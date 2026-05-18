@@ -66,6 +66,10 @@ export class ViewManager {
         active: true,
       });
       this.app.workspace.revealLeaf(leaf);
+      const view = leaf.view;
+      if (view instanceof OpenCodeView) {
+        requestAnimationFrame(() => view.focusIframe());
+      }
     }
   }
 
@@ -109,8 +113,24 @@ export class ViewManager {
           }
         }
       } else {
-        // For main area views, just detach (close the tab)
-        existingLeaf.detach();
+        // Main area: close if active, switch if inactive, same three-state logic as sidebar
+        if (this.app.workspace.activeLeaf === existingLeaf) {
+          existingLeaf.detach();
+          if (this.previousEditorLeaf && this.previousEditorLeaf.view) {
+            this.app.workspace.setActiveLeaf(this.previousEditorLeaf, { focus: true });
+          }
+        } else {
+          const activeLeaf = this.app.workspace.activeLeaf;
+          if (activeLeaf && activeLeaf !== existingLeaf) {
+            this.previousEditorLeaf = activeLeaf;
+          }
+          this.app.workspace.revealLeaf(existingLeaf);
+          this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+          const view = existingLeaf.view;
+          if (view instanceof OpenCodeView) {
+            requestAnimationFrame(() => view.focusIframe());
+          }
+        }
       }
     } else {
       await this.activateView();
