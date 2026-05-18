@@ -40,12 +40,8 @@ export default class OpenCodePlugin extends Plugin {
     });
 
     // Start proxy to inject keyboard listener into opencode iframe
-    this.openCodeProxy = new OpenCodeProxy(this.settings.proxyPort, this.settings.hostname, this.settings.port);
+    this.openCodeProxy = new OpenCodeProxy(this.settings.hostname, this.settings.port);
     await this.openCodeProxy.start();
-    if (this.settings.proxyPort !== this.openCodeProxy.getPort()) {
-      this.settings.proxyPort = this.openCodeProxy.getPort();
-      await this.saveData(this.settings);
-    }
 
     // Listen for toggle messages from iframe (injected by proxy)
     (this as any).registerDomEvent(window, 'message', (event: MessageEvent) => {

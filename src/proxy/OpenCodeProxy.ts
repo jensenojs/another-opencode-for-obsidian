@@ -28,11 +28,12 @@ export class OpenCodeProxy extends EventEmitter {
   private server: http.Server | null = null;
   private targetHost: string;
   private targetPort: number;
-  private effectivePort: number;
+  private effectivePort: number = 0;
+  private static readonly START_PORT = 4097;
+  private static readonly MAX_ATTEMPTS = 10;
 
-  constructor(proxyPort: number, targetHost: string, targetPort: number) {
+  constructor(targetHost: string, targetPort: number) {
     super();
-    this.effectivePort = proxyPort || 4097;
     this.targetHost = targetHost;
     this.targetPort = targetPort;
   }
@@ -44,10 +45,7 @@ export class OpenCodeProxy extends EventEmitter {
   async start(): Promise<boolean> {
     if (this.server) return true;
 
-    const startPort = this.effectivePort;
-    const maxAttempts = 10;
-
-    for (let port = startPort; port < startPort + maxAttempts; port++) {
+    for (let port = OpenCodeProxy.START_PORT; port < OpenCodeProxy.START_PORT + OpenCodeProxy.MAX_ATTEMPTS; port++) {
       const ok = await this.tryListen(port);
       if (ok) {
         this.effectivePort = port;
