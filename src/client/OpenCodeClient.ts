@@ -64,12 +64,30 @@ export class OpenCodeClient {
 
   async initializeProject(): Promise<boolean> {
     try {
+      const http = require("http");
       const url = `${this.apiBaseUrl}/session?directory=${encodeURIComponent(this.projectDirectory)}`;
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "x-opencode-directory": this.projectDirectory,
-        },
+      const urlObj = new URL(url);
+      const response = await new Promise<{ ok: boolean; status: number }>((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: urlObj.hostname,
+            port: urlObj.port,
+            path: urlObj.pathname + urlObj.search,
+            method: "GET",
+            headers: {
+              "x-opencode-directory": this.projectDirectory,
+            },
+          },
+          (res) => {
+            res.resume(); // drain response
+            resolve({
+              ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
+              status: res.statusCode ?? 500,
+            });
+          }
+        );
+        req.on("error", reject);
+        req.end();
       });
 
       if (response.ok) {
@@ -186,13 +204,39 @@ export class OpenCodeClient {
   private async request<T>(method: string, path: string, body?: unknown): Promise<OpenCodeResponse<T>> {
     try {
       const url = `${this.apiBaseUrl}${path}`;
-      const response = await fetch(url, {
+      const urlObj = new URL(url);
+      const http = require("http");
+      const options = {
+        hostname: urlObj.hostname,
+        port: urlObj.port,
+        path: urlObj.pathname,
         method,
         headers: {
           "Content-Type": "application/json",
           "x-opencode-directory": this.projectDirectory,
         },
-        body: body ? JSON.stringify(body) : undefined,
+      };
+      const response = await new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>((resolve, reject) => {
+        const req = http.request(options, (res) => {
+          let data = "";
+          res.on("data", (chunk) => (data += chunk));
+          res.on("end", () => {
+            resolve({
+              ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
+              status: res.statusCode ?? 500,
+              json: async () => {
+                try {
+                  return JSON.parse(data || "null");
+                } catch {
+                  return null;
+                }
+              },
+            });
+          });
+        });
+        req.on("error", reject);
+        if (body) req.write(JSON.stringify(body));
+        req.end();
       });
 
       if (!response.ok) {
@@ -203,9 +247,7 @@ export class OpenCodeClient {
         return null;
       }
 
-      const json = await response
-        .json()
-        .catch(() => null);
+      const json = await response.json();
       return json as OpenCodeResponse<T>;
     } catch (error) {
       console.error("[OpenCode] API request error", error);

@@ -230,7 +230,19 @@ export class ServerManager extends EventEmitter {
       });
       return response.ok;
     } catch {
-      return false;
+      // CORS blocked the request. Fallback: send request in no-cors mode.
+      // The response is opaque (can't read status), but if the request
+      // reaches the server we know it's alive. Rejects on network error.
+      try {
+        await fetch(`${this.getUrl()}/global/health`, {
+          method: "GET",
+          mode: "no-cors",
+          signal: AbortSignal.timeout(2000),
+        });
+        return true;
+      } catch {
+        return false;
+      }
     }
   }
 
