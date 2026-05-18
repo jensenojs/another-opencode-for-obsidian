@@ -27,7 +27,7 @@ export default class OpenCodePlugin extends Plugin {
     registerOpenCodeIcons();
 
     await this.loadSettings();
-    this.cachedIframeUrl = this.settings.lastSessionUrl || null;
+    this.cachedIframeUrl = null;
 
     // Attempt autodetect if opencodePath is empty and not using custom command
     await this.attemptAutodetect();
@@ -40,8 +40,12 @@ export default class OpenCodePlugin extends Plugin {
     });
 
     // Start proxy to inject keyboard listener into opencode iframe
-    this.openCodeProxy = new OpenCodeProxy(4097, this.settings.hostname, this.settings.port);
+    this.openCodeProxy = new OpenCodeProxy(this.settings.proxyPort, this.settings.hostname, this.settings.port);
     await this.openCodeProxy.start();
+    if (this.settings.proxyPort !== this.openCodeProxy.getPort()) {
+      this.settings.proxyPort = this.openCodeProxy.getPort();
+      await this.saveData(this.settings);
+    }
 
     // Listen for toggle messages from iframe (injected by proxy)
     (this as any).registerDomEvent(window, 'message', (event: MessageEvent) => {
@@ -252,11 +256,6 @@ export default class OpenCodePlugin extends Plugin {
 
   setCachedIframeUrl(url: string | null): void {
     this.cachedIframeUrl = url;
-    const lastSessionUrl = url ?? "";
-    if (this.settings.lastSessionUrl !== lastSessionUrl) {
-      this.settings.lastSessionUrl = lastSessionUrl;
-      void this.saveData(this.settings);
-    }
   }
 
   onServerStateChange(callback: (state: ServerState) => void): () => void {

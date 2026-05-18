@@ -26,41 +26,61 @@ const INJECTED_SCRIPT = `
 
 export class OpenCodeProxy extends EventEmitter {
   private server: http.Server | null = null;
-  private proxyPort: number;
   private targetHost: string;
   private targetPort: number;
+  private effectivePort: number;
 
   constructor(proxyPort: number, targetHost: string, targetPort: number) {
     super();
-    this.proxyPort = proxyPort;
+    this.effectivePort = proxyPort || 4097;
     this.targetHost = targetHost;
     this.targetPort = targetPort;
+  }
+
+  getPort(): number {
+    return this.effectivePort;
   }
 
   async start(): Promise<boolean> {
     if (this.server) return true;
 
+    const startPort = this.effectivePort;
+    const maxAttempts = 10;
+
+    for (let port = startPort; port < startPort + maxAttempts; port++) {
+      const ok = await this.tryListen(port);
+      if (ok) {
+        this.effectivePort = port;
+        console.log(`[OpenCode Proxy] Listening on port ${port}`);
+        return true;
+      }
+    }
+
+    console.error("[OpenCode Proxy] Failed to find available port");
+    return false;
+  }
+
+  private tryListen(port: number): Promise<boolean> {
     return new Promise((resolve) => {
-      this.server = http.createServer((clientReq, clientRes) => {
+      const srv = http.createServer((clientReq, clientRes) => {
         this.handleRequest(clientReq, clientRes);
       });
 
-      this.server.on("upgrade", (clientReq, clientSocket, clientHead) => {
+      srv.on("upgrade", (clientReq, clientSocket, clientHead) => {
         this.handleUpgrade(clientReq, clientSocket, clientHead);
       });
 
-      this.server.on("error", (err: NodeJS.ErrnoException) => {
+      srv.on("error", (err: NodeJS.ErrnoException) => {
         if (err.code === "EADDRINUSE") {
-          console.log("[OpenCode Proxy] Port already in use, assuming proxy is running");
-          resolve(true);
+          resolve(false);
         } else {
-          console.error("[OpenCode Proxy] Server error:", err.message);
+          console.error("[OpenCode Proxy] Unexpected error:", err.message);
           resolve(false);
         }
       });
 
-      this.server.listen(this.proxyPort, "127.0.0.1", () => {
-        console.log(`[OpenCode Proxy] Listening on port ${this.proxyPort}`);
+      srv.listen(port, "127.0.0.1", () => {
+        this.server = srv;
         resolve(true);
       });
     });
@@ -74,7 +94,7 @@ export class OpenCodeProxy extends EventEmitter {
   }
 
   getProxyUrl(encodedPath: string): string {
-    return `http://127.0.0.1:${this.proxyPort}/${encodedPath}`;
+    return `http://127.0.0.1:${this.effectivePort}/${encodedPath}`;
   }
 
   private handleRequest(clientReq: http.IncomingMessage, clientRes: http.ServerResponse): void {
