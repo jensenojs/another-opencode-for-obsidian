@@ -8,6 +8,7 @@ import { registerOpenCodeIcons, OPENCODE_ICON_NAME } from "./icons";
 import { OpenCodeClient } from "./client/OpenCodeClient";
 import { ContextManager } from "./context/ContextManager";
 import { ExecutableResolver } from "./server/ExecutableResolver";
+import { OpenCodeProxy } from "./proxy/OpenCodeProxy";
 
 export default class OpenCodePlugin extends Plugin {
   settings: OpenCodeSettings = DEFAULT_SETTINGS;
@@ -18,6 +19,7 @@ export default class OpenCodePlugin extends Plugin {
   private viewManager: ViewManager;
   private cachedIframeUrl: string | null = null;
   private lastBaseUrl: string | null = null;
+  private openCodeProxy: OpenCodeProxy;
 
   async onload(): Promise<void> {
     console.log("Loading OpenCode plugin");
@@ -35,6 +37,20 @@ export default class OpenCodePlugin extends Plugin {
     this.processManager = new ServerManager(this.settings, projectDirectory);
     this.processManager.on("stateChange", (state: ServerState) => {
       this.notifyStateChange(state);
+    });
+
+    // Start proxy to inject keyboard listener into opencode iframe
+    this.openCodeProxy = new OpenCodeProxy(this.settings.hostname, this.settings.port);
+    await this.openCodeProxy.start();
+
+    // Listen for toggle messages from iframe (injected by proxy)
+    (this as any).registerDomEvent(window, 'message', (event: MessageEvent) => {
+      if (event.data?.type === 'opencode-proxy-loaded') {
+        (window as any).__opencode_proxy_loaded = true;
+      }
+      if (event.data?.type === 'opencode-toggle') {
+        void this.viewManager.toggleView();
+      }
     });
 
     // Listen for project directory changes and coordinate response
@@ -145,6 +161,7 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
+    this.openCodeProxy?.stop();
     this.contextManager.destroy();
     await this.stopServer();
     this.app.workspace.detachLeavesOfType(OPENCODE_VIEW_TYPE);
@@ -221,7 +238,8 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   getServerUrl(): string {
-    return this.processManager.getUrl();
+    const encodedPath = Buffer.from(this.getProjectDirectory()).toString('base64');
+    return this.openCodeProxy.getProxyUrl(encodedPath);
   }
 
   getApiBaseUrl(): string {
