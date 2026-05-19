@@ -72,37 +72,16 @@ export class OpenCodeClient {
 
   async initializeProject(): Promise<boolean> {
     try {
-      const http = require("http");
-      const url = `${this.apiBaseUrl}/session?directory=${encodeURIComponent(this.projectDirectory)}`;
-      const urlObj = new URL(url);
-      const response = await new Promise<{ ok: boolean; status: number }>((resolve, reject) => {
-        const req = http.request(
-          {
-            hostname: urlObj.hostname,
-            port: urlObj.port,
-            path: urlObj.pathname + urlObj.search,
-            method: "GET",
-            headers: {
-              "x-opencode-directory": this.projectDirectory,
-            },
-          },
-          (res) => {
-            res.resume(); // drain response
-            resolve({
-              ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
-              status: res.statusCode ?? 500,
-            });
-          }
-        );
-        req.on("error", reject);
-        req.end();
-      });
+      const response = await this.request<unknown>(
+        "GET",
+        `/session?directory=${encodeURIComponent(this.projectDirectory)}`
+      );
 
-      if (response.ok) {
+      if (response) {
         console.log("[OpenCode] Project initialized:", this.projectDirectory);
         return true;
       } else {
-        console.warn("[OpenCode] Project initialization failed:", response.status);
+        console.warn("[OpenCode] Project initialization failed");
         return false;
       }
     } catch (error) {
@@ -236,7 +215,7 @@ export class OpenCodeClient {
       const options = {
         hostname: urlObj.hostname,
         port: urlObj.port,
-        path: urlObj.pathname,
+        path: urlObj.pathname + urlObj.search,
         method,
         headers: {
           "Content-Type": "application/json",
