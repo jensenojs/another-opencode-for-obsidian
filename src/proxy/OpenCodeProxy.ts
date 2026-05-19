@@ -1,4 +1,4 @@
-import http from "http";
+import * as http from "http";
 import { EventEmitter } from "events";
 
 const INJECTED_SCRIPT = `
@@ -60,11 +60,11 @@ export class OpenCodeProxy extends EventEmitter {
 
   private tryListen(port: number): Promise<boolean> {
     return new Promise((resolve) => {
-      const srv = http.createServer((clientReq, clientRes) => {
+      const srv = http.createServer((clientReq: http.IncomingMessage, clientRes: http.ServerResponse) => {
         this.handleRequest(clientReq, clientRes);
       });
 
-      srv.on("upgrade", (clientReq, clientSocket, clientHead) => {
+      srv.on("upgrade", (clientReq: http.IncomingMessage, clientSocket: import("net").Socket, clientHead: Buffer) => {
         this.handleUpgrade(clientReq, clientSocket, clientHead);
       });
 
@@ -104,7 +104,7 @@ export class OpenCodeProxy extends EventEmitter {
       headers: { ...clientReq.headers, host: `${this.targetHost}:${this.targetPort}` },
     };
 
-    const proxyReq = http.request(options, (proxyRes) => {
+    const proxyReq = http.request(options, (proxyRes: http.IncomingMessage) => {
       const contentType = proxyRes.headers["content-type"] || "";
 
       if (this.shouldInject(contentType)) {
@@ -149,7 +149,7 @@ export class OpenCodeProxy extends EventEmitter {
     const proxyReq = http.request(options);
     proxyReq.end();
 
-    proxyReq.on("upgrade", (_proxyRes, proxySocket, _proxyHead) => {
+    proxyReq.on("upgrade", (_proxyRes: http.IncomingMessage, proxySocket: import("net").Socket, _proxyHead: Buffer) => {
       clientSocket.write("HTTP/1.1 101 Switching Protocols\r\n\r\n");
       proxySocket.pipe(clientSocket);
       clientSocket.pipe(proxySocket);

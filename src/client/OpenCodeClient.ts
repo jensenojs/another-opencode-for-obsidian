@@ -223,9 +223,9 @@ export class OpenCodeClient {
         },
       };
       const response = await new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>((resolve, reject) => {
-        const req = http.request(options, (res) => {
+        const req = http.request(options, (res: import("http").IncomingMessage) => {
           let data = "";
-          res.on("data", (chunk) => (data += chunk));
+          res.on("data", (chunk: Buffer) => (data += chunk));
           res.on("end", () => {
             resolve({
               ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
