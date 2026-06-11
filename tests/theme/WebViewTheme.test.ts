@@ -5,6 +5,7 @@ describe("createOpenCodeWebViewTheme", () => {
   test("maps Obsidian theme variables onto OpenCode design tokens", () => {
     const theme = createOpenCodeWebViewTheme({
       colorScheme: "dark",
+      pageBackground: "rgba(0, 0, 0, 0.25)",
       backgroundPrimary: "#000000",
       backgroundSecondary: "rgb(29, 32, 33)",
       backgroundModifierBorder: "rgb(60, 56, 54)",
@@ -17,9 +18,10 @@ describe("createOpenCodeWebViewTheme", () => {
     });
 
     expect(theme.colorScheme).toBe("dark");
+    expect(theme.variables["--opencode-obsidian-page-background"]).toBe("rgba(0, 0, 0, 0.25)");
     expect(theme.variables["--opencode-obsidian-background-primary"]).toBe("#000000");
-    expect(theme.variables["--background-base"]).toBe("transparent");
-    expect(theme.variables["--background-strong"]).toBe("transparent");
+    expect(theme.variables["--background-base"]).toBe("var(--opencode-obsidian-page-background)");
+    expect(theme.variables["--background-strong"]).toBe("var(--opencode-obsidian-page-background)");
     expect(theme.variables["--surface-raised-base"]).toBe(
       "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 64%, transparent)"
     );
@@ -32,7 +34,9 @@ describe("createOpenCodeWebViewTheme", () => {
     expect(theme.variables["--text-strong"]).toBe("var(--opencode-obsidian-text-normal)");
     expect(theme.variables["--border-weak-base"]).toBe("var(--opencode-obsidian-border)");
     expect(theme.variables["--text-interactive-base"]).toBe("var(--opencode-obsidian-accent)");
-    expect(theme.variables["--v2-background-bg-base"]).toBe("transparent");
+    expect(theme.variables["--v2-background-bg-base"]).toBe(
+      "var(--opencode-obsidian-page-background)"
+    );
     expect(theme.variables["--v2-background-bg-layer-03"]).toBe(
       "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 76%, transparent)"
     );

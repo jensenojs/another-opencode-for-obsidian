@@ -8,6 +8,7 @@ import { createLogger } from "../debug/RuntimeDiagnostics";
 export class OpenCodeView extends ItemView {
   plugin: OpenCodePlugin;
   private iframeEl: HTMLIFrameElement | null = null;
+  private iframeProbeEl: HTMLIFrameElement | null = null;
   private currentState: ServerState = "stopped";
   private unsubscribeStateChange: (() => void) | null = null;
   private logger = createLogger("view");
@@ -59,6 +60,10 @@ export class OpenCodeView extends ItemView {
       }
       this.iframeEl.src = "about:blank";
       this.iframeEl = null;
+    }
+    if (this.iframeProbeEl) {
+      this.iframeProbeEl.remove();
+      this.iframeProbeEl = null;
     }
   }
 
@@ -147,6 +152,10 @@ export class OpenCodeView extends ItemView {
       console.error("Failed to load OpenCode iframe");
     });
 
+    this.iframeEl.addEventListener("load", () => {
+      this.scheduleIframeDiagnostics("opencode-load");
+    });
+
     this.iframeEl.addEventListener("focus", () => {
       this.plugin.refreshContextForView(this);
     });
@@ -156,6 +165,8 @@ export class OpenCodeView extends ItemView {
     });
 
     void this.plugin.ensureSessionUrl(this);
+    this.createIframeProbe(iframeContainer);
+    this.scheduleIframeDiagnostics("opencode-created");
   }
 
   getIframeUrl(): string | null {
@@ -304,5 +315,97 @@ export class OpenCodeView extends ItemView {
         }
       }, 100);
     }
+  }
+
+  private createIframeProbe(container: HTMLElement): void {
+    this.iframeProbeEl?.remove();
+
+    this.iframeProbeEl = container.createEl("iframe", {
+      cls: "opencode-iframe-probe",
+      attr: {
+        srcdoc:
+          "<!doctype html><html><head><style>html,body{margin:0;background:transparent;color-scheme:light dark}</style></head><body></body></html>",
+        frameborder: "0",
+        allowtransparency: "true",
+        tabindex: "-1",
+      },
+    });
+
+    this.iframeProbeEl.addEventListener("load", () => {
+      this.scheduleIframeDiagnostics("srcdoc-probe-load");
+    });
+  }
+
+  private scheduleIframeDiagnostics(reason: string): void {
+    window.setTimeout(() => {
+      this.plugin.recordIframeDiagnostics(this.createIframeDiagnostics(reason));
+    }, 120);
+  }
+
+  private createIframeDiagnostics(reason: string): Record<string, unknown> {
+    // Parent-side iframe composition is sampled here; OpenCode DOM internals are
+    // sampled by the proxy script because the loaded iframe is not same-origin.
+    return {
+      reason,
+      appearance: this.plugin.getSettings().webViewAppearance,
+      iframe: this.describeElement(this.iframeEl),
+      probeIframe: this.describeElement(this.iframeProbeEl),
+      ancestors: this.collectAncestors(this.iframeEl, 16),
+      iframeDocumentRoots: this.sampleIframeDocumentRoots(this.iframeEl),
+      srcdocProbeRoots: this.sampleIframeDocumentRoots(this.iframeProbeEl),
+    };
+  }
+
+  private sampleIframeDocumentRoots(iframe: HTMLIFrameElement | null): unknown {
+    let doc: Document | null | undefined;
+    try {
+      doc = iframe?.contentDocument;
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    if (!doc) {
+      return [];
+    }
+
+    return [doc.documentElement, doc.body, doc.getElementById("root")]
+      .filter((element): element is HTMLElement => Boolean(element))
+      .map((element) => this.describeElement(element));
+  }
+
+  private collectAncestors(element: HTMLElement | null, limit: number): unknown[] {
+    const ancestors: unknown[] = [];
+    let current: HTMLElement | null = element?.parentElement ?? null;
+    while (current && ancestors.length < limit) {
+      ancestors.push(this.describeElement(current));
+      current = current.parentElement;
+    }
+    return ancestors;
+  }
+
+  private describeElement(element: HTMLElement | null): Record<string, unknown> | null {
+    if (!element) {
+      return null;
+    }
+
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return {
+      tag: element.tagName.toLowerCase(),
+      id: element.id || null,
+      className: typeof element.className === "string" ? element.className.slice(0, 220) : null,
+      backgroundColor: style.backgroundColor,
+      backgroundImage: style.backgroundImage,
+      opacity: style.opacity,
+      backdropFilter: style.backdropFilter,
+      mixBlendMode: style.mixBlendMode,
+      isolation: style.isolation,
+      colorScheme: style.colorScheme,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      area: Math.round(rect.width * rect.height),
+    };
   }
 }

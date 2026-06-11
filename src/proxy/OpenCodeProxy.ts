@@ -33,7 +33,7 @@ const OBSIDIAN_APPEARANCE_STYLE = `
 html,
 body,
 #root {
-  background: transparent !important;
+  background: var(--background-base) !important;
 }
 </style>
 `;

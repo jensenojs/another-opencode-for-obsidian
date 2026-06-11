@@ -419,6 +419,7 @@ interface ThemeReport {
     textAndBorder: Record<string, string | null>;
   };
   runtimeDiagnostics: unknown | null;
+  iframeDiagnostics: unknown | null;
   checks: Array<{ name: string; ok: boolean; detail?: unknown }>;
 }
 
@@ -446,6 +447,7 @@ function bridge(args: Args): void {
 async function buildThemeReport(args: Args): Promise<ThemeReport> {
   const runtimeStatus = readJson(getRuntimePaths().statusFile);
   const runtimeThemeDiagnostics = runtimeStatus?.runtimeDiagnostics?.theme ?? null;
+  const runtimeIframeDiagnostics = runtimeStatus?.runtimeDiagnostics?.iframe ?? null;
   const data = readJson(join(pluginDir(args.vault), "data.json"));
   const mode =
     data?.webViewAppearance === "obsidian" || data?.webViewAppearance === "opencode"
@@ -474,6 +476,7 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
       injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
       tokens: emptyThemeTokens(),
       runtimeDiagnostics: runtimeThemeDiagnostics,
+      iframeDiagnostics: runtimeIframeDiagnostics,
       checks,
     };
   }
@@ -494,6 +497,7 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
       injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
       tokens: emptyThemeTokens(),
       runtimeDiagnostics: runtimeThemeDiagnostics,
+      iframeDiagnostics: runtimeIframeDiagnostics,
       checks,
     };
   }
@@ -502,6 +506,7 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
   const variables = injectedTheme?.variables ?? {};
   const tokens = {
     rootBackground: pickVariables(variables, [
+      "--opencode-obsidian-page-background",
       "--background-base",
       "--background-weak",
       "--background-strong",
@@ -533,8 +538,13 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
       ok: injection.hasThemeScript,
     });
     checks.push({
-      name: "root background tokens are transparent",
-      ok: Object.values(tokens.rootBackground).every((value) => value === "transparent"),
+      name: "root background tokens use Obsidian page background",
+      ok:
+        typeof tokens.rootBackground["--opencode-obsidian-page-background"] === "string" &&
+        tokens.rootBackground["--opencode-obsidian-page-background"]!.length > 0 &&
+        Object.entries(tokens.rootBackground)
+          .filter(([name]) => name !== "--opencode-obsidian-page-background")
+          .every(([, value]) => value === "var(--opencode-obsidian-page-background)"),
       detail: tokens.rootBackground,
     });
     checks.push({
@@ -557,6 +567,13 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
       detail:
         runtimeThemeDiagnostics ??
         "No iframe diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
+    });
+    checks.push({
+      name: "runtime iframe composition diagnostics received",
+      ok: Boolean(runtimeIframeDiagnostics),
+      detail:
+        runtimeIframeDiagnostics ??
+        "No iframe composition diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
     });
   }
 
@@ -583,6 +600,7 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
     injection,
     tokens,
     runtimeDiagnostics: runtimeThemeDiagnostics,
+    iframeDiagnostics: runtimeIframeDiagnostics,
     checks,
   };
 }

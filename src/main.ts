@@ -35,6 +35,7 @@ export default class OpenCodePlugin extends Plugin {
   private lastApiBaseUrl: string | null = null;
   private runtimeDiagnostics: RuntimeDiagnosticsSnapshot = {
     theme: null,
+    iframe: null,
   };
   private openCodeProxy: OpenCodeProxy;
   private logger = createLogger("plugin");
@@ -357,6 +358,12 @@ export default class OpenCodePlugin extends Plugin {
 
   refreshContextForView(view: OpenCodeView): void {
     void this.contextManager.refreshContextForView(view);
+  }
+
+  recordIframeDiagnostics(payload: unknown): void {
+    this.runtimeDiagnostics.iframe = payload;
+    this.logger.info("iframe diagnostics", payload);
+    this.writeStatus("iframe-diagnostics");
   }
 
   async ensureSessionUrl(view: OpenCodeView): Promise<void> {

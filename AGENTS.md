@@ -94,12 +94,12 @@ scripts/
   1. **剥离 Content-Security-Policy 头**——否则注入的脚本会被浏览器阻止执行
   2. **注入键盘监听脚本**——拦截 iframe 内的 `Cmd+L` / `Ctrl+L`，通过 `BridgeProtocol.ts` 定义的 `postMessage` 协议发送到父窗口
 - `webViewAppearance === "obsidian"` 时读取 Obsidian 当前 CSS 变量，并在 proxied HTML 里覆盖 OpenCode 的设计 token
-- Obsidian 外观模式的默认行为是让 Obsidian pane 拥有页面背景：`--background-base`、`--background-strong*`、`--v2-background-bg-base`、`--v2-background-bg-deep` 等根背景 token 必须保持透明；输入框、浮层、会话面板等局部 surface 使用 Obsidian 变量派生出的半透明 token
+- Obsidian 外观模式的默认行为是让 OpenCode 页面底色使用 Obsidian 运行时可见背景；输入框、浮层、会话面板等局部 surface 使用 Obsidian 变量派生出的半透明 token。透明主题下的可见背景可能在 `.app-container`，不一定等于 `--background-primary`。先前的纯透明根背景在 DOM computed style 层成立，但不能保证 Electron iframe 的可见合成结果继承 Obsidian 背景。
 - 主题桥接的真相源是稳定变量面:
   - Obsidian CSS variables: https://docs.obsidian.md/Reference/CSS+variables/CSS+variables
   - OpenCode tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/theme.css
   - OpenCode Tailwind mapping: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/tailwind/colors.css
-- 不要用 OpenCode 内部组件 class selector 重写主题。当前可验收路径是打开 proxy URL 或 Obsidian iframe，读取内部 DOM 的 computed style，确认 `--background-base`/`--v2-background-bg-base` 为透明，同时 `--surface-raised-base`、`--text-strong`、`--border-weak-base` 等 token 已影响页面
+- 不要用 OpenCode 内部组件 class selector 重写主题。当前可验收路径是打开 proxy URL 或 Obsidian iframe，读取内部 DOM 的 computed style，确认 `--background-base`/`--v2-background-bg-base` 使用 `--opencode-obsidian-page-background`，同时 `--surface-raised-base`、`--text-strong`、`--border-weak-base` 等 token 已影响页面
 - 代理在插件卸载时自动关闭
 
 ### `OpenCodeView.ts` — 侧边栏视图
@@ -160,8 +160,9 @@ scripts/
 ### `harness theme` — Web UI 外观检查
 
 - 读取 XDG `status.json` 里的 `proxyUrl`，只访问本机 proxy HTML
-- `obsidian` 模式要求 `data-opencode-obsidian-*` 注入存在、根背景 token 透明、局部 surface token 半透明
+- `obsidian` 模式要求 `data-opencode-obsidian-*` 注入存在、根背景 token 使用 Obsidian 页面背景变量、局部 surface token 半透明
 - `opencode` 模式要求不注入 Obsidian 外观覆盖
+- `runtimeDiagnostics.theme` 来自 proxy 注入脚本，检查 OpenCode iframe 内部 DOM；`runtimeDiagnostics.iframe` 来自 Obsidian 父窗口，检查 iframe 元素和 Obsidian 祖先链。两者必须分开，因为 iframe 加载后父窗口不能可靠读取 OpenCode 内部 DOM
 
 ## 关键架构决策
 

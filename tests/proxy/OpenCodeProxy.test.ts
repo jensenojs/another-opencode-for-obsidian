@@ -71,7 +71,7 @@ describe("OpenCodeProxy", () => {
     const body = await response.text();
 
     expect(body).toContain("data-opencode-obsidian-appearance");
-    expect(body).toContain("background: transparent");
+    expect(body).toContain("background: var(--background-base)");
   });
 
   test("injects Obsidian theme variables when provided", async () => {

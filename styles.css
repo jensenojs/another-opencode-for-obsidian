@@ -28,6 +28,16 @@
   background-color: var(--background-primary);
 }
 
+.opencode-iframe-probe {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 1px;
+  height: 1px;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* Status container (for stopped/starting/error states) */
 .opencode-status-container {
   display: flex;

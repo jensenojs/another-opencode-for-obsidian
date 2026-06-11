@@ -2,6 +2,7 @@ import type { WebViewTheme } from "../types";
 
 interface ObsidianThemeValues {
   colorScheme: "light" | "dark";
+  pageBackground: string;
   backgroundPrimary: string;
   backgroundSecondary: string;
   backgroundModifierBorder: string;
@@ -15,6 +16,7 @@ interface ObsidianThemeValues {
 
 const OBSIDIAN_FALLBACKS: ObsidianThemeValues = {
   colorScheme: "dark",
+  pageBackground: "#1e1e1e",
   backgroundPrimary: "#1e1e1e",
   backgroundSecondary: "#262626",
   backgroundModifierBorder: "#3a3a3a",
@@ -36,6 +38,7 @@ export function captureObsidianWebViewTheme(source: HTMLElement = document.body)
 
   return createOpenCodeWebViewTheme({
     colorScheme,
+    pageBackground: resolveObsidianPageBackground(source, styles),
     backgroundPrimary: cssVar(styles, "--background-primary", OBSIDIAN_FALLBACKS.backgroundPrimary),
     backgroundSecondary: cssVar(
       styles,
@@ -61,7 +64,7 @@ export function captureObsidianWebViewTheme(source: HTMLElement = document.body)
 }
 
 export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebViewTheme {
-  const transparent = "transparent";
+  const pageBackground = "var(--opencode-obsidian-page-background)";
   const subtleSurface = "color-mix(in srgb, var(--opencode-obsidian-text-normal) 7%, transparent)";
   const baseSurface =
     "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 48%, transparent)";
@@ -74,6 +77,7 @@ export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebVi
 
   const variables = {
     "--opencode-obsidian-background-primary": obsidian.backgroundPrimary,
+    "--opencode-obsidian-page-background": obsidian.pageBackground,
     "--opencode-obsidian-background-secondary": obsidian.backgroundSecondary,
     "--opencode-obsidian-border": obsidian.backgroundModifierBorder,
     "--opencode-obsidian-hover": obsidian.backgroundModifierHover,
@@ -84,12 +88,13 @@ export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebVi
     "--font-family-sans": obsidian.fontInterface,
     "--font-sans": obsidian.fontInterface,
 
-    // Obsidian mode lets the Obsidian pane own the page background. Local
-    // OpenCode surfaces below add contrast without targeting component classes.
-    "--background-base": transparent,
-    "--background-weak": transparent,
-    "--background-strong": transparent,
-    "--background-stronger": transparent,
+    // The iframe does not reliably show the parent Obsidian pane through
+    // transparent document roots. The stable bridge is to make OpenCode's page
+    // background use Obsidian's token, while local surfaces stay translucent.
+    "--background-base": pageBackground,
+    "--background-weak": pageBackground,
+    "--background-strong": pageBackground,
+    "--background-stronger": pageBackground,
 
     "--surface-base": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 6%, transparent)",
     "--base": subtleSurface,
@@ -187,8 +192,8 @@ export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebVi
     "--markdown-link": "var(--opencode-obsidian-accent)",
     "--markdown-link-text": "var(--opencode-obsidian-accent)",
 
-    "--v2-background-bg-base": transparent,
-    "--v2-background-bg-deep": transparent,
+    "--v2-background-bg-base": pageBackground,
+    "--v2-background-bg-deep": pageBackground,
     "--v2-background-bg-layer-01": baseSurface,
     "--v2-background-bg-layer-02": raisedSurface,
     "--v2-background-bg-layer-03": strongSurface,
@@ -216,4 +221,23 @@ export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebVi
 
 function cssVar(styles: CSSStyleDeclaration, name: string, fallback: string): string {
   return styles.getPropertyValue(name).trim() || fallback;
+}
+
+function resolveObsidianPageBackground(
+  source: HTMLElement,
+  sourceStyles: CSSStyleDeclaration
+): string {
+  const appContainer = source.ownerDocument.querySelector(".app-container");
+  if (appContainer instanceof HTMLElement) {
+    const appBackground = getComputedStyle(appContainer).backgroundColor.trim();
+    if (isVisibleBackground(appBackground)) {
+      return appBackground;
+    }
+  }
+
+  return cssVar(sourceStyles, "--background-primary", OBSIDIAN_FALLBACKS.backgroundPrimary);
+}
+
+function isVisibleBackground(color: string): boolean {
+  return color !== "" && color !== "transparent" && color !== "rgba(0, 0, 0, 0)";
 }
