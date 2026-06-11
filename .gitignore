@@ -3,3 +3,6 @@
 /data.json
 /main.js
 
+
+# bv (beads viewer) local config and caches
+.bv/

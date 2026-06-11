@@ -7,6 +7,7 @@ The obsidian-opencode plugin is currently in early development (v0.1.0). The rep
 BRAT (Beta Reviewer's Auto-update Tool) is the community standard for beta plugin distribution. It works by monitoring GitHub releases and downloading `manifest.json`, `main.js`, and `styles.css` from release assets.
 
 Current state:
+
 - Uses Bun as package manager and build tool
 - Has esbuild-based build system producing `main.js`
 - Has CI workflow for testing but no release automation
@@ -16,6 +17,7 @@ Current state:
 ## Goals / Non-Goals
 
 **Goals:**
+
 - Enable one-click installation via BRAT for beta testers
 - Automate release creation on version tag push
 - Ensure `manifest.json` version always matches release tag
@@ -23,6 +25,7 @@ Current state:
 - Provide simple version bumping commands for developers
 
 **Non-Goals:**
+
 - Marketplace submission (out of scope for this change)
 - Automated changelog generation
 - Multi-platform release assets (only JS/CSS files, no binaries)
@@ -36,6 +39,7 @@ Current state:
 **Rationale:** Bun's built-in version manager updates `package.json`, creates a git commit, and tags automatically. This is simpler than custom scripts and matches the existing Bun-based toolchain.
 
 **Alternatives considered:**
+
 - Custom Node.js script: More code to maintain, requires parsing JSON
 - `standard-version` or `semantic-release`: Too complex for early-stage project
 - Manual editing: Error-prone, inconsistent
@@ -47,12 +51,14 @@ Current state:
 **Rationale:** Keeps both files in sync at all times in the repository. The manifest.json always reflects the current package.json version, making it clear what version is being developed. This also simplifies the release workflow since manifest.json is already correct.
 
 **Implementation:**
+
 1. Add a "version" script to package.json that runs a sync script
 2. The sync script reads package.json version and writes it to manifest.json
 3. Stage manifest.json with `git add` so it's included in the version commit
 4. `bun pm version` handles the commit and tag automatically
 
 **Alternatives considered:**
+
 - Two-stage (release-time sync): Manifest in repo stays out of sync with package.json, confusing during development
 - Custom version script: Would lose Bun's built-in lifecycle management
 - Pre-commit hook: Would run on every commit, not just version bumps
@@ -64,6 +70,7 @@ Current state:
 **Rationale:** Prevents accidental releases from every commit. Tag-based triggers are standard for GitHub releases and integrate well with `bun pm version` which creates tags.
 
 **Alternatives considered:**
+
 - Manual workflow dispatch: More steps, easier to forget
 - Release on every push to main: Too frequent, no control
 - Release on merged PR: Good for continuous deployment, but we want explicit versioning
@@ -75,6 +82,7 @@ Current state:
 **Rationale:** Signals to users and BRAT that these are beta versions. Once we submit to marketplace, we'll change this to `prerelease: false` for stable releases.
 
 **Alternatives considered:**
+
 - Detect from version string (e.g., `-beta` suffix): More complex, inconsistent with BRAT expectations
 - Manual toggle in workflow: Easy to forget
 
@@ -88,13 +96,13 @@ Current state:
 
 ## Risks / Trade-offs
 
-| Risk | Mitigation |
-|------|------------|
-| Tag pushed but release fails | Workflow will fail visibly; developer can delete tag and retry, or manually create release |
-| Version mismatch between package.json and manifest.json in release | Workflow enforces manifest.json version is updated from package.json before build |
-| Users can't install from git clone anymore | Document that BRAT is the intended install method for users; git clone is for developers only |
-| Build fails on CI but works locally | Existing CI already builds successfully; release workflow uses same build command |
-| Forgetting to use `bun pm version` vs manual tag | Document in CONTRIBUTING.md; consider adding a check that verifies tag matches package.json version |
+| Risk                                                               | Mitigation                                                                                          |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Tag pushed but release fails                                       | Workflow will fail visibly; developer can delete tag and retry, or manually create release          |
+| Version mismatch between package.json and manifest.json in release | Workflow enforces manifest.json version is updated from package.json before build                   |
+| Users can't install from git clone anymore                         | Document that BRAT is the intended install method for users; git clone is for developers only       |
+| Build fails on CI but works locally                                | Existing CI already builds successfully; release workflow uses same build command                   |
+| Forgetting to use `bun pm version` vs manual tag                   | Document in CONTRIBUTING.md; consider adding a check that verifies tag matches package.json version |
 
 ## Migration Plan
 

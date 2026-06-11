@@ -12,10 +12,10 @@
   - Check if configured path is absolute and exists → return it
   - Extract basename from configured path (handle both "opencode" and "/path/to/opencode")
 - [x] 2.4 Implement platform-specific directory search:
-  - Linux: ~/.local/bin/, ~/.opencode/bin/, ~/.bun/bin/, ~/.npm-global/bin/, ~/.nvm/versions/node/*/bin/, /usr/local/bin/, /usr/bin/
+  - Linux: ~/.local/bin/, ~/.opencode/bin/, ~/.bun/bin/, ~/.npm-global/bin/, ~/.nvm/versions/node/\*/bin/, /usr/local/bin/, /usr/bin/
   - macOS: ~/.local/bin/, /opt/homebrew/bin/, /usr/local/bin/
   - Windows: %LOCALAPPDATA%\opencode\bin\, %USERPROFILE%\.bun\bin\, %USERPROFILE%\.local\bin\
-- [x] 2.5 Implement nvm wildcard expansion for ~/.nvm/versions/node/*/bin/
+- [x] 2.5 Implement nvm wildcard expansion for ~/.nvm/versions/node/\*/bin/
 - [x] 2.6 Ensure fallback: return configured path if search fails
 
 ## 3. ServerManager Updates

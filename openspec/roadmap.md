@@ -4,19 +4,20 @@
 
 ### 0.1
 
-* Versioning and changelog
+- Versioning and changelog
 
 ### 0.2
 
-* Windows support
-* 3-4 sample skills useful in a vault
+- Windows support
+- 3-4 sample skills useful in a vault
 
 ### 0.3
-* AGENTS.md initialization
+
+- AGENTS.md initialization
 
 ### 1.0
 
-* TBD
+- TBD
 
 ## Ideas
 

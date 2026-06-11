@@ -34,6 +34,7 @@ bun install
 To work on the plugin during development:
 
 1. Build the plugin:
+
    ```bash
    bun run build  # One-time production build
    ```

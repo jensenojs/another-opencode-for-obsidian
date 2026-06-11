@@ -1,7 +1,9 @@
 ## Context
 
 ### Current Implementation
+
 The plugin uses a simple `opencodePath: string` setting that defaults to "opencode". The `ServerManager` spawns this directly with default arguments:
+
 ```typescript
 this.process = this.processImpl.start(
   this.settings.opencodePath,
@@ -13,6 +15,7 @@ this.process = this.processImpl.start(
 Platform-specific process implementations (`PosixProcess`, `WindowsProcess`) handle spawning and verification. The `verifyCommand` method checks if the executable exists.
 
 ### New Requirements
+
 1. One-time autodetect for new users (empty path on first run)
 2. Support custom shell commands with full user control
 3. Maintain backward compatibility with existing path-based configuration
@@ -20,6 +23,7 @@ Platform-specific process implementations (`PosixProcess`, `WindowsProcess`) han
 ## Goals / Non-Goals
 
 **Goals:**
+
 - Provide zero-configuration setup for new users via autodetect
 - Enable power users to use custom commands with full flexibility
 - Maintain backward compatibility for existing users
@@ -27,6 +31,7 @@ Platform-specific process implementations (`PosixProcess`, `WindowsProcess`) han
 - Platform-aware executable detection (PATH + common locations)
 
 **Non-Goals:**
+
 - Complex command builder UI (simple text input for custom commands)
 - Automatic installation of opencode
 - Validation of custom commands before execution
@@ -34,41 +39,49 @@ Platform-specific process implementations (`PosixProcess`, `WindowsProcess`) han
 ## Decisions
 
 ### 1. Settings Schema Extension
+
 **Decision:** Extend existing settings rather than replace.
 
 **Rationale:**
+
 - Maintains backward compatibility - existing configs continue working
 - Simple migration - just add new fields with sensible defaults
 - Minimal code changes to existing path-based logic
 
 **Alternatives considered:**
+
 - Replace with structured command object - rejected due to breaking change
 - Separate settings sections - rejected as overkill for this feature
 
 **Implementation:**
+
 ```typescript
 interface OpenCodeSettings {
   // ... existing fields ...
-  opencodePath: string;           // Still used as primary path
-  customCommand: string;          // New: shell command
-  useCustomCommand: boolean;     // New: toggle mode
+  opencodePath: string; // Still used as primary path
+  customCommand: string; // New: shell command
+  useCustomCommand: boolean; // New: toggle mode
 }
 ```
 
 ### 2. Autodetect Trigger Strategy
+
 **Decision:** Autodetect runs on every plugin startup when path is empty.
 
 **Rationale:**
+
 - Reminds user to configure or disable the plugin if opencode is missing
 - Simpler implementation - no state tracking needed
 - If user installs opencode later, it will be detected automatically
 
 **Alternatives considered:**
+
 - Run once and remember with flag - rejected as hides the problem
 - Run only manually - rejected as adds friction for new users
 - Explicit "first setup" wizard - rejected as overkill
 
 **Implementation:**
+
 ```typescript
 // In main.ts onload()
 if (!this.settings.opencodePath && !this.settings.useCustomCommand) {
@@ -77,19 +90,23 @@ if (!this.settings.opencodePath && !this.settings.useCustomCommand) {
 ```
 
 ### 3. Custom Command Spawning Strategy
+
 **Decision:** Use `shell: true` for custom commands, user controls ALL arguments.
 
 **Rationale:**
+
 - Maximum flexibility - env vars, pipes, complex invocations all work
 - Simple mental model - "what you type is what runs"
 - No ambiguity about argument concatenation
 
 **Alternatives considered:**
+
 - Parse and split custom command - rejected as fragile
 - Merge plugin args with custom args - rejected as confusing
 - Separate args array - rejected as limiting
 
 **Implementation:**
+
 ```typescript
 // Path mode
 this.process = spawn(opencodePath, ["serve", "--port", port, ...], options);
@@ -99,13 +116,16 @@ this.process = spawn(customCommand, [], { ...options, shell: true });
 ```
 
 ### 4. Executable Detection Order
+
 **Decision:** Check PATH first, then platform-specific common locations.
 
 **Rationale:**
+
 - Respects user's environment setup
 - Common locations cover most package manager installs (homebrew, cargo, npm -g, etc.)
 
 **Search algorithm:**
+
 1. If configured path is absolute and exists, return it directly
 2. Extract basename from configured path (e.g., "opencode" from "/path/to/opencode" or just "opencode")
 3. Search platform-specific locations for that basename:
@@ -117,14 +137,17 @@ this.process = spawn(customCommand, [], { ...options, shell: true });
 **nvm wildcard handling:** For `~/.nvm/versions/node/*/bin/`, expand the wildcard to find actual Node version directories.
 
 ### 5. UI Layout
+
 **Decision:** Toggle switch to select mode, conditional display of relevant input.
 
 **Rationale:**
+
 - Clear mental model - one or the other, not both
 - Reduces visual clutter
 - Toggle state directly maps to `useCustomCommand` boolean
 
 **Layout:**
+
 ```
 Command Mode:
 [  Use custom command  ●─────○  ]

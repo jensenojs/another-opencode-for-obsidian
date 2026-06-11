@@ -1,6 +1,7 @@
 ## Why
 
 Currently, the plugin requires users to manually specify an OpenCode path in settings, defaulting to just "opencode" (expecting it in PATH). This creates friction for new users who haven't configured anything yet. We need:
+
 1. **Autodetect on first run** - Seamless setup for new users
 2. **Custom command support** - Power users need flexibility for custom flags, env vars, wrapper scripts
 3. **Backward compatibility** - Existing `opencodePath` settings must continue working
@@ -8,6 +9,7 @@ Currently, the plugin requires users to manually specify an OpenCode path in set
 ## What Changes
 
 ### New Capabilities
+
 - **Startup autodetect**: On every plugin startup with empty `opencodePath`, automatically search for opencode executable
   - Check PATH first
   - Check platform-specific common locations (homebrew, ~/.local/bin, etc.)
@@ -20,31 +22,36 @@ Currently, the plugin requires users to manually specify an OpenCode path in set
   - Custom mode uses `shell: true` for maximum flexibility
 
 ### Settings Schema Changes
+
 ```typescript
 interface OpenCodeSettings {
   // ... existing fields ...
-  opencodePath: string;           // Path to executable (or empty)
-  customCommand: string;          // Full shell command
-  useCustomCommand: boolean;      // Toggle: false=path, true=custom
+  opencodePath: string; // Path to executable (or empty)
+  customCommand: string; // Full shell command
+  useCustomCommand: boolean; // Toggle: false=path, true=custom
 }
 ```
 
 ### UI Changes
+
 - Toggle: "Use custom command" (default: off)
 - When off: Show path input + "Autodetect" button
 - When on: Show custom command textarea
 
 ### Validation
+
 - Path mode: Verify with `opencode --version` (existing behavior)
 - Custom mode: Trust user, let it fail naturally
 
 ## Capabilities
 
 ### New Capabilities
+
 - `executable-autodetect`: Cross-platform executable detection on startup when path is empty
 - `custom-command-launch`: Shell-based command execution with full user control
 
 ### Modified Capabilities
+
 - `process-launch`: Extended to support both direct path execution and shell-based custom commands
 
 ## Impact
