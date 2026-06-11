@@ -1,5 +1,14 @@
 export type ViewLocation = "sidebar" | "main";
 
+export interface ServerEndpoint {
+  hostname: string;
+  port: number;
+  apiBaseUrl: string;
+  uiBaseUrl: string;
+  healthUrl: string;
+  encodedProjectDirectory: string;
+}
+
 export interface OpenCodeSettings {
   port: number;
   hostname: string;
@@ -33,3 +42,20 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
 };
 
 export const OPENCODE_VIEW_TYPE = "opencode-view";
+
+export function createServerEndpoint(
+  settings: Pick<OpenCodeSettings, "hostname" | "port">,
+  projectDirectory: string
+): ServerEndpoint {
+  const encodedProjectDirectory = Buffer.from(projectDirectory).toString("base64");
+  const apiBaseUrl = `http://${settings.hostname}:${settings.port}`;
+
+  return {
+    hostname: settings.hostname,
+    port: settings.port,
+    apiBaseUrl,
+    uiBaseUrl: `${apiBaseUrl}/${encodedProjectDirectory}`,
+    healthUrl: `${apiBaseUrl}/global/health`,
+    encodedProjectDirectory,
+  };
+}

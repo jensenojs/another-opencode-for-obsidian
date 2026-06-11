@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
+import * as http from "http";
 import { ServerManager, ServerState } from "../src/server/ServerManager";
 import { OpenCodeSettings } from "../src/types";
 
@@ -27,7 +28,30 @@ function createTestSettings(port: number): OpenCodeSettings {
     maxSelectionLength: 2000,
     customCommand: "",
     useCustomCommand: false,
+    lastSessionUrl: "",
   };
+}
+
+function quoteCommandPart(value: string): string {
+  return value.includes(" ") ? `"${value.replace(/"/g, '\\"')}"` : value;
+}
+
+async function listen(server: http.Server, port: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    server.listen(port, "127.0.0.1", resolve);
+  });
+}
+
+async function close(server: http.Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error?: Error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 // Track current manager for cleanup
@@ -191,8 +215,7 @@ describe("ServerManager", () => {
       await currentManager.start();
 
       // Verify we can hit the health endpoint
-      const url = currentManager.getUrl();
-      const healthUrl = `${url}/global/health`;
+      const healthUrl = currentManager.getHealthUrl();
 
       const response = await fetch(healthUrl, {
         signal: AbortSignal.timeout(2000),
@@ -200,6 +223,29 @@ describe("ServerManager", () => {
 
       expect(response.ok).toBe(true);
     });
+
+    test("starts custom command template with the configured endpoint", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
+      settings.useCustomCommand = true;
+      settings.customCommand =
+        "opencode serve --hostname {hostname} --port {port} --cors {cors}";
+
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+
+      const success = await currentManager.start();
+
+      expect(success).toBe(true);
+      expect(currentManager.getState()).toBe("running");
+
+      const response = await fetch(currentManager.getHealthUrl(), {
+        signal: AbortSignal.timeout(2000),
+      });
+      const body = await response.json();
+
+      expect(response.ok).toBe(true);
+      expect(body.healthy).toBe(true);
+    }, 30000);
   });
 
   describe("async stop behavior", () => {
@@ -267,6 +313,60 @@ describe("ServerManager", () => {
   });
 
   describe("error handling", () => {
+    test("rejects custom commands without hostname placeholder", async () => {
+      const settings = createTestSettings(getNextPort());
+      settings.useCustomCommand = true;
+      settings.customCommand = "opencode serve --port {port}";
+
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+
+      const success = await currentManager.start();
+
+      expect(success).toBe(false);
+      expect(currentManager.getState()).toBe("error");
+      expect(currentManager.getLastError() ?? "").toContain("{hostname}");
+    });
+
+    test("rejects custom commands without port placeholder", async () => {
+      const settings = createTestSettings(getNextPort());
+      settings.useCustomCommand = true;
+      settings.customCommand = "opencode serve --hostname {hostname}";
+
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+
+      const success = await currentManager.start();
+
+      expect(success).toBe(false);
+      expect(currentManager.getState()).toBe("error");
+      expect(currentManager.getLastError() ?? "").toContain("{port}");
+    });
+
+    test("does not treat an HTML response as a healthy server", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
+      settings.startupTimeout = 800;
+      settings.useCustomCommand = true;
+      settings.customCommand = `${quoteCommandPart(process.execPath)} -e "setTimeout(() => {}, 10000); // {hostname} {port}"`;
+
+      const htmlServer = http.createServer((_req, res) => {
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end("<html></html>");
+      });
+      await listen(htmlServer, port);
+
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+
+      try {
+        const success = await currentManager.start();
+
+        expect(success).toBe(false);
+        expect(currentManager.getState()).toBe("error");
+        expect(currentManager.getLastError() ?? "").toContain("non-JSON");
+      } finally {
+        await close(htmlServer);
+      }
+    });
+
     test("handles double stop gracefully", async () => {
       const port = getNextPort();
       const settings = createTestSettings(port);

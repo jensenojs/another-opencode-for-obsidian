@@ -1,6 +1,7 @@
 import { ChildProcess, SpawnOptions } from "child_process";
 import { EventEmitter } from "events";
-import { OpenCodeSettings } from "../types";
+import * as http from "http";
+import { OpenCodeSettings, ServerEndpoint, createServerEndpoint } from "../types";
 import { ServerState } from "./types";
 import { OpenCodeProcess } from "./process/OpenCodeProcess";
 import { WindowsProcess } from "./process/WindowsProcess";
@@ -13,6 +14,7 @@ export class ServerManager extends EventEmitter {
   private process: ChildProcess | null = null;
   private state: ServerState = "stopped";
   private lastError: string | null = null;
+  private lastHealthError: string | null = null;
   private earlyExitCode: number | null = null;
   private settings: OpenCodeSettings;
   private projectDirectory: string;
@@ -44,8 +46,11 @@ export class ServerManager extends EventEmitter {
   }
 
   getUrl(): string {
-    const encodedPath = Buffer.from(this.projectDirectory).toString('base64');
-    return `http://${this.settings.hostname}:${this.settings.port}/${encodedPath}`;
+    return this.getEndpoint().uiBaseUrl;
+  }
+
+  getHealthUrl(): string {
+    return this.getEndpoint().healthUrl;
   }
 
   async start(): Promise<boolean> {
@@ -55,19 +60,23 @@ export class ServerManager extends EventEmitter {
 
     this.setState("starting");
     this.lastError = null;
+    this.lastHealthError = null;
     this.earlyExitCode = null;
 
     if (!this.projectDirectory) {
       return this.setError("Project directory (vault) not configured");
     }
 
-    // Determine execution mode and resolve executable path
+    const endpoint = this.getEndpoint();
     let executablePath: string;
     let spawnOptions: SpawnOptions;
     
     if (this.settings.useCustomCommand) {
-      // Custom command mode: use custom command directly with shell
-      executablePath = this.settings.customCommand;
+      const resolvedCommand = this.resolveCustomCommand(endpoint);
+      if (typeof resolvedCommand !== "string") {
+        return this.setError(resolvedCommand.message);
+      }
+      executablePath = resolvedCommand;
       spawnOptions = {
         cwd: this.projectDirectory,
         env: { ...process.env, NODE_USE_SYSTEM_CA: "1" },
@@ -103,8 +112,8 @@ export class ServerManager extends EventEmitter {
     console.log("[OpenCode] Starting server:", {
       mode: this.settings.useCustomCommand ? "custom" : "path",
       command: executablePath,
-      port: this.settings.port,
-      hostname: this.settings.hostname,
+      port: endpoint.port,
+      hostname: endpoint.hostname,
       cwd: this.projectDirectory,
       projectDirectory: this.projectDirectory,
     });
@@ -123,9 +132,9 @@ export class ServerManager extends EventEmitter {
         [
           "serve",
           "--port",
-          this.settings.port.toString(),
+          endpoint.port.toString(),
           "--hostname",
-          this.settings.hostname,
+          endpoint.hostname,
           "--cors",
           "app://obsidian.md",
         ],
@@ -184,16 +193,24 @@ export class ServerManager extends EventEmitter {
       return false;
     }
 
-    await this.stop();
     if (this.earlyExitCode !== null) {
       return this.setError(
         `Process exited unexpectedly (exit code ${this.earlyExitCode})`
       );
     }
+
     if (!this.process) {
       return this.setError("Process exited before server became ready");
     }
-    return this.setError("Server failed to start within timeout");
+
+    const healthError = this.lastHealthError;
+    await this.stop();
+
+    return this.setError(
+      healthError
+        ? `Server failed to start within timeout; last health check: ${healthError}`
+        : "Server failed to start within timeout"
+    );
   }
 
   async stop(): Promise<void> {
@@ -222,28 +239,82 @@ export class ServerManager extends EventEmitter {
     return false;
   }
 
-  private async checkServerHealth(): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.getUrl()}/global/health`, {
-        method: "GET",
-        signal: AbortSignal.timeout(2000),
-      });
-      return response.ok;
-    } catch {
-      // CORS blocked the request. Fallback: send request in no-cors mode.
-      // The response is opaque (can't read status), but if the request
-      // reaches the server we know it's alive. Rejects on network error.
-      try {
-        await fetch(`${this.getUrl()}/global/health`, {
-          method: "GET",
-          mode: "no-cors",
-          signal: AbortSignal.timeout(2000),
-        });
-        return true;
-      } catch {
-        return false;
-      }
+  private getEndpoint(): ServerEndpoint {
+    return createServerEndpoint(this.settings, this.projectDirectory);
+  }
+
+  private resolveCustomCommand(
+    endpoint: ServerEndpoint
+  ): string | { message: string } {
+    const command = this.settings.customCommand.trim();
+    if (!command) {
+      return { message: "Custom command is empty" };
     }
+
+    if (!command.includes("{hostname}")) {
+      return {
+        message: "Custom command must include {hostname} so the plugin can use one server endpoint",
+      };
+    }
+
+    if (!command.includes("{port}")) {
+      return {
+        message: "Custom command must include {port} so the plugin can use one server endpoint",
+      };
+    }
+
+    return command
+      .replace(/\{hostname\}/g, endpoint.hostname)
+      .replace(/\{port\}/g, endpoint.port.toString())
+      .replace(/\{cors\}/g, "app://obsidian.md")
+      .replace(/\{projectDirectory\}/g, this.projectDirectory);
+  }
+
+  private async checkServerHealth(): Promise<boolean> {
+    const healthUrl = this.getEndpoint().healthUrl;
+
+    return new Promise((resolve) => {
+      const request = http.get(healthUrl, (response) => {
+        let body = "";
+
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => {
+          body += chunk;
+        });
+
+        response.on("end", () => {
+          if (response.statusCode !== 200) {
+            this.lastHealthError = `${healthUrl} returned HTTP ${response.statusCode}`;
+            resolve(false);
+            return;
+          }
+
+          try {
+            const payload = JSON.parse(body) as { healthy?: unknown };
+            if (payload.healthy === true) {
+              this.lastHealthError = null;
+              resolve(true);
+              return;
+            }
+            this.lastHealthError = `${healthUrl} returned an unhealthy payload`;
+          } catch {
+            this.lastHealthError = `${healthUrl} returned a non-JSON response`;
+          }
+          resolve(false);
+        });
+      });
+
+      request.setTimeout(2000, () => {
+        this.lastHealthError = `${healthUrl} timed out`;
+        request.destroy();
+        resolve(false);
+      });
+
+      request.on("error", (error: Error) => {
+        this.lastHealthError = `${healthUrl} is not reachable: ${error.message}`;
+        resolve(false);
+      });
+    });
   }
 
   private async waitForServerOrExit(timeoutMs: number): Promise<boolean> {
@@ -252,7 +323,7 @@ export class ServerManager extends EventEmitter {
 
     while (Date.now() - startTime < timeoutMs) {
       if (!this.process) {
-        console.log("[OpenCode] Process exited before server became ready");
+        console.log("Process exited before server became ready");
         return false;
       }
 

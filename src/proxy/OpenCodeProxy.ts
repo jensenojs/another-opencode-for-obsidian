@@ -42,6 +42,11 @@ export class OpenCodeProxy extends EventEmitter {
     return this.effectivePort;
   }
 
+  updateTarget(targetHost: string, targetPort: number): void {
+    this.targetHost = targetHost;
+    this.targetPort = targetPort;
+  }
+
   async start(): Promise<boolean> {
     if (this.server) return true;
 

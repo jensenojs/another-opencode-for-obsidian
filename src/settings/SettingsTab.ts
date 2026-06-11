@@ -5,6 +5,9 @@ import { OpenCodeSettings, ViewLocation } from "../types";
 import { ServerManager } from "../server/ServerManager";
 import { ExecutableResolver } from "../server/ExecutableResolver";
 
+const DEFAULT_CUSTOM_COMMAND =
+  "opencode serve --hostname {hostname} --port {port} --cors {cors}";
+
 function expandTilde(path: string): string {
   if (path === "~") {
     return homedir();
@@ -65,12 +68,15 @@ export class OpenCodeSettingTab extends PluginSettingTab {
 
     const customCmdSetting = new Setting(containerEl)
       .setName("Use custom command")
-      .setDesc("Enable to use a custom shell command instead of the executable path")
+      .setDesc("Use a shell command template instead of the executable path")
       .addToggle((toggle) =>
         toggle
           .setValue(this.settings.useCustomCommand)
           .onChange(async (value) => {
             this.settings.useCustomCommand = value;
+            if (value && !this.settings.customCommand.trim()) {
+              this.settings.customCommand = DEFAULT_CUSTOM_COMMAND;
+            }
             await this.onSettingsChange();
             // Re-render to show/hide appropriate fields
             this.display();
@@ -91,10 +97,10 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     if (this.settings.useCustomCommand) {
       new Setting(containerEl)
         .setName("Custom command")
-        .setDesc("Custom shell command to start OpenCode.")
+        .setDesc("Command template to start OpenCode. Must include {hostname} and {port}. Optional variables: {cors}, {projectDirectory}.")
         .addTextArea((text) => {
           text
-            .setPlaceholder("opencode serve --port 14096 --hostname 127.0.0.1 --cors app://obsidian.md")
+            .setPlaceholder(DEFAULT_CUSTOM_COMMAND)
             .setValue(this.settings.customCommand)
             .onChange(async (value) => {
               this.settings.customCommand = value;

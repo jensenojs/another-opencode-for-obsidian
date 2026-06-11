@@ -1,5 +1,10 @@
 import { Plugin, WorkspaceLeaf, Notice, EventRef, MarkdownView } from "obsidian";
-import { OpenCodeSettings, DEFAULT_SETTINGS, OPENCODE_VIEW_TYPE } from "./types";
+import {
+  OpenCodeSettings,
+  DEFAULT_SETTINGS,
+  OPENCODE_VIEW_TYPE,
+  createServerEndpoint,
+} from "./types";
 import { OpenCodeView } from "./ui/OpenCodeView";
 import { ViewManager } from "./ui/ViewManager";
 import { OpenCodeSettingTab } from "./settings/SettingsTab";
@@ -19,6 +24,7 @@ export default class OpenCodePlugin extends Plugin {
   private viewManager: ViewManager;
   private cachedIframeUrl: string | null = null;
   private lastBaseUrl: string | null = null;
+  private lastApiBaseUrl: string | null = null;
   private openCodeProxy: OpenCodeProxy;
 
   async onload(): Promise<void> {
@@ -40,7 +46,9 @@ export default class OpenCodePlugin extends Plugin {
     });
 
     // Start proxy to inject keyboard listener into opencode iframe
-    this.openCodeProxy = new OpenCodeProxy(this.settings.hostname, this.settings.port);
+    const endpoint = createServerEndpoint(this.settings, projectDirectory);
+
+    this.openCodeProxy = new OpenCodeProxy(endpoint.hostname, endpoint.port);
     await this.openCodeProxy.start();
 
     // Listen for toggle messages from iframe (injected by proxy)
@@ -70,6 +78,7 @@ export default class OpenCodePlugin extends Plugin {
       projectDirectory
     );
     this.lastBaseUrl = this.getServerUrl();
+    this.lastApiBaseUrl = this.getApiBaseUrl();
 
     this.contextManager = new ContextManager({
       app: this.app,
@@ -238,12 +247,12 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   getServerUrl(): string {
-    const encodedPath = Buffer.from(this.getProjectDirectory()).toString('base64');
-    return this.openCodeProxy.getProxyUrl(encodedPath);
+    const endpoint = createServerEndpoint(this.settings, this.getProjectDirectory());
+    return this.openCodeProxy.getProxyUrl(endpoint.encodedProjectDirectory);
   }
 
   getApiBaseUrl(): string {
-    return `http://${this.settings.hostname}:${this.settings.port}`;
+    return createServerEndpoint(this.settings, this.getProjectDirectory()).apiBaseUrl;
   }
 
   getStoredIframeUrl(): string | null {
@@ -276,16 +285,22 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   private refreshClientState(): void {
+    this.openCodeProxy.updateTarget(this.settings.hostname, this.settings.port);
+
     const nextUiBaseUrl = this.getServerUrl();
     const nextApiBaseUrl = this.getApiBaseUrl();
     const projectDirectory = this.getProjectDirectory();
     this.openCodeClient.updateBaseUrl(nextApiBaseUrl, nextUiBaseUrl, projectDirectory);
 
-    if (this.lastBaseUrl && this.lastBaseUrl !== nextUiBaseUrl) {
+    if (
+      (this.lastBaseUrl && this.lastBaseUrl !== nextUiBaseUrl) ||
+      (this.lastApiBaseUrl && this.lastApiBaseUrl !== nextApiBaseUrl)
+    ) {
       this.setCachedIframeUrl(null);
     }
 
     this.lastBaseUrl = nextUiBaseUrl;
+    this.lastApiBaseUrl = nextApiBaseUrl;
   }
 
   refreshContextForView(view: OpenCodeView): void {
