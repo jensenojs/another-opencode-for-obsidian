@@ -100,6 +100,7 @@ describe("OpenCodeProxy", () => {
 
     expect(body).toContain("data-opencode-obsidian-theme");
     expect(body).toContain('"--background-base":"transparent"');
+    expect(body).toContain("root.dataset.colorScheme = theme.colorScheme");
     expect(body).toContain(
       '"--surface-raised-base":"color-mix(in srgb, #222222 64%, transparent)"'
     );

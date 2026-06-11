@@ -40,6 +40,11 @@ describe("createOpenCodeWebViewTheme", () => {
     expect(theme.variables["--v2-background-bg-layer-03"]).toBe(
       "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 76%, transparent)"
     );
+    expect(theme.variables["--background-bg-base"]).toBe("var(--v2-background-bg-base)");
+    expect(theme.variables["--background-bg-layer-01"]).toBe("var(--v2-background-bg-layer-01)");
+    expect(theme.variables["--text-text-base"]).toBe("var(--v2-text-text-base)");
+    expect(theme.variables["--border-border-base"]).toBe("var(--v2-border-border-base)");
+    expect(theme.variables["--alpha-light-6"]).toBe("var(--v2-alpha-light-6)");
     expect(theme.variables["--font-family-sans"]).toBe('"Monaco Nerd Font Mono", ui-sans-serif');
   });
 });

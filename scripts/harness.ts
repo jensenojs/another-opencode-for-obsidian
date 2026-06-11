@@ -513,14 +513,23 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
       "--background-stronger",
       "--v2-background-bg-base",
       "--v2-background-bg-deep",
+      "--background-bg-base",
+      "--background-bg-deep",
     ]),
     surfaces: pickVariables(variables, [
       "--surface-raised-base",
       "--surface-float-base",
       "--input-base",
       "--v2-background-bg-layer-03",
+      "--background-bg-layer-01",
+      "--background-bg-layer-03",
     ]),
-    textAndBorder: pickVariables(variables, ["--text-strong", "--border-weak-base"]),
+    textAndBorder: pickVariables(variables, [
+      "--text-strong",
+      "--border-weak-base",
+      "--text-text-base",
+      "--border-border-base",
+    ]),
   };
   const injection = {
     hasAppearanceStyle: html.body.includes("data-opencode-obsidian-appearance"),
@@ -543,22 +552,40 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
         typeof tokens.rootBackground["--opencode-obsidian-page-background"] === "string" &&
         tokens.rootBackground["--opencode-obsidian-page-background"]!.length > 0 &&
         Object.entries(tokens.rootBackground)
-          .filter(([name]) => name !== "--opencode-obsidian-page-background")
-          .every(([, value]) => value === "var(--opencode-obsidian-page-background)"),
+          .filter(
+            ([name]) =>
+              name !== "--opencode-obsidian-page-background" &&
+              name !== "--background-bg-base" &&
+              name !== "--background-bg-deep"
+          )
+          .every(([, value]) => value === "var(--opencode-obsidian-page-background)") &&
+        tokens.rootBackground["--background-bg-base"] === "var(--v2-background-bg-base)" &&
+        tokens.rootBackground["--background-bg-deep"] === "var(--v2-background-bg-deep)",
       detail: tokens.rootBackground,
     });
     checks.push({
       name: "local surface tokens stay translucent",
-      ok: Object.values(tokens.surfaces).every(
-        (value) => typeof value === "string" && value.includes("transparent")
-      ),
+      ok:
+        [
+          "--surface-raised-base",
+          "--surface-float-base",
+          "--input-base",
+          "--v2-background-bg-layer-03",
+        ].every((name) => {
+          const value = tokens.surfaces[name];
+          return typeof value === "string" && value.includes("transparent");
+        }) &&
+        tokens.surfaces["--background-bg-layer-01"] === "var(--v2-background-bg-layer-01)" &&
+        tokens.surfaces["--background-bg-layer-03"] === "var(--v2-background-bg-layer-03)",
       detail: tokens.surfaces,
     });
     checks.push({
       name: "text and border tokens use Obsidian variables",
       ok:
         tokens.textAndBorder["--text-strong"] === "var(--opencode-obsidian-text-normal)" &&
-        tokens.textAndBorder["--border-weak-base"] === "var(--opencode-obsidian-border)",
+        tokens.textAndBorder["--border-weak-base"] === "var(--opencode-obsidian-border)" &&
+        tokens.textAndBorder["--text-text-base"] === "var(--v2-text-text-base)" &&
+        tokens.textAndBorder["--border-border-base"] === "var(--v2-border-border-base)",
       detail: tokens.textAndBorder,
     });
     checks.push({

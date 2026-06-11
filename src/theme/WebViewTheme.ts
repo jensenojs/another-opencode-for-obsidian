@@ -32,8 +32,8 @@ const OBSIDIAN_FALLBACKS: ObsidianThemeValues = {
 // values, OpenCode owns the destination token names; component class selectors
 // in either app are intentionally outside this contract.
 // Obsidian CSS variables: https://docs.obsidian.md/Reference/CSS+variables/CSS+variables
-// OpenCode tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/theme.css
-// Tailwind mapping: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/tailwind/colors.css
+// OpenCode tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/theme.css
+// Tailwind entry: https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/tailwind.css
 export function captureObsidianWebViewTheme(source: HTMLElement = document.body): WebViewTheme {
   const styles = getComputedStyle(source);
   const colorScheme = source.classList.contains("theme-light") ? "light" : "dark";
@@ -213,6 +213,30 @@ export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebVi
       "color-mix(in srgb, var(--opencode-obsidian-border) 60%, transparent)",
     "--v2-border-border-base": "var(--opencode-obsidian-border)",
     "--v2-border-border-focus": "var(--opencode-obsidian-accent)",
+
+    "--background-bg-base": "var(--v2-background-bg-base)",
+    "--background-bg-deep": "var(--v2-background-bg-deep)",
+    "--background-bg-layer-01": "var(--v2-background-bg-layer-01)",
+    "--background-bg-layer-02": "var(--v2-background-bg-layer-02)",
+    "--background-bg-layer-03": "var(--v2-background-bg-layer-03)",
+    "--background-bg-layer-04": "var(--v2-background-bg-layer-04)",
+    "--background-bg-button-neutral": "var(--v2-background-bg-button-neutral)",
+    "--background-bg-accent": "var(--v2-background-bg-accent)",
+    "--text-text-base": "var(--v2-text-text-base)",
+    "--text-text-muted": "var(--v2-text-text-muted)",
+    "--text-text-faint": "var(--v2-text-text-faint)",
+    "--text-text-accent": "var(--v2-text-text-accent)",
+    "--icon-icon-base": "var(--v2-icon-icon-base)",
+    "--icon-icon-muted": "var(--v2-icon-icon-muted)",
+    "--icon-icon-accent": "var(--v2-icon-icon-accent)",
+    "--border-border-muted": "var(--v2-border-border-muted)",
+    "--border-border-base": "var(--v2-border-border-base)",
+    "--border-border-strong": "var(--v2-border-border-base)",
+    "--border-border-focus": "var(--v2-border-border-focus)",
+    "--alpha-light-0": "var(--v2-alpha-light-0)",
+    "--alpha-light-2": "var(--v2-alpha-light-2)",
+    "--alpha-light-6": "var(--v2-alpha-light-6)",
+    "--alpha-light-20": "var(--v2-alpha-light-20)",
   };
 
   return {

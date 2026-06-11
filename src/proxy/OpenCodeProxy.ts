@@ -264,12 +264,13 @@ function createThemeInjection(theme: WebViewTheme | null): string {
 <script data-opencode-obsidian-theme>
 (function() {
   var theme = ${payload};
-    function applyTheme() {
-      var root = document.documentElement;
-      root.dataset.opencodeObsidianAppearance = 'obsidian';
-      root.style.colorScheme = theme.colorScheme;
-      Object.keys(theme.variables).forEach(function(name) {
-        root.style.setProperty(name, theme.variables[name]);
+      function applyTheme() {
+        var root = document.documentElement;
+        root.dataset.opencodeObsidianAppearance = 'obsidian';
+        root.dataset.colorScheme = theme.colorScheme;
+        root.style.colorScheme = theme.colorScheme;
+        Object.keys(theme.variables).forEach(function(name) {
+          root.style.setProperty(name, theme.variables[name]);
       });
     }
       function isVisibleOpaqueBackground(style) {
@@ -304,12 +305,16 @@ function createThemeInjection(theme: WebViewTheme | null): string {
         '--background-base',
         '--background-weak',
         '--background-strong',
-        '--background-stronger',
-        '--v2-background-bg-base',
-        '--v2-background-bg-deep',
-        '--surface-raised-base',
-        '--input-base'
-      ];
+          '--background-stronger',
+          '--v2-background-bg-base',
+          '--v2-background-bg-deep',
+          '--background-bg-base',
+          '--background-bg-layer-01',
+          '--surface-raised-base',
+          '--input-base',
+          '--text-text-base',
+          '--border-border-base'
+        ];
       return names.reduce(function(result, name) {
         result[name] = style.getPropertyValue(name).trim();
         return result;

@@ -90,16 +90,16 @@ Other settings (port, hostname, auto-start, view location, context injection) ar
 
 The embedded web view can use either:
 
-- `Obsidian`: inherit the active Obsidian theme. Page-level OpenCode background tokens stay transparent, while local controls and panels use translucent surfaces derived from Obsidian variables.
+- `Obsidian`: inherit the active Obsidian theme. Page-level OpenCode background tokens use the Obsidian pane background, while local controls and panels use translucent surfaces derived from Obsidian variables.
 - `OpenCode`: keep OpenCode's own web UI styling.
 
-The Obsidian mode uses the stable CSS-variable surfaces exposed by both apps. It reads Obsidian variables such as `--background-primary`, `--text-normal`, and `--interactive-accent`, then injects OpenCode token overrides such as `--background-base`, `--surface-raised-base`, `--text-strong`, and `--border-weak-base` through the local proxy. The page background tokens are transparent so Obsidian owns the pane material; local OpenCode surfaces remain translucent for readability. This code does not target OpenCode component class names.
+The Obsidian mode uses the stable CSS-variable surfaces exposed by both apps. It reads Obsidian variables such as `--background-primary`, `--text-normal`, and `--interactive-accent`, then injects OpenCode token overrides such as `--background-base`, `--surface-raised-base`, `--text-strong`, and `--border-weak-base` through the local proxy. OpenCode v2 has both `--v2-*` tokens and unprefixed component tokens such as `--background-bg-base`; the unprefixed tokens alias to the `--v2-*` tokens so the mapping has one source. This code does not target OpenCode component class names.
 
 Relevant upstream surfaces:
 
 - Obsidian CSS variables: https://docs.obsidian.md/Reference/CSS+variables/CSS+variables
-- OpenCode theme tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/theme.css
-- OpenCode Tailwind token mapping: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/tailwind/colors.css
+- OpenCode theme tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/theme.css
+- OpenCode Tailwind entry: https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/tailwind.css
 
 ### Context injection (experimental)
 

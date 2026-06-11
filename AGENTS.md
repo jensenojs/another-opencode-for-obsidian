@@ -100,9 +100,10 @@ scripts/
 - Obsidian 外观模式的默认行为是让 OpenCode 页面底色使用 Obsidian `--background-primary`，输入框、浮层、会话面板等局部 surface 使用 Obsidian 变量派生出的半透明 token。只有 Obsidian CSS 变量缺失时才退回 `.app-container` 的 computed background；代码消费稳定变量面，不消费 Obsidian 或 OpenCode 的内部组件 class。
 - 主题桥接的真相源是稳定变量面:
   - Obsidian CSS variables: https://docs.obsidian.md/Reference/CSS+variables/CSS+variables
-  - OpenCode tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/theme.css
-  - OpenCode Tailwind mapping: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/tailwind/colors.css
+  - OpenCode tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/theme.css
+  - OpenCode Tailwind entry: https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/tailwind.css
 - 不要用 OpenCode 内部组件 class selector 重写主题。当前可验收路径是打开 proxy URL 或 Obsidian iframe，读取内部 DOM 的 computed style，确认 `--background-base`/`--v2-background-bg-base` 使用 `--opencode-obsidian-page-background`，同时 `--surface-raised-base`、`--text-strong`、`--border-weak-base` 等 token 已影响页面
+- OpenCode v2 组件同时消费 `--v2-*` token 和未加 v2 前缀的组件 token。未加前缀 token 必须别名到 `--v2-*`，不能复制一套颜色算法
 - 代理在插件卸载时自动关闭
 
 ### `OpenCodeView.ts` — 侧边栏视图
