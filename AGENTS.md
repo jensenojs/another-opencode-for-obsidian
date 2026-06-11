@@ -46,6 +46,7 @@ src/
 │   └── RuntimeDiagnostics.ts # XDG 日志、status.json、运行时路径
 ├── context/
 │   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，触发上下文刷新
+│   ├── AutoSelectionContextSource.ts # 自动选区策略：去重、空选区重置、失败重试
 │   └── WorkspaceContext.ts  # 收集打开的笔记路径 + 选中文本
 ├── ui/
 │   ├── OpenCodeView.ts      # ItemView：iframe + 基于状态的渲染
@@ -129,6 +130,11 @@ scripts/
 - 调用 `WorkspaceContext` 收集数据，通过 `OpenCodeClient` 发送到 opencode 会话
 - `injectWorkspaceContext` 控制自动 workspace 摘要（打开笔记路径 + 当前选区）是否作为一个 auto item 维护
 - `autoAddSelectionContext` 控制 editor-change 后是否把变化后的选区追加为 manual item；它复用 `addSelectionForCurrentSession()`，不新增 ContextItem 身份字段或第二套状态源
+
+### `AutoSelectionContextSource.ts` — 自动选区策略
+
+- 只处理自动选区策略：开关判断、fingerprint 去重、空选区重置、失败后允许同一选区重试
+- 不持有 ContextItem[]，不调用 OpenCodeClient，不读取 Obsidian workspace
 - 自动选区只在成功创建 ContextItem 后记录 fingerprint。没有 active session 或 OpenCode 拒收时，后续相同选区仍可重试
 
 ### `WorkspaceContext.ts` — 上下文收集
