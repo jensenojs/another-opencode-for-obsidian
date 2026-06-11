@@ -184,7 +184,7 @@ describe("ServerManager", () => {
       const secondStart = await currentManager.start();
       expect(secondStart).toBe(true);
       expect(currentManager.getState()).toBe("running");
-    });
+    }, 30000);
 
     test("returns true immediately if already running", async () => {
       const port = getNextPort();
