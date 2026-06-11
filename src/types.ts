@@ -51,6 +51,7 @@ export interface OpenCodeSettings {
   injectWorkspaceContext: boolean;
   autoAddSelectionContext: boolean;
   autoAddBacklinksContext: boolean;
+  autoAddCursorContext: boolean;
   maxNotesInContext: number;
   maxSelectionLength: number;
   customCommand: string;
@@ -73,6 +74,7 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
   injectWorkspaceContext: false,
   autoAddSelectionContext: false,
   autoAddBacklinksContext: false,
+  autoAddCursorContext: false,
   maxNotesInContext: 20,
   maxSelectionLength: 2000,
   customCommand: "",

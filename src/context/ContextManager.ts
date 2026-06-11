@@ -5,6 +5,11 @@ import { WorkspaceContext } from "./WorkspaceContext";
 import { formatWorkspaceContext } from "./ContextFormatter";
 import { AutoSelectionContextSource } from "./AutoSelectionContextSource";
 import { BacklinkContextSource } from "./BacklinkContextSource";
+import {
+  CursorContextSnapshot,
+  CursorContextSource,
+  formatCursorContext,
+} from "./CursorContextSource";
 import { OpenCodeView } from "../ui/OpenCodeView";
 import { ServerState } from "../server/types";
 
@@ -12,6 +17,7 @@ const MAX_ACTIVE_CONTEXT_ITEMS = 50;
 const WORKSPACE_CONTEXT_LABEL = "Workspace context";
 const WORKSPACE_CONTEXT_SOURCE = "Obsidian workspace";
 const BACKLINK_CONTEXT_LABEL_PREFIX = "Backlinks:";
+const CURSOR_CONTEXT_LABEL_PREFIX = "Cursor:";
 
 type ContextManagerDeps = {
   app: App;
@@ -39,6 +45,7 @@ export class ContextManager {
   private itemChangeCallbacks: Array<(items: ContextItem[]) => void> = [];
   private autoSelectionSource: AutoSelectionContextSource;
   private backlinkSource: BacklinkContextSource;
+  private cursorSource: CursorContextSource;
   private activeMarkdownPath: string | null = null;
 
   constructor(deps: ContextManagerDeps) {
@@ -65,6 +72,11 @@ export class ContextManager {
       addBacklinks: (params) => this.addBacklinksForCurrentSession(params.filePath, params.text),
       removeBacklinks: () => this.removeBacklinksForCurrentSession(),
     });
+    this.cursorSource = new CursorContextSource({
+      isEnabled: () => this.settings.autoAddCursorContext,
+      addCursor: (cursor) => this.addCursorForCurrentSession(cursor),
+      removeCursor: () => this.removeCursorForCurrentSession(),
+    });
   }
 
   updateSettings(settings: OpenCodeSettings): void {
@@ -76,7 +88,8 @@ export class ContextManager {
     if (
       !this.settings.injectWorkspaceContext &&
       !this.settings.autoAddSelectionContext &&
-      !this.settings.autoAddBacklinksContext
+      !this.settings.autoAddBacklinksContext &&
+      !this.settings.autoAddCursorContext
     ) {
       this.clearListeners();
       return;
@@ -91,12 +104,14 @@ export class ContextManager {
         this.activeMarkdownPath = leaf.view.file?.path ?? null;
         this.workspaceContext.trackViewSelection(leaf.view);
         void this.refreshBacklinks();
+        void this.refreshCursor(leaf.view);
       }
       this.scheduleRefresh(0);
     });
     const fileOpenRef = this.app.workspace.on("file-open", (file) => {
       this.activeMarkdownPath = file?.path ?? null;
       void this.refreshBacklinks();
+      void this.refreshCursor();
       this.scheduleRefresh();
     });
     const layoutChangeRef = this.app.workspace.on("layout-change", () => {
@@ -108,6 +123,7 @@ export class ContextManager {
         const selection = this.workspaceContext.trackViewSelection(view);
         void this.autoSelectionSource.handleSelection(selection);
         void this.refreshBacklinks();
+        void this.refreshCursor(view);
       }
       this.scheduleRefresh(500);
     });
@@ -140,6 +156,7 @@ export class ContextManager {
     }
     this.autoSelectionSource.reset();
     this.backlinkSource.reset();
+    this.cursorSource.reset();
     this.activeMarkdownPath = null;
   }
 
@@ -315,6 +332,46 @@ export class ContextManager {
     }
 
     await this.removeBacklinkAutoItems(sessionId);
+    return true;
+  }
+
+  private async addCursorForCurrentSession(
+    cursor: CursorContextSnapshot
+  ): Promise<ContextItem | null> {
+    const iframeUrl = this.getCachedIframeUrl();
+    if (!iframeUrl) {
+      return null;
+    }
+
+    const sessionId = this.client.resolveSessionId(iframeUrl);
+    if (!sessionId) {
+      return null;
+    }
+
+    await this.removeCursorAutoItems(sessionId);
+    return this.addItem({
+      sessionId,
+      type: "auto",
+      label: `${CURSOR_CONTEXT_LABEL_PREFIX} ${cursor.sourcePath}:${cursor.line}:${cursor.column}`,
+      text: formatCursorContext(cursor),
+      sourceFile: cursor.sourcePath,
+      startLine: cursor.line,
+      endLine: cursor.line,
+    });
+  }
+
+  private async removeCursorForCurrentSession(): Promise<boolean> {
+    const iframeUrl = this.getCachedIframeUrl();
+    if (!iframeUrl) {
+      return false;
+    }
+
+    const sessionId = this.client.resolveSessionId(iframeUrl);
+    if (!sessionId) {
+      return false;
+    }
+
+    await this.removeCursorAutoItems(sessionId);
     return true;
   }
 
@@ -495,6 +552,15 @@ export class ContextManager {
     }
   }
 
+  private async removeCursorAutoItems(sessionId: string): Promise<void> {
+    const items = this.items.filter(
+      (item) => item.type === "auto" && item.label.startsWith(CURSOR_CONTEXT_LABEL_PREFIX)
+    );
+    for (const item of items) {
+      await this.removeItem(sessionId, item.id);
+    }
+  }
+
   private stripContextMarker(text: string): string {
     return text.slice(CONTEXT_MESSAGE_PREFIX.length).replace(/^\n/, "");
   }
@@ -525,6 +591,25 @@ export class ContextManager {
       this.activeMarkdownPath,
       this.app.metadataCache.resolvedLinks
     );
+  }
+
+  private async refreshCursor(view?: MarkdownView | null): Promise<void> {
+    const markdownView = view ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+    await this.cursorSource.refresh(this.getCursorSnapshot(markdownView));
+  }
+
+  private getCursorSnapshot(view: MarkdownView | null): CursorContextSnapshot | null {
+    const sourcePath = view?.file?.path;
+    const cursor = view?.editor?.getCursor?.();
+    if (!sourcePath || !cursor) {
+      return null;
+    }
+
+    return {
+      sourcePath,
+      line: cursor.line + 1,
+      column: cursor.ch + 1,
+    };
   }
 
   destroy(): void {

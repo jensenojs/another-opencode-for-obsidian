@@ -48,6 +48,7 @@ src/
 │   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，触发上下文刷新
 │   ├── AutoSelectionContextSource.ts # 自动选区策略：去重、空选区重置、失败重试
 │   ├── BacklinkContextSource.ts # 反向链接策略：消费 resolvedLinks、生成 active note backlink context
+│   ├── CursorContextSource.ts # 光标位置策略：消费 active editor cursor snapshot、维护单个 cursor auto item
 │   └── WorkspaceContext.ts  # 收集打开的笔记路径 + 选中文本
 ├── ui/
 │   ├── OpenCodeView.ts      # ItemView：iframe + 基于状态的渲染
@@ -132,7 +133,9 @@ scripts/
 - `injectWorkspaceContext` 控制自动 workspace 摘要（打开笔记路径 + 当前选区）是否作为一个 auto item 维护
 - `autoAddSelectionContext` 控制 editor-change 后是否把变化后的选区追加为 manual item；它复用 `addSelectionForCurrentSession()`，不新增 ContextItem 身份字段或第二套状态源
 - `autoAddBacklinksContext` 控制 active note 的反向链接是否作为 auto item 维护；`ContextManager` 只路由 workspace/metadataCache 事件和当前文件路径，不在这里解析 backlink 图
+- `autoAddCursorContext` 控制 active note 光标位置是否作为 auto item 维护；`ContextManager` 只消费 Obsidian `MarkdownView.editor.getCursor()`，并把 0-based `EditorPosition` 转成给模型看的 1-based 行列
 - workspace auto item 由固定 label 和 source file 替换；backlink auto item 只表示当前 active note，切换 active note 时先删除既有 backlink auto item
+- cursor auto item 只表示当前 active editor 的一个光标位置，切换文件或移动光标时先删除既有 cursor auto item
 
 ### `AutoSelectionContextSource.ts` — 自动选区策略
 
@@ -147,6 +150,13 @@ scripts/
 - `changed` 和 `resolve` 事件只作为刷新触发器；反向链接事实来自 `resolvedLinks`
 - 不 import Obsidian，不调用 OpenCodeClient，不持有 ContextItem[]。新增 backlink 文本格式时先改这里的纯函数和测试
 
+### `CursorContextSource.ts` — 光标位置策略
+
+- 只处理光标位置策略：开关判断、fingerprint 去重、无 active cursor 时删除 stale auto item、失败后允许同一位置重试
+- 消费的稳定面是本地 `node_modules/obsidian/obsidian.d.ts` 暴露的 `Editor.getCursor()` 和 `EditorPosition { line, ch }`
+- source module 只接收普通对象 `{ sourcePath, line, column }`。这里的 `line` 和 `column` 已经是 1-based，转换只允许发生在 `ContextManager.getCursorSnapshot()`
+- 不 import Obsidian，不调用 OpenCodeClient，不持有 ContextItem[]。新增 cursor 文本格式时先改这里的纯函数和测试
+
 ### `WorkspaceContext.ts` — 上下文收集
 
 - 获取当前打开的笔记文件路径列表
@@ -160,6 +170,7 @@ scripts/
 - textarea 显示真实配置值；示例命令只作为 placeholder。空字符串必须保持为空，因为它表示 path 模式
 - `webViewAppearance`: 默认 `obsidian`，让 Web UI 继承 Obsidian pane 背景并使用半透明局部 surface；`opencode` 保留 OpenCode Web UI 原生风格
 - `autoAddSelectionContext`: 默认关闭。开启后，编辑器选区变化会自动追加到当前 OpenCode session；关闭后只能通过命令手动添加选区
+- `autoAddCursorContext`: 默认关闭。开启后，active note 的当前光标位置会作为单个 auto item 维护
 
 ### `RuntimeDiagnostics.ts` — 运行时观测
 
@@ -174,7 +185,7 @@ scripts/
 - 一阶真相源只读本地依赖，不联网、不静默重试、不维护手写能力清单
 - OpenCode HTTP 以 `/path/to/opencode/packages/sdk/openapi.json` 为准
 - OpenCode hooks 以 `/path/to/opencode/packages/plugin/src/index.ts` 为准
-- Obsidian workspace events 以 `node_modules/obsidian/obsidian.d.ts` 为准
+- Obsidian workspace events、`Editor.getCursor()`、`MetadataCache.resolvedLinks` 以 `node_modules/obsidian/obsidian.d.ts` 为准
 - `BridgeProtocol.ts` 只定义本项目自己的 postMessage 协议，不替 OpenCode 或 Obsidian 定义能力
 
 ### `harness theme` — Web UI 外观检查

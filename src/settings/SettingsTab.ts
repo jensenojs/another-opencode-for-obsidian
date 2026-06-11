@@ -236,6 +236,16 @@ export class OpenCodeSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Auto-add cursor position")
+      .setDesc("Automatically keeps the active note cursor position in the OpenCode context")
+      .addToggle((toggle) =>
+        toggle.setValue(this.settings.autoAddCursorContext).onChange(async (value) => {
+          this.settings.autoAddCursorContext = value;
+          await this.onSettingsChange();
+        })
+      );
+
+    new Setting(containerEl)
       .setName("Max notes in context")
       .setDesc("Limit how many open notes are included")
       .addSlider((slider) =>

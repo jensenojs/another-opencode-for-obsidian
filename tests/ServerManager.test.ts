@@ -31,6 +31,7 @@ function createTestSettings(port: number): OpenCodeSettings {
     injectWorkspaceContext: true,
     autoAddSelectionContext: false,
     autoAddBacklinksContext: false,
+    autoAddCursorContext: false,
     maxNotesInContext: 20,
     maxSelectionLength: 2000,
     customCommand: "",
