@@ -15,6 +15,31 @@ export interface ServerEndpoint {
   encodedProjectDirectory: string;
 }
 
+export type ContextItemType = "manual" | "auto" | "inbound";
+
+export interface ContextItem {
+  id: string;
+  type: ContextItemType;
+  label: string;
+  text: string;
+  sourceFile: string;
+  startLine?: number;
+  endLine?: number;
+  messageId?: string;
+  partId?: string;
+  createdAt: number;
+}
+
+export interface ContextSuggestion {
+  id: string;
+  label: string;
+  text: string;
+  sourceFile: string;
+  startLine?: number;
+  endLine?: number;
+  priority: number;
+}
+
 export interface OpenCodeSettings {
   port: number;
   hostname: string;

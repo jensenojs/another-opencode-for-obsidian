@@ -33,6 +33,7 @@ function createTestSettings(port: number): OpenCodeSettings {
     maxSelectionLength: 2000,
     customCommand: "",
     useCustomCommand: false,
+    webViewAppearance: "obsidian",
     lastSessionUrl: "",
   };
 }

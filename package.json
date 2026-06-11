@@ -5,7 +5,8 @@
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "bun run tsc -noEmit -skipLibCheck && bun run esbuild.config.mjs production",
+    "typecheck": "bun run tsc -p tsconfig.check.json -noEmit -skipLibCheck",
+    "build": "bun run typecheck && bun run esbuild.config.mjs production",
     "test": "bun test",
     "lint": "eslint .",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" \"*.{json,md,mjs,css}\"",
