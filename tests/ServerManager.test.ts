@@ -30,6 +30,7 @@ function createTestSettings(port: number): OpenCodeSettings {
     defaultViewLocation: "sidebar",
     injectWorkspaceContext: true,
     autoAddSelectionContext: false,
+    autoAddBacklinksContext: false,
     maxNotesInContext: 20,
     maxSelectionLength: 2000,
     customCommand: "",
@@ -251,6 +252,28 @@ describe("ServerManager", () => {
 
       expect(response.ok).toBe(true);
       expect(body.healthy).toBe(true);
+    }, 30000);
+
+    test("does not reuse a transient existing server", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
+      const transientServer = http.createServer((_request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ healthy: true }));
+      });
+
+      await listen(transientServer, port);
+      setTimeout(() => {
+        void close(transientServer).catch(() => {});
+      }, 100);
+
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+
+      const success = await currentManager.start();
+
+      expect(success).toBe(true);
+      expect(currentManager.getState()).toBe("running");
+      expect(currentManager.getDiagnostics().lastStartMode).toBe("path");
     }, 30000);
   });
 

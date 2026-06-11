@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { ContextItem, ContextSuggestion } from "../../src/types";
 
 type UnexpectedContextItemKeys = Extract<keyof ContextItem, "sourceKey">;
-const contextItemHasNoExtraKeys: UnexpectedContextItemKeys extends never ? true : false = true;
+const contextItemHasNoSourceKey: UnexpectedContextItemKeys extends never ? true : false = true;
 
 test("ContextItem keeps the frozen context contract", () => {
   const item = {
@@ -19,7 +19,7 @@ test("ContextItem keeps the frozen context contract", () => {
   } satisfies ContextItem;
 
   expect(item.type).toBe("manual");
-  expect(contextItemHasNoExtraKeys).toBe(true);
+  expect(contextItemHasNoSourceKey).toBe(true);
 });
 
 test("ContextSuggestion keeps the frozen suggestion contract", () => {

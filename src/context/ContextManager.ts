@@ -4,11 +4,14 @@ import { CONTEXT_MESSAGE_PREFIX, OpenCodeClient, OpenCodeMessage } from "../clie
 import { WorkspaceContext } from "./WorkspaceContext";
 import { formatWorkspaceContext } from "./ContextFormatter";
 import { AutoSelectionContextSource } from "./AutoSelectionContextSource";
+import { BacklinkContextSource } from "./BacklinkContextSource";
 import { OpenCodeView } from "../ui/OpenCodeView";
 import { ServerState } from "../server/types";
 
 const MAX_ACTIVE_CONTEXT_ITEMS = 50;
+const WORKSPACE_CONTEXT_LABEL = "Workspace context";
 const WORKSPACE_CONTEXT_SOURCE = "Obsidian workspace";
+const BACKLINK_CONTEXT_LABEL_PREFIX = "Backlinks:";
 
 type ContextManagerDeps = {
   app: App;
@@ -35,6 +38,8 @@ export class ContextManager {
   private items: ContextItem[] = [];
   private itemChangeCallbacks: Array<(items: ContextItem[]) => void> = [];
   private autoSelectionSource: AutoSelectionContextSource;
+  private backlinkSource: BacklinkContextSource;
+  private activeMarkdownPath: string | null = null;
 
   constructor(deps: ContextManagerDeps) {
     this.app = deps.app;
@@ -55,6 +60,11 @@ export class ContextManager {
           selection.selectionEndLine
         ),
     });
+    this.backlinkSource = new BacklinkContextSource({
+      isEnabled: () => this.settings.autoAddBacklinksContext,
+      addBacklinks: (params) => this.addBacklinksForCurrentSession(params.filePath, params.text),
+      removeBacklinks: () => this.removeBacklinksForCurrentSession(),
+    });
   }
 
   updateSettings(settings: OpenCodeSettings): void {
@@ -63,7 +73,11 @@ export class ContextManager {
   }
 
   private updateListeners(): void {
-    if (!this.settings.injectWorkspaceContext && !this.settings.autoAddSelectionContext) {
+    if (
+      !this.settings.injectWorkspaceContext &&
+      !this.settings.autoAddSelectionContext &&
+      !this.settings.autoAddBacklinksContext
+    ) {
       this.clearListeners();
       return;
     }
@@ -74,11 +88,15 @@ export class ContextManager {
 
     const activeLeafRef = this.app.workspace.on("active-leaf-change", (leaf) => {
       if (leaf?.view instanceof MarkdownView) {
+        this.activeMarkdownPath = leaf.view.file?.path ?? null;
         this.workspaceContext.trackViewSelection(leaf.view);
+        void this.refreshBacklinks();
       }
       this.scheduleRefresh(0);
     });
-    const fileOpenRef = this.app.workspace.on("file-open", () => {
+    const fileOpenRef = this.app.workspace.on("file-open", (file) => {
+      this.activeMarkdownPath = file?.path ?? null;
+      void this.refreshBacklinks();
       this.scheduleRefresh();
     });
     const layoutChangeRef = this.app.workspace.on("layout-change", () => {
@@ -86,13 +104,28 @@ export class ContextManager {
     });
     const editorChangeRef = this.app.workspace.on("editor-change", (_editor, view) => {
       if (view instanceof MarkdownView) {
+        this.activeMarkdownPath = view.file?.path ?? null;
         const selection = this.workspaceContext.trackViewSelection(view);
         void this.autoSelectionSource.handleSelection(selection);
+        void this.refreshBacklinks();
       }
       this.scheduleRefresh(500);
     });
+    const metadataChangeRef = this.app.metadataCache.on("changed", () => {
+      void this.refreshBacklinks();
+    });
+    const metadataResolveRef = this.app.metadataCache.on("resolve", () => {
+      void this.refreshBacklinks();
+    });
 
-    this.contextEventRefs = [activeLeafRef, fileOpenRef, layoutChangeRef, editorChangeRef];
+    this.contextEventRefs = [
+      activeLeafRef,
+      fileOpenRef,
+      layoutChangeRef,
+      editorChangeRef,
+      metadataChangeRef,
+      metadataResolveRef,
+    ];
     this.contextEventRefs.forEach((ref) => this.registerEvent(ref));
   }
 
@@ -106,6 +139,8 @@ export class ContextManager {
       this.contextRefreshTimer = null;
     }
     this.autoSelectionSource.reset();
+    this.backlinkSource.reset();
+    this.activeMarkdownPath = null;
   }
 
   private scheduleRefresh(delayMs: number = 300): void {
@@ -220,6 +255,69 @@ export class ContextManager {
     return this.addManual(sessionId, text, sourceFile, startLine, endLine);
   }
 
+  async addAutoForCurrentSession(params: {
+    label: string;
+    text: string;
+    sourceFile: string;
+  }): Promise<ContextItem | null> {
+    const iframeUrl = this.getCachedIframeUrl();
+    if (!iframeUrl) {
+      return null;
+    }
+
+    const sessionId = this.client.resolveSessionId(iframeUrl);
+    if (!sessionId) {
+      return null;
+    }
+
+    return this.addItem({
+      sessionId,
+      type: "auto",
+      label: params.label,
+      text: params.text,
+      sourceFile: params.sourceFile,
+    });
+  }
+
+  private async addBacklinksForCurrentSession(
+    filePath: string,
+    text: string
+  ): Promise<ContextItem | null> {
+    const iframeUrl = this.getCachedIframeUrl();
+    if (!iframeUrl) {
+      return null;
+    }
+
+    const sessionId = this.client.resolveSessionId(iframeUrl);
+    if (!sessionId) {
+      return null;
+    }
+
+    await this.removeBacklinkAutoItems(sessionId);
+    return this.addItem({
+      sessionId,
+      type: "auto",
+      label: `${BACKLINK_CONTEXT_LABEL_PREFIX} ${filePath}`,
+      text,
+      sourceFile: filePath,
+    });
+  }
+
+  private async removeBacklinksForCurrentSession(): Promise<boolean> {
+    const iframeUrl = this.getCachedIframeUrl();
+    if (!iframeUrl) {
+      return false;
+    }
+
+    const sessionId = this.client.resolveSessionId(iframeUrl);
+    if (!sessionId) {
+      return false;
+    }
+
+    await this.removeBacklinkAutoItems(sessionId);
+    return true;
+  }
+
   async removeItem(sessionId: string, itemId: string): Promise<boolean> {
     const item = this.items.find((candidate) => candidate.id === itemId);
     if (!item) {
@@ -296,14 +394,14 @@ export class ContextManager {
     });
 
     if (!contextText) {
-      await this.removeAutoItem(sessionId, WORKSPACE_CONTEXT_SOURCE);
+      await this.removeAutoItem(sessionId, WORKSPACE_CONTEXT_LABEL, WORKSPACE_CONTEXT_SOURCE);
       return;
     }
 
     await this.addItem({
       sessionId,
       type: "auto",
-      label: "Workspace context",
+      label: WORKSPACE_CONTEXT_LABEL,
       text: contextText,
       sourceFile: WORKSPACE_CONTEXT_SOURCE,
     });
@@ -324,7 +422,7 @@ export class ContextManager {
     }
 
     if (params.type === "auto") {
-      await this.removeAutoItem(params.sessionId, params.sourceFile);
+      await this.removeAutoItem(params.sessionId, params.label, params.sourceFile);
     }
 
     if (this.items.length >= MAX_ACTIVE_CONTEXT_ITEMS) {
@@ -375,9 +473,22 @@ export class ContextManager {
       });
   }
 
-  private async removeAutoItem(sessionId: string, sourceFile: string): Promise<void> {
+  private async removeAutoItem(
+    sessionId: string,
+    label: string,
+    sourceFile: string
+  ): Promise<void> {
     const items = this.items.filter(
-      (item) => item.type === "auto" && item.sourceFile === sourceFile
+      (item) => item.type === "auto" && item.label === label && item.sourceFile === sourceFile
+    );
+    for (const item of items) {
+      await this.removeItem(sessionId, item.id);
+    }
+  }
+
+  private async removeBacklinkAutoItems(sessionId: string): Promise<void> {
+    const items = this.items.filter(
+      (item) => item.type === "auto" && item.label.startsWith(BACKLINK_CONTEXT_LABEL_PREFIX)
     );
     for (const item of items) {
       await this.removeItem(sessionId, item.id);
@@ -407,6 +518,13 @@ export class ContextManager {
       return `${sourceFile}:${startLine}`;
     }
     return `${sourceFile}:${startLine}-${endLine}`;
+  }
+
+  private async refreshBacklinks(): Promise<void> {
+    await this.backlinkSource.refresh(
+      this.activeMarkdownPath,
+      this.app.metadataCache.resolvedLinks
+    );
   }
 
   destroy(): void {

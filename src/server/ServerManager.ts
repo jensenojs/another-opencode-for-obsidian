@@ -47,6 +47,7 @@ export interface ServerDiagnostics {
 }
 
 const MAX_PROCESS_OUTPUT_CHARS = 4000;
+const EXISTING_SERVER_STABILITY_CHECK_MS = 1000;
 
 export class ServerManager extends EventEmitter {
   private process: ChildProcess | null = null;
@@ -145,7 +146,7 @@ export class ServerManager extends EventEmitter {
 
     const endpoint = this.getEndpoint();
 
-    if (await this.checkServerHealth()) {
+    if (await this.checkExistingServerIsStable()) {
       this.logger.info("server already running", {
         port: this.settings.port,
         hostname: endpoint.hostname,
@@ -478,6 +479,24 @@ export class ServerManager extends EventEmitter {
         resolve(false);
       });
     });
+  }
+
+  private async checkExistingServerIsStable(): Promise<boolean> {
+    if (!(await this.checkServerHealth())) {
+      return false;
+    }
+
+    await this.sleep(EXISTING_SERVER_STABILITY_CHECK_MS);
+    if (await this.checkServerHealth()) {
+      return true;
+    }
+
+    this.logger.warn("existing server disappeared before reuse", {
+      healthError: this.lastHealthError,
+      port: this.settings.port,
+      hostname: this.settings.hostname,
+    });
+    return false;
   }
 
   private async waitForServerOrExit(timeoutMs: number): Promise<boolean> {

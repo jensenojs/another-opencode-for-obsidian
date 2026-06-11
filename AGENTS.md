@@ -47,6 +47,7 @@ src/
 ├── context/
 │   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，触发上下文刷新
 │   ├── AutoSelectionContextSource.ts # 自动选区策略：去重、空选区重置、失败重试
+│   ├── BacklinkContextSource.ts # 反向链接策略：消费 resolvedLinks、生成 active note backlink context
 │   └── WorkspaceContext.ts  # 收集打开的笔记路径 + 选中文本
 ├── ui/
 │   ├── OpenCodeView.ts      # ItemView：iframe + 基于状态的渲染
@@ -95,7 +96,7 @@ scripts/
   1. **剥离 Content-Security-Policy 头**——否则注入的脚本会被浏览器阻止执行
   2. **注入键盘监听脚本**——拦截 iframe 内的 `Cmd+L` / `Ctrl+L`，通过 `BridgeProtocol.ts` 定义的 `postMessage` 协议发送到父窗口
 - `webViewAppearance === "obsidian"` 时读取 Obsidian 当前 CSS 变量，并在 proxied HTML 里覆盖 OpenCode 的设计 token
-- Obsidian 外观模式的默认行为是让 OpenCode 页面底色使用 Obsidian 运行时可见背景；输入框、浮层、会话面板等局部 surface 使用 Obsidian 变量派生出的半透明 token。透明主题下的可见背景可能在 `.app-container`，不一定等于 `--background-primary`。先前的纯透明根背景在 DOM computed style 层成立，但不能保证 Electron iframe 的可见合成结果继承 Obsidian 背景。
+- Obsidian 外观模式的默认行为是让 OpenCode 页面底色使用 Obsidian `--background-primary`，输入框、浮层、会话面板等局部 surface 使用 Obsidian 变量派生出的半透明 token。只有 Obsidian CSS 变量缺失时才退回 `.app-container` 的 computed background；代码消费稳定变量面，不消费 Obsidian 或 OpenCode 的内部组件 class。
 - 主题桥接的真相源是稳定变量面:
   - Obsidian CSS variables: https://docs.obsidian.md/Reference/CSS+variables/CSS+variables
   - OpenCode tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/theme.css
@@ -130,12 +131,21 @@ scripts/
 - 调用 `WorkspaceContext` 收集数据，通过 `OpenCodeClient` 发送到 opencode 会话
 - `injectWorkspaceContext` 控制自动 workspace 摘要（打开笔记路径 + 当前选区）是否作为一个 auto item 维护
 - `autoAddSelectionContext` 控制 editor-change 后是否把变化后的选区追加为 manual item；它复用 `addSelectionForCurrentSession()`，不新增 ContextItem 身份字段或第二套状态源
+- `autoAddBacklinksContext` 控制 active note 的反向链接是否作为 auto item 维护；`ContextManager` 只路由 workspace/metadataCache 事件和当前文件路径，不在这里解析 backlink 图
+- workspace auto item 由固定 label 和 source file 替换；backlink auto item 只表示当前 active note，切换 active note 时先删除既有 backlink auto item
 
 ### `AutoSelectionContextSource.ts` — 自动选区策略
 
 - 只处理自动选区策略：开关判断、fingerprint 去重、空选区重置、失败后允许同一选区重试
 - 不持有 ContextItem[]，不调用 OpenCodeClient，不读取 Obsidian workspace
 - 自动选区只在成功创建 ContextItem 后记录 fingerprint。没有 active session 或 OpenCode 拒收时，后续相同选区仍可重试
+
+### `BacklinkContextSource.ts` — 反向链接策略
+
+- 只处理反向链接策略：开关判断、从 `resolvedLinks` 反查 source notes、fingerprint 去重、无 backlink 时删除 stale auto item
+- 消费的稳定面是本地 `node_modules/obsidian/obsidian.d.ts` 暴露的 `MetadataCache.resolvedLinks: Record<string, Record<string, number>>`
+- `changed` 和 `resolve` 事件只作为刷新触发器；反向链接事实来自 `resolvedLinks`
+- 不 import Obsidian，不调用 OpenCodeClient，不持有 ContextItem[]。新增 backlink 文本格式时先改这里的纯函数和测试
 
 ### `WorkspaceContext.ts` — 上下文收集
 

@@ -50,6 +50,7 @@ export interface OpenCodeSettings {
   defaultViewLocation: ViewLocation;
   injectWorkspaceContext: boolean;
   autoAddSelectionContext: boolean;
+  autoAddBacklinksContext: boolean;
   maxNotesInContext: number;
   maxSelectionLength: number;
   customCommand: string;
@@ -71,6 +72,7 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
   defaultViewLocation: "sidebar",
   injectWorkspaceContext: false,
   autoAddSelectionContext: false,
+  autoAddBacklinksContext: false,
   maxNotesInContext: 20,
   maxSelectionLength: 2000,
   customCommand: "",

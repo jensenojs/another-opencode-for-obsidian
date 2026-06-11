@@ -38,6 +38,7 @@ function createSettings(): OpenCodeSettings {
     defaultViewLocation: "sidebar",
     injectWorkspaceContext: false,
     autoAddSelectionContext: false,
+    autoAddBacklinksContext: false,
     maxNotesInContext: 20,
     maxSelectionLength: 2000,
     customCommand: "",
@@ -49,6 +50,10 @@ function createSettings(): OpenCodeSettings {
 
 function createApp(): App {
   return {
+    metadataCache: {
+      on: () => ({}),
+      resolvedLinks: {},
+    },
     workspace: {
       on: () => ({}),
       offref: () => {},
@@ -60,9 +65,18 @@ function createApp(): App {
 function createAppWithEvents(): {
   app: App;
   handlers: Record<string, (...args: unknown[]) => void>;
+  resolvedLinks: Record<string, Record<string, number>>;
 } {
   const handlers: Record<string, (...args: unknown[]) => void> = {};
+  const resolvedLinks: Record<string, Record<string, number>> = {};
   const app = {
+    metadataCache: {
+      on: (event: string, handler: (...args: unknown[]) => void) => {
+        handlers[`metadata:${event}`] = handler;
+        return {};
+      },
+      resolvedLinks,
+    },
     workspace: {
       on: (event: string, handler: (...args: unknown[]) => void) => {
         handlers[event] = handler;
@@ -73,7 +87,7 @@ function createAppWithEvents(): {
     },
   } as unknown as App;
 
-  return { app, handlers };
+  return { app, handlers, resolvedLinks };
 }
 
 function createMarkdownView(
@@ -268,6 +282,95 @@ describe("ContextManager", () => {
     expect(manager.getItems()).toEqual([]);
   });
 
+  test("auto-adds resolved backlinks for the active note when enabled", async () => {
+    const settings = createSettings();
+    settings.autoAddBacklinksContext = true;
+    const { app, handlers, resolvedLinks } = createAppWithEvents();
+    resolvedLinks["source.md"] = { "target.md": 2 };
+    const calls: Array<{ sessionId: string; text: string }> = [];
+    const manager = new ContextManager({
+      app,
+      settings,
+      client: {
+        resolveSessionId: () => "ses_1",
+        addContextMessage: async (sessionId: string, text: string) => {
+          calls.push({ sessionId, text });
+          return { messageId: `msg_${calls.length}`, partId: `prt_${calls.length}` };
+        },
+        ignorePart: async () => true,
+      } as unknown as OpenCodeClient,
+      getServerState: () => "running",
+      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
+      setCachedIframeUrl: () => {},
+      registerEvent: () => {},
+    });
+
+    manager.updateSettings(settings);
+    handlers["file-open"]?.({ path: "target.md" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    handlers["metadata:resolve"]?.({ path: "source.md" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls).toEqual([
+      {
+        sessionId: "ses_1",
+        text: `<obsidian-backlinks file="target.md">
+- source.md (2)
+</obsidian-backlinks>`,
+      },
+    ]);
+    expect(manager.getItems()).toMatchObject([
+      {
+        type: "auto",
+        label: "Backlinks: target.md",
+        sourceFile: "target.md",
+      },
+    ]);
+  });
+
+  test("keeps only one active backlink auto item", async () => {
+    const settings = createSettings();
+    settings.autoAddBacklinksContext = true;
+    const { app, handlers, resolvedLinks } = createAppWithEvents();
+    resolvedLinks["source.md"] = { "first.md": 1, "second.md": 1 };
+    const ignored: string[] = [];
+    let messageIndex = 0;
+    const manager = new ContextManager({
+      app,
+      settings,
+      client: {
+        resolveSessionId: () => "ses_1",
+        addContextMessage: async () => {
+          messageIndex += 1;
+          return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
+        },
+        ignorePart: async (_sessionId: string, messageId: string, partId: string) => {
+          ignored.push(`${messageId}:${partId}`);
+          return true;
+        },
+      } as unknown as OpenCodeClient,
+      getServerState: () => "running",
+      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
+      setCachedIframeUrl: () => {},
+      registerEvent: () => {},
+    });
+
+    manager.updateSettings(settings);
+    handlers["file-open"]?.({ path: "first.md" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    handlers["file-open"]?.({ path: "second.md" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ignored).toEqual(["msg_1:prt_1"]);
+    expect(manager.getItems()).toMatchObject([
+      {
+        type: "auto",
+        label: "Backlinks: second.md",
+        sourceFile: "second.md",
+      },
+    ]);
+  });
+
   test("removes context only after the remote part is ignored", async () => {
     const ignored: string[] = [];
     const manager = createManager({
@@ -299,7 +402,7 @@ describe("ContextManager", () => {
     expect(manager.getItems()).toEqual([item]);
   });
 
-  test("replaces workspace auto context through its source file identity", async () => {
+  test("replaces workspace auto context through its public identity", async () => {
     const ignored: string[] = [];
     let messageIndex = 0;
     const manager = createManager({
@@ -308,7 +411,7 @@ describe("ContextManager", () => {
         messageIndex += 1;
         return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
       },
-      ignorePart: async (_sessionId, messageId, partId) => {
+      ignorePart: async (_sessionId: string, messageId: string, partId: string) => {
         ignored.push(`${messageId}:${partId}`);
         return true;
       },

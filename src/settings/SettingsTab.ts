@@ -226,6 +226,16 @@ export class OpenCodeSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Auto-add backlinks")
+      .setDesc("Automatically adds resolved backlinks for the active note to the OpenCode context")
+      .addToggle((toggle) =>
+        toggle.setValue(this.settings.autoAddBacklinksContext).onChange(async (value) => {
+          this.settings.autoAddBacklinksContext = value;
+          await this.onSettingsChange();
+        })
+      );
+
+    new Setting(containerEl)
       .setName("Max notes in context")
       .setDesc("Limit how many open notes are included")
       .addSlider((slider) =>

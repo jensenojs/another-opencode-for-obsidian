@@ -28,7 +28,9 @@ const OBSIDIAN_FALLBACKS: ObsidianThemeValues = {
   fontInterface: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 };
 
-// This bridge consumes both apps' theme-token surfaces:
+// Keep this bridge on documented token surfaces. Obsidian owns the source
+// values, OpenCode owns the destination token names; component class selectors
+// in either app are intentionally outside this contract.
 // Obsidian CSS variables: https://docs.obsidian.md/Reference/CSS+variables/CSS+variables
 // OpenCode tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/theme.css
 // Tailwind mapping: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/tailwind/colors.css
@@ -227,6 +229,15 @@ function resolveObsidianPageBackground(
   source: HTMLElement,
   sourceStyles: CSSStyleDeclaration
 ): string {
+  const backgroundPrimary = cssVar(
+    sourceStyles,
+    "--background-primary",
+    OBSIDIAN_FALLBACKS.backgroundPrimary
+  );
+  if (isVisibleBackground(backgroundPrimary)) {
+    return backgroundPrimary;
+  }
+
   const appContainer = source.ownerDocument.querySelector(".app-container");
   if (appContainer instanceof HTMLElement) {
     const appBackground = getComputedStyle(appContainer).backgroundColor.trim();
