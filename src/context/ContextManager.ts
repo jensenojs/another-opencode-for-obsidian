@@ -2,6 +2,7 @@ import { App, EventRef, MarkdownView, WorkspaceLeaf } from "obsidian";
 import { OpenCodeSettings, OPENCODE_VIEW_TYPE } from "../types";
 import { OpenCodeClient } from "../client/OpenCodeClient";
 import { WorkspaceContext } from "./WorkspaceContext";
+import { formatWorkspaceContext } from "./ContextFormatter";
 import { OpenCodeView } from "../ui/OpenCodeView";
 import { ServerState } from "../server/types";
 
@@ -170,10 +171,10 @@ export class ContextManager {
 
     this.setCachedIframeUrl(iframeUrl);
 
-    const { contextText } = this.workspaceContext.gatherContext(
-      this.settings.maxNotesInContext,
-      this.settings.maxSelectionLength
-    );
+    const contextText = formatWorkspaceContext(this.workspaceContext.gatherContext(), {
+      maxNotes: this.settings.maxNotesInContext,
+      maxSelectionLength: this.settings.maxSelectionLength,
+    });
 
     await this.client.updateContext({
       sessionId,

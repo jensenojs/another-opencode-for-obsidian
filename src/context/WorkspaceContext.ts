@@ -1,15 +1,5 @@
 import { App, MarkdownView } from "obsidian";
-
-type SelectedTextContext = {
-  text: string;
-  sourcePath: string;
-};
-
-type WorkspaceContextSnapshot = {
-  openNotePaths: string[];
-  selection: SelectedTextContext | null;
-  contextText: string | null;
-};
+import type { SelectedTextContext, WorkspaceContextSnapshot } from "./ContextFormatter";
 
 export class WorkspaceContext {
   private app: App;
@@ -36,7 +26,7 @@ export class WorkspaceContext {
     }
   }
 
-  gatherContext(maxNotes: number, maxSelectionLength: number): WorkspaceContextSnapshot {
+  gatherContext(): WorkspaceContextSnapshot {
     const leaves = this.app.workspace.getLeavesOfType("markdown");
     const paths = new Set<string>();
 
@@ -48,7 +38,7 @@ export class WorkspaceContext {
       }
     }
 
-    const openNotePaths = Array.from(paths).slice(0, Math.max(0, maxNotes));
+    const openNotePaths = Array.from(paths);
     const view = this.app.workspace.getActiveViewOfType(MarkdownView) ?? this.lastMarkdownView;
 
     this.trackViewSelection(view);
@@ -67,40 +57,9 @@ export class WorkspaceContext {
       selectionContext = this.lastSelection;
     }
 
-    if (selectionContext && selectionContext.text.length > maxSelectionLength) {
-      selectionContext = {
-        ...selectionContext,
-        text: selectionContext.text.slice(0, maxSelectionLength) + "... [truncated]",
-      };
-    }
-
-    let contextText: string | null = null;
-    if (openNotePaths.length > 0 || selectionContext) {
-      const lines: string[] = ["<obsidian-context>"];
-
-      if (openNotePaths.length > 0) {
-        lines.push("Currently open notes in Obsidian:");
-        for (const path of openNotePaths) {
-          lines.push(`- ${path}`);
-        }
-      }
-
-      if (selectionContext) {
-        lines.push("");
-        lines.push(`Selected text (from ${selectionContext.sourcePath}):`);
-        lines.push('"""');
-        lines.push(selectionContext.text);
-        lines.push('"""');
-      }
-
-      lines.push("</obsidian-context>");
-      contextText = lines.join("\n");
-    }
-
     return {
       openNotePaths,
       selection: selectionContext,
-      contextText,
     };
   }
 }
