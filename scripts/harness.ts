@@ -568,6 +568,12 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
         runtimeThemeDiagnostics ??
         "No iframe diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
     });
+    checks.push(
+      ...runtimeThemeChecks(
+        runtimeThemeDiagnostics,
+        tokens.rootBackground["--opencode-obsidian-page-background"]
+      )
+    );
     checks.push({
       name: "runtime iframe composition diagnostics received",
       ok: Boolean(runtimeIframeDiagnostics),
@@ -1384,6 +1390,81 @@ function emptyThemeTokens(): ThemeReport["tokens"] {
     surfaces: {},
     textAndBorder: {},
   };
+}
+
+function runtimeThemeChecks(
+  diagnostics: unknown,
+  expectedPageBackground: string | null
+): ThemeReport["checks"] {
+  if (!diagnostics || !expectedPageBackground) {
+    return [];
+  }
+
+  type RuntimeBackgroundSample = {
+    tag: unknown;
+    id: unknown;
+    className?: string | null;
+    dataComponent?: unknown;
+    backgroundColor: string | null;
+    backgroundImage: string | null;
+    area?: unknown;
+  };
+
+  const roots = Array.isArray((diagnostics as any).roots) ? (diagnostics as any).roots : [];
+  const rootBackgrounds: RuntimeBackgroundSample[] = roots.map((root: any) => ({
+    tag: root?.tag ?? null,
+    id: root?.id ?? null,
+    backgroundColor: typeof root?.backgroundColor === "string" ? root.backgroundColor : null,
+    backgroundImage: typeof root?.backgroundImage === "string" ? root.backgroundImage : null,
+  }));
+
+  const viewport = (diagnostics as any).viewport;
+  const viewportArea =
+    typeof viewport?.width === "number" && typeof viewport?.height === "number"
+      ? viewport.width * viewport.height
+      : 0;
+  const largeBackgrounds: RuntimeBackgroundSample[] = Array.isArray(
+    (diagnostics as any).opaqueBackgrounds
+  )
+    ? (diagnostics as any).opaqueBackgrounds
+        .filter((item: any) => typeof item?.area === "number" && item.area >= viewportArea * 0.08)
+        .map((item: any) => ({
+          tag: item?.tag ?? null,
+          id: item?.id ?? null,
+          className: typeof item?.className === "string" ? item.className : null,
+          dataComponent: item?.dataComponent ?? null,
+          backgroundColor: typeof item?.backgroundColor === "string" ? item.backgroundColor : null,
+          backgroundImage: typeof item?.backgroundImage === "string" ? item.backgroundImage : null,
+          area: item?.area ?? null,
+        }))
+    : [];
+
+  return [
+    {
+      name: "runtime root backgrounds use Obsidian page background",
+      ok:
+        rootBackgrounds.length > 0 &&
+        rootBackgrounds.every((item) => item.backgroundColor === expectedPageBackground),
+      detail: {
+        expectedPageBackground,
+        roots: rootBackgrounds,
+      },
+    },
+    {
+      name: "runtime large backgrounds use Obsidian page background",
+      ok:
+        largeBackgrounds.length > 0 &&
+        largeBackgrounds.every(
+          (item) =>
+            item.backgroundColor === expectedPageBackground ||
+            Boolean(item.backgroundImage?.includes(expectedPageBackground))
+        ),
+      detail: {
+        expectedPageBackground,
+        largeBackgrounds,
+      },
+    },
+  ];
 }
 
 async function probeHealth(

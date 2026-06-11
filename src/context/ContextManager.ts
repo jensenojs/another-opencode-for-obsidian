@@ -1,10 +1,13 @@
 import { App, EventRef, MarkdownView, WorkspaceLeaf } from "obsidian";
-import { OpenCodeSettings, OPENCODE_VIEW_TYPE } from "../types";
-import { OpenCodeClient } from "../client/OpenCodeClient";
+import { ContextItem, OpenCodeSettings, OPENCODE_VIEW_TYPE } from "../types";
+import { CONTEXT_MESSAGE_PREFIX, OpenCodeClient, OpenCodeMessage } from "../client/OpenCodeClient";
 import { WorkspaceContext } from "./WorkspaceContext";
 import { formatWorkspaceContext } from "./ContextFormatter";
 import { OpenCodeView } from "../ui/OpenCodeView";
 import { ServerState } from "../server/types";
+
+const MAX_ACTIVE_CONTEXT_ITEMS = 50;
+const WORKSPACE_CONTEXT_SOURCE = "Obsidian workspace";
 
 type ContextManagerDeps = {
   app: App;
@@ -28,6 +31,7 @@ export class ContextManager {
 
   private contextEventRefs: EventRef[] = [];
   private contextRefreshTimer: number | null = null;
+  private items: ContextItem[] = [];
 
   constructor(deps: ContextManagerDeps) {
     this.app = deps.app;
@@ -149,6 +153,59 @@ export class ContextManager {
     await this.refreshContext(leaf);
   }
 
+  getItems(): ContextItem[] {
+    return [...this.items];
+  }
+
+  async addManual(
+    sessionId: string,
+    text: string,
+    sourceFile: string,
+    startLine?: number,
+    endLine?: number
+  ): Promise<ContextItem | null> {
+    return this.addItem({
+      sessionId,
+      type: "manual",
+      label: this.formatContextLabel(sourceFile, startLine, endLine),
+      text,
+      sourceFile,
+      startLine,
+      endLine,
+    });
+  }
+
+  async removeItem(sessionId: string, itemId: string): Promise<boolean> {
+    const item = this.items.find((candidate) => candidate.id === itemId);
+    if (!item) {
+      return false;
+    }
+
+    if (item.messageId && item.partId) {
+      const ignored = await this.client.ignorePart(sessionId, item.messageId, item.partId);
+      if (!ignored) {
+        return false;
+      }
+    }
+
+    this.items = this.items.filter((candidate) => candidate.id !== itemId);
+    return true;
+  }
+
+  async restoreFromServer(sessionId: string): Promise<ContextItem[]> {
+    const messages = await this.client.listSessionMessages(sessionId);
+    if (!messages) {
+      this.items = [];
+      return this.getItems();
+    }
+
+    this.items = messages
+      .flatMap((message) => this.restoreItemsFromMessage(message))
+      .slice(0, MAX_ACTIVE_CONTEXT_ITEMS);
+
+    return this.getItems();
+  }
+
   private async refreshContext(leaf: WorkspaceLeaf): Promise<void> {
     if (!this.settings.injectWorkspaceContext) {
       return;
@@ -176,9 +233,110 @@ export class ContextManager {
       maxSelectionLength: this.settings.maxSelectionLength,
     });
 
-    if (contextText) {
-      await this.client.addContextMessage(sessionId, contextText);
+    if (!contextText) {
+      await this.removeAutoItem(sessionId, WORKSPACE_CONTEXT_SOURCE);
+      return;
     }
+
+    await this.addItem({
+      sessionId,
+      type: "auto",
+      label: "Workspace context",
+      text: contextText,
+      sourceFile: WORKSPACE_CONTEXT_SOURCE,
+    });
+  }
+
+  private async addItem(params: {
+    sessionId: string;
+    type: ContextItem["type"];
+    label: string;
+    text: string;
+    sourceFile: string;
+    startLine?: number;
+    endLine?: number;
+  }): Promise<ContextItem | null> {
+    const text = params.text.trim();
+    if (!text) {
+      return null;
+    }
+
+    if (params.type === "auto") {
+      await this.removeAutoItem(params.sessionId, params.sourceFile);
+    }
+
+    if (this.items.length >= MAX_ACTIVE_CONTEXT_ITEMS) {
+      return null;
+    }
+
+    const ref = await this.client.addContextMessage(params.sessionId, text);
+    if (!ref) {
+      return null;
+    }
+
+    const item: ContextItem = {
+      id: this.createItemId(ref.messageId, ref.partId),
+      type: params.type,
+      label: params.label,
+      text,
+      sourceFile: params.sourceFile,
+      startLine: params.startLine,
+      endLine: params.endLine,
+      messageId: ref.messageId,
+      partId: ref.partId,
+      createdAt: Date.now(),
+    };
+
+    this.items = [...this.items, item];
+    return item;
+  }
+
+  private restoreItemsFromMessage(message: OpenCodeMessage): ContextItem[] {
+    return message.parts
+      .filter((part) => part.type === "text")
+      .filter((part) => typeof part.text === "string")
+      .filter((part) => part.text!.startsWith(CONTEXT_MESSAGE_PREFIX))
+      .filter((part) => !part.ignored)
+      .map((part) => {
+        const text = this.stripContextMarker(part.text!);
+        return {
+          id: this.createItemId(message.info.id, part.id),
+          type: "manual",
+          label: "Restored context",
+          text,
+          sourceFile: "OpenCode session",
+          messageId: message.info.id,
+          partId: part.id,
+          createdAt: part.time?.start ?? Date.now(),
+        };
+      });
+  }
+
+  private async removeAutoItem(sessionId: string, sourceFile: string): Promise<void> {
+    const items = this.items.filter(
+      (item) => item.type === "auto" && item.sourceFile === sourceFile
+    );
+    for (const item of items) {
+      await this.removeItem(sessionId, item.id);
+    }
+  }
+
+  private stripContextMarker(text: string): string {
+    return text.slice(CONTEXT_MESSAGE_PREFIX.length).replace(/^\n/, "");
+  }
+
+  private createItemId(messageId: string, partId: string): string {
+    return `${messageId}:${partId}`;
+  }
+
+  private formatContextLabel(sourceFile: string, startLine?: number, endLine?: number): string {
+    if (startLine === undefined || endLine === undefined) {
+      return sourceFile;
+    }
+    if (startLine === endLine) {
+      return `${sourceFile}:${startLine}`;
+    }
+    return `${sourceFile}:${startLine}-${endLine}`;
   }
 
   destroy(): void {
