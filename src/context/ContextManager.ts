@@ -32,6 +32,7 @@ export class ContextManager {
   private contextEventRefs: EventRef[] = [];
   private contextRefreshTimer: number | null = null;
   private items: ContextItem[] = [];
+  private itemChangeCallbacks: Array<(items: ContextItem[]) => void> = [];
 
   constructor(deps: ContextManagerDeps) {
     this.app = deps.app;
@@ -157,6 +158,17 @@ export class ContextManager {
     return [...this.items];
   }
 
+  onItemsChanged(callback: (items: ContextItem[]) => void): () => void {
+    this.itemChangeCallbacks.push(callback);
+    callback(this.getItems());
+    return () => {
+      const index = this.itemChangeCallbacks.indexOf(callback);
+      if (index >= 0) {
+        this.itemChangeCallbacks.splice(index, 1);
+      }
+    };
+  }
+
   async addManual(
     sessionId: string,
     text: string,
@@ -189,13 +201,29 @@ export class ContextManager {
     }
 
     this.items = this.items.filter((candidate) => candidate.id !== itemId);
+    this.emitItemsChanged();
     return true;
+  }
+
+  async removeItemForCurrentSession(itemId: string): Promise<boolean> {
+    const iframeUrl = this.getCachedIframeUrl();
+    if (!iframeUrl) {
+      return false;
+    }
+
+    const sessionId = this.client.resolveSessionId(iframeUrl);
+    if (!sessionId) {
+      return false;
+    }
+
+    return this.removeItem(sessionId, itemId);
   }
 
   async restoreFromServer(sessionId: string): Promise<ContextItem[]> {
     const messages = await this.client.listSessionMessages(sessionId);
     if (!messages) {
       this.items = [];
+      this.emitItemsChanged();
       return this.getItems();
     }
 
@@ -203,6 +231,7 @@ export class ContextManager {
       .flatMap((message) => this.restoreItemsFromMessage(message))
       .slice(0, MAX_ACTIVE_CONTEXT_ITEMS);
 
+    this.emitItemsChanged();
     return this.getItems();
   }
 
@@ -288,6 +317,7 @@ export class ContextManager {
     };
 
     this.items = [...this.items, item];
+    this.emitItemsChanged();
     return item;
   }
 
@@ -327,6 +357,13 @@ export class ContextManager {
 
   private createItemId(messageId: string, partId: string): string {
     return `${messageId}:${partId}`;
+  }
+
+  private emitItemsChanged(): void {
+    const items = this.getItems();
+    for (const callback of this.itemChangeCallbacks) {
+      callback(items);
+    }
   }
 
   private formatContextLabel(sourceFile: string, startLine?: number, endLine?: number): string {

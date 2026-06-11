@@ -12,6 +12,7 @@ import { ServerDiagnostics, ServerManager, ServerState } from "./server/ServerMa
 import { registerOpenCodeIcons, OPENCODE_ICON_NAME } from "./icons";
 import { OpenCodeClient } from "./client/OpenCodeClient";
 import { ContextManager } from "./context/ContextManager";
+import { ContextStatusBar } from "./context/ContextStatusBar";
 import { ExecutableResolver } from "./server/ExecutableResolver";
 import { OpenCodeProxy } from "./proxy/OpenCodeProxy";
 import {
@@ -29,6 +30,7 @@ export default class OpenCodePlugin extends Plugin {
   private stateChangeCallbacks: Array<(state: ServerState) => void> = [];
   private openCodeClient: OpenCodeClient;
   private contextManager: ContextManager;
+  private contextStatusBar: ContextStatusBar;
   private viewManager: ViewManager;
   private cachedIframeUrl: string | null = null;
   private lastBaseUrl: string | null = null;
@@ -111,6 +113,13 @@ export default class OpenCodePlugin extends Plugin {
       getCachedIframeUrl: () => this.cachedIframeUrl,
       setCachedIframeUrl: (url) => this.setCachedIframeUrl(url),
       registerEvent: (ref) => this.registerEvent(ref),
+    });
+    this.contextStatusBar = new ContextStatusBar({
+      addStatusBarItem: () => this.addStatusBarItem(),
+      getItems: () => this.contextManager.getItems(),
+      onItemsChanged: (callback) => this.contextManager.onItemsChanged(callback),
+      openItem: (item) => this.app.workspace.openLinkText(item.sourceFile, "", false),
+      removeItem: (itemId) => this.contextManager.removeItemForCurrentSession(itemId),
     });
 
     this.viewManager = new ViewManager({
@@ -197,6 +206,7 @@ export default class OpenCodePlugin extends Plugin {
   async onunload(): Promise<void> {
     this.writeStatus("unloading");
     this.openCodeProxy?.stop();
+    this.contextStatusBar?.destroy();
     this.contextManager.destroy();
     await this.stopServer();
     this.app.workspace.detachLeavesOfType(OPENCODE_VIEW_TYPE);

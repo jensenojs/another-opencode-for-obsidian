@@ -124,6 +124,47 @@ describe("ContextManager", () => {
     expect(manager.getItems()).toEqual([item]);
   });
 
+  test("replaces workspace auto context through its source file identity", async () => {
+    const ignored: string[] = [];
+    let messageIndex = 0;
+    const manager = createManager({
+      resolveSessionId: () => "ses_1",
+      addContextMessage: async () => {
+        messageIndex += 1;
+        return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
+      },
+      ignorePart: async (_sessionId, messageId, partId) => {
+        ignored.push(`${messageId}:${partId}`);
+        return true;
+      },
+    });
+
+    await manager["addItem"]({
+      sessionId: "ses_1",
+      type: "auto",
+      label: "Workspace context",
+      text: "first",
+      sourceFile: "Obsidian workspace",
+    });
+    await manager["addItem"]({
+      sessionId: "ses_1",
+      type: "auto",
+      label: "Workspace context",
+      text: "second",
+      sourceFile: "Obsidian workspace",
+    });
+
+    expect(ignored).toEqual(["msg_1:prt_1"]);
+    expect(manager.getItems()).toMatchObject([
+      {
+        id: "msg_2:prt_2",
+        type: "auto",
+        text: "second",
+        sourceFile: "Obsidian workspace",
+      },
+    ]);
+  });
+
   test("restores active plugin context messages from the server", async () => {
     const messages: OpenCodeMessage[] = [
       {
