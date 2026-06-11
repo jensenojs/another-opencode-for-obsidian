@@ -2,7 +2,8 @@ import { App, EventRef, MarkdownView, WorkspaceLeaf } from "obsidian";
 import { ContextItem, OpenCodeSettings, OPENCODE_VIEW_TYPE } from "../types";
 import { CONTEXT_MESSAGE_PREFIX, OpenCodeClient, OpenCodeMessage } from "../client/OpenCodeClient";
 import { WorkspaceContext } from "./WorkspaceContext";
-import { formatWorkspaceContext, SelectedTextContext } from "./ContextFormatter";
+import { formatWorkspaceContext } from "./ContextFormatter";
+import { AutoSelectionContextSource } from "./AutoSelectionContextSource";
 import { OpenCodeView } from "../ui/OpenCodeView";
 import { ServerState } from "../server/types";
 
@@ -33,7 +34,7 @@ export class ContextManager {
   private contextRefreshTimer: number | null = null;
   private items: ContextItem[] = [];
   private itemChangeCallbacks: Array<(items: ContextItem[]) => void> = [];
-  private lastAutoSelectionFingerprint: string | null = null;
+  private autoSelectionSource: AutoSelectionContextSource;
 
   constructor(deps: ContextManagerDeps) {
     this.app = deps.app;
@@ -44,6 +45,16 @@ export class ContextManager {
     this.getCachedIframeUrl = deps.getCachedIframeUrl;
     this.setCachedIframeUrl = deps.setCachedIframeUrl;
     this.registerEvent = deps.registerEvent;
+    this.autoSelectionSource = new AutoSelectionContextSource({
+      isEnabled: () => this.settings.autoAddSelectionContext,
+      addSelection: (selection) =>
+        this.addSelectionForCurrentSession(
+          selection.text,
+          selection.sourcePath,
+          selection.selectionStartLine,
+          selection.selectionEndLine
+        ),
+    });
   }
 
   updateSettings(settings: OpenCodeSettings): void {
@@ -76,7 +87,7 @@ export class ContextManager {
     const editorChangeRef = this.app.workspace.on("editor-change", (_editor, view) => {
       if (view instanceof MarkdownView) {
         const selection = this.workspaceContext.trackViewSelection(view);
-        void this.autoAddSelection(selection);
+        void this.autoSelectionSource.handleSelection(selection);
       }
       this.scheduleRefresh(500);
     });
@@ -94,7 +105,7 @@ export class ContextManager {
       window.clearTimeout(this.contextRefreshTimer);
       this.contextRefreshTimer = null;
     }
-    this.lastAutoSelectionFingerprint = null;
+    this.autoSelectionSource.reset();
   }
 
   private scheduleRefresh(delayMs: number = 300): void {
@@ -207,32 +218,6 @@ export class ContextManager {
     }
 
     return this.addManual(sessionId, text, sourceFile, startLine, endLine);
-  }
-
-  private async autoAddSelection(selection: SelectedTextContext | null): Promise<void> {
-    if (!this.settings.autoAddSelectionContext) {
-      return;
-    }
-
-    if (!selection) {
-      this.lastAutoSelectionFingerprint = null;
-      return;
-    }
-
-    const fingerprint = this.createSelectionFingerprint(selection);
-    if (fingerprint === this.lastAutoSelectionFingerprint) {
-      return;
-    }
-
-    const item = await this.addSelectionForCurrentSession(
-      selection.text,
-      selection.sourcePath,
-      selection.selectionStartLine,
-      selection.selectionEndLine
-    );
-    if (item) {
-      this.lastAutoSelectionFingerprint = fingerprint;
-    }
   }
 
   async removeItem(sessionId: string, itemId: string): Promise<boolean> {
@@ -422,15 +407,6 @@ export class ContextManager {
       return `${sourceFile}:${startLine}`;
     }
     return `${sourceFile}:${startLine}-${endLine}`;
-  }
-
-  private createSelectionFingerprint(selection: SelectedTextContext): string {
-    return [
-      selection.sourcePath,
-      selection.selectionStartLine ?? "",
-      selection.selectionEndLine ?? "",
-      selection.text,
-    ].join("\u0000");
   }
 
   destroy(): void {
