@@ -29,6 +29,7 @@ function createTestSettings(port: number): OpenCodeSettings {
     startupTimeout: process.platform === "win32" ? 15000 : TEST_TIMEOUT_MS,
     defaultViewLocation: "sidebar",
     injectWorkspaceContext: true,
+    autoAddSelectionContext: false,
     maxNotesInContext: 20,
     maxSelectionLength: 2000,
     customCommand: "",

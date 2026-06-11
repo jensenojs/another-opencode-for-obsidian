@@ -11,7 +11,7 @@ export class WorkspaceContext {
     this.app = app;
   }
 
-  trackViewSelection(view: MarkdownView | null): void {
+  trackViewSelection(view: MarkdownView | null): SelectedTextContext | null {
     if (view) {
       this.lastMarkdownView = view;
     }
@@ -20,6 +20,7 @@ export class WorkspaceContext {
     if (selectionContext) {
       this.lastSelection = selectionContext;
     }
+    return selectionContext;
   }
 
   gatherContext(): WorkspaceContextSnapshot {

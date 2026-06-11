@@ -216,6 +216,16 @@ export class OpenCodeSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Auto-add selected text")
+      .setDesc("Automatically adds a changed editor selection to the active OpenCode context")
+      .addToggle((toggle) =>
+        toggle.setValue(this.settings.autoAddSelectionContext).onChange(async (value) => {
+          this.settings.autoAddSelectionContext = value;
+          await this.onSettingsChange();
+        })
+      );
+
+    new Setting(containerEl)
       .setName("Max notes in context")
       .setDesc("Limit how many open notes are included")
       .addSlider((slider) =>

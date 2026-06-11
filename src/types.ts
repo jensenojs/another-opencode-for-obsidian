@@ -49,6 +49,7 @@ export interface OpenCodeSettings {
   startupTimeout: number;
   defaultViewLocation: ViewLocation;
   injectWorkspaceContext: boolean;
+  autoAddSelectionContext: boolean;
   maxNotesInContext: number;
   maxSelectionLength: number;
   customCommand: string;
@@ -69,6 +70,7 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
   startupTimeout: 45000,
   defaultViewLocation: "sidebar",
   injectWorkspaceContext: false,
+  autoAddSelectionContext: false,
   maxNotesInContext: 20,
   maxSelectionLength: 2000,
   customCommand: "",
