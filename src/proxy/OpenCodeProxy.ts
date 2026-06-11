@@ -193,7 +193,7 @@ export class OpenCodeProxy extends EventEmitter {
   private handleUpgrade(
     clientReq: http.IncomingMessage,
     clientSocket: import("net").Socket,
-    clientHead: Buffer
+    _clientHead: Buffer
   ): void {
     const options = {
       hostname: this.targetHost,

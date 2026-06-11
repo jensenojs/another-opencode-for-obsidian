@@ -1,4 +1,4 @@
-import { Plugin, WorkspaceLeaf, Notice, EventRef, MarkdownView } from "obsidian";
+import { Plugin, Notice } from "obsidian";
 import {
   OpenCodeSettings,
   DEFAULT_SETTINGS,

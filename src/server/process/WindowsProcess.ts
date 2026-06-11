@@ -31,27 +31,10 @@ export class WindowsProcess implements OpenCodeProcess {
     logger.info("stopping server process tree", { pid });
 
     // shell:true spawns cmd.exe -> node.exe; kill the child first or OpenCode survives.
-    try {
-      const { execSync } = require("child_process");
-      const output = execSync(
-        `powershell -Command "Get-CimInstance Win32_Process -Filter \\"ParentProcessId=${pid}\\" | Select-Object ProcessId"`,
-        { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }
-      );
-
-      const lines = output.split("\n").slice(3);
-      for (const line of lines) {
-        const childPid = line.trim();
-        if (childPid && !isNaN(parseInt(childPid))) {
-          try {
-            execSync(`taskkill /F /PID ${childPid}`, { stdio: "ignore" });
-          } catch {}
-        }
-      }
-    } catch {}
-
-    try {
-      await this.execAsync(`taskkill /F /PID ${pid}`);
-    } catch {}
+    this.killChildProcesses(pid);
+    await this.execAsync(`taskkill /F /PID ${pid}`).catch((error: Error) => {
+      logger.warn("failed to stop server process", { pid, error: error.message });
+    });
 
     WindowsProcess.currentProcess = null;
 
@@ -74,30 +57,8 @@ export class WindowsProcess implements OpenCodeProcess {
   }
 
   private static killProcessSync(pid: number): void {
-    try {
-      const { execSync } = require("child_process");
-
-      try {
-        const output = execSync(
-          `powershell -Command "Get-CimInstance Win32_Process -Filter \\"ParentProcessId=${pid}\\" | Select-Object ProcessId"`,
-          { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }
-        );
-
-        const lines = output.split("\n").slice(3);
-        for (const line of lines) {
-          const childPid = line.trim();
-          if (childPid && !isNaN(parseInt(childPid))) {
-            try {
-              execSync(`taskkill /F /PID ${childPid}`, { stdio: "ignore" });
-            } catch {}
-          }
-        }
-      } catch {}
-
-      try {
-        execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
-      } catch {}
-    } catch {}
+    WindowsProcess.killChildProcesses(pid);
+    WindowsProcess.execSyncQuiet(`taskkill /F /PID ${pid}`);
   }
 
   async verifyCommand(command: string): Promise<string | null> {
@@ -147,5 +108,39 @@ export class WindowsProcess implements OpenCodeProcess {
         }
       });
     });
+  }
+
+  private static killChildProcesses(pid: number): void {
+    const output = WindowsProcess.execSyncQuiet(
+      `powershell -Command "Get-CimInstance Win32_Process -Filter \\"ParentProcessId=${pid}\\" | Select-Object ProcessId"`
+    );
+    if (!output) {
+      return;
+    }
+
+    const lines = output.split("\n").slice(3);
+    for (const line of lines) {
+      const childPid = line.trim();
+      if (childPid && !isNaN(parseInt(childPid))) {
+        WindowsProcess.execSyncQuiet(`taskkill /F /PID ${childPid}`);
+      }
+    }
+  }
+
+  private killChildProcesses(pid: number): void {
+    WindowsProcess.killChildProcesses(pid);
+  }
+
+  private static execSyncQuiet(command: string): string | null {
+    try {
+      const { execSync } = require("child_process");
+      return execSync(command, {
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "ignore"],
+      });
+    } catch (error) {
+      logger.warn("windows process command failed", { command, error: String(error) });
+      return null;
+    }
   }
 }

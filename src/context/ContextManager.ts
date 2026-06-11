@@ -135,7 +135,7 @@ export class ContextManager {
     }
   }
 
-  async refreshContextForView(view: OpenCodeView): Promise<void> {
+  async refreshContextForView(_view: OpenCodeView): Promise<void> {
     if (!this.settings.injectWorkspaceContext) {
       return;
     }

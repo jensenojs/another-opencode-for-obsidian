@@ -7,9 +7,10 @@
     "dev": "node esbuild.config.mjs",
     "build": "bun run tsc -noEmit -skipLibCheck && bun run esbuild.config.mjs production",
     "test": "bun test",
+    "lint": "eslint .",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" \"*.{json,md,mjs,css}\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" \"*.{json,md,mjs,css}\"",
-    "check": "bun run format:check && bun run build && bun test",
+    "check": "bun run format:check && bun run lint && bun run build && bun test",
     "harness": "bun run scripts/harness.ts",
     "dev:install": "bun run scripts/harness.ts install",
     "dev:status": "bun run scripts/harness.ts status",
@@ -31,13 +32,17 @@
   "author": "mat",
   "license": "MIT",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/bun": "^1.3.5",
     "@types/node": "^20.11.0",
     "builtin-modules": "^3.3.0",
     "esbuild": "^0.21.5",
+    "eslint": "^10.4.1",
+    "globals": "^17.6.0",
     "obsidian": "latest",
     "prettier": "^3.8.4",
     "tslib": "^2.6.2",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^8.61.0"
   }
 }

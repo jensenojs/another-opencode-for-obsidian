@@ -52,12 +52,10 @@ export class ViewManager {
       return;
     }
 
-    let leaf: WorkspaceLeaf | null = null;
-    if (this.settings.defaultViewLocation === "main") {
-      leaf = this.app.workspace.getLeaf("tab");
-    } else {
-      leaf = this.app.workspace.getRightLeaf(false);
-    }
+    const leaf =
+      this.settings.defaultViewLocation === "main"
+        ? this.app.workspace.getLeaf("tab")
+        : this.app.workspace.getRightLeaf(false);
 
     if (leaf) {
       await leaf.setViewState({

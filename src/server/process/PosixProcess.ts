@@ -47,7 +47,7 @@ export class PosixProcess implements OpenCodeProcess {
       try {
         fs.accessSync(command, fs.constants.X_OK);
         return null;
-      } catch (err: any) {
+      } catch {
         if (existsSync(command)) {
           return `'${command}' exists but is not executable. Run: chmod +x ${command}`;
         }
@@ -61,7 +61,7 @@ export class PosixProcess implements OpenCodeProcess {
     try {
       process.kill(-pid, signal);
     } catch (error) {
-      logger.warn("signal failed", { pid, signal });
+      logger.warn("signal failed", { pid, signal, error: String(error) });
     }
   }
 

@@ -41,7 +41,9 @@ export class ExecutableResolver {
       if (path && existsSync(path)) {
         return path;
       }
-    } catch {}
+    } catch {
+      return null;
+    }
     return null;
   }
 
@@ -94,7 +96,9 @@ export class ExecutableResolver {
           }
         }
       }
-    } catch {}
+    } catch {
+      return nvmDirs;
+    }
 
     return nvmDirs;
   }

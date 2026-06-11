@@ -1,13 +1,16 @@
 VAULT ?= /Users/oujinsai/obsidian
 OPENCODE ?= /Users/oujinsai/Projects/ai-cli/opencode
 
-.PHONY: build test format format-check check install status logs doctor bridge theme reload
+.PHONY: build test lint format format-check check install status logs doctor bridge theme reload
 
 build:
 	bun run build
 
 test:
 	bun test
+
+lint:
+	bun run lint
 
 format:
 	bun run format
