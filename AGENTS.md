@@ -127,6 +127,9 @@ scripts/
 - 监听 Obsidian workspace 事件（active-leaf-change、editor-change 等）
 - 防抖 2 秒后触发上下文刷新
 - 调用 `WorkspaceContext` 收集数据，通过 `OpenCodeClient` 发送到 opencode 会话
+- `injectWorkspaceContext` 控制自动 workspace 摘要（打开笔记路径 + 当前选区）是否作为一个 auto item 维护
+- `autoAddSelectionContext` 控制 editor-change 后是否把变化后的选区追加为 manual item；它复用 `addSelectionForCurrentSession()`，不新增 ContextItem 身份字段或第二套状态源
+- 自动选区只在成功创建 ContextItem 后记录 fingerprint。没有 active session 或 OpenCode 拒收时，后续相同选区仍可重试
 
 ### `WorkspaceContext.ts` — 上下文收集
 
@@ -140,6 +143,7 @@ scripts/
 - `customCommand`: 非空时是 shell command template，必须包含 `{hostname}` 和 `{port}`
 - textarea 显示真实配置值；示例命令只作为 placeholder。空字符串必须保持为空，因为它表示 path 模式
 - `webViewAppearance`: 默认 `obsidian`，让 Web UI 继承 Obsidian pane 背景并使用半透明局部 surface；`opencode` 保留 OpenCode Web UI 原生风格
+- `autoAddSelectionContext`: 默认关闭。开启后，编辑器选区变化会自动追加到当前 OpenCode session；关闭后只能通过命令手动添加选区
 
 ### `RuntimeDiagnostics.ts` — 运行时观测
 
