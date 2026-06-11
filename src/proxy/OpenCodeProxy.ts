@@ -321,6 +321,9 @@ function createThemeInjection(theme: WebViewTheme | null): string {
       }, {});
     }
     function collectOpaqueBackgrounds() {
+      if (!document.body) {
+        return [];
+      }
       var minArea = Math.max(2000, window.innerWidth * window.innerHeight * 0.04);
       return Array.prototype.slice.call(document.body.querySelectorAll('*'))
         .map(function(element) {
@@ -340,24 +343,37 @@ function createThemeInjection(theme: WebViewTheme | null): string {
         });
     }
     function postThemeDiagnostics(reason) {
-      var payload = {
-        reason: reason,
-        url: location.href,
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        variables: rootVariables(),
-        roots: [
-          describeElement(document.documentElement),
-          describeElement(document.body),
-          describeElement(document.getElementById('root'))
-        ],
-        opaqueBackgrounds: collectOpaqueBackgrounds()
-      };
-      window.parent.postMessage({
-        ns: ${JSON.stringify(BRIDGE_NAMESPACE)},
-        version: ${JSON.stringify(BRIDGE_VERSION)},
-        type: ${JSON.stringify(BRIDGE_MESSAGES.themeDiagnostics)},
-        payload: payload
-      }, '*');
+      try {
+        var payload = {
+          reason: reason,
+          url: location.href,
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          variables: rootVariables(),
+          roots: [
+            describeElement(document.documentElement),
+            describeElement(document.body),
+            describeElement(document.getElementById('root'))
+          ],
+          opaqueBackgrounds: collectOpaqueBackgrounds()
+        };
+        window.parent.postMessage({
+          ns: ${JSON.stringify(BRIDGE_NAMESPACE)},
+          version: ${JSON.stringify(BRIDGE_VERSION)},
+          type: ${JSON.stringify(BRIDGE_MESSAGES.themeDiagnostics)},
+          payload: payload
+        }, '*');
+      } catch (error) {
+        window.parent.postMessage({
+          ns: ${JSON.stringify(BRIDGE_NAMESPACE)},
+          version: ${JSON.stringify(BRIDGE_VERSION)},
+          type: ${JSON.stringify(BRIDGE_MESSAGES.themeDiagnostics)},
+          payload: {
+            reason: reason,
+            url: location.href,
+            error: error instanceof Error ? error.message : String(error)
+          }
+        }, '*');
+      }
     }
     function scheduleThemeDiagnostics(reason) {
       requestAnimationFrame(function() {

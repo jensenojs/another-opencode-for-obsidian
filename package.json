@@ -19,6 +19,7 @@
     "dev:doctor": "bun run scripts/harness.ts doctor",
     "dev:bridge": "bun run scripts/harness.ts bridge",
     "dev:theme": "bun run scripts/harness.ts theme",
+    "dev:theme:fixture": "bun run scripts/harness.ts theme --fixture",
     "version": "bun run scripts/sync-manifest-version.ts && git add manifest.json",
     "version:patch": "bun pm version patch && git push --follow-tags",
     "version:minor": "bun pm version minor && git push --follow-tags",

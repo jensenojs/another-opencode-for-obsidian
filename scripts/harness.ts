@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, unlinkSync } from "fs";
-import { request } from "http";
+import { createServer, request } from "http";
 import { dirname, join, resolve } from "path";
 import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
@@ -7,6 +7,8 @@ import * as ts from "typescript";
 import { getRuntimePaths } from "../src/debug/RuntimeDiagnostics";
 import { getExplicitCustomCommand, usesExplicitCustomCommand } from "../src/types";
 import { BRIDGE_MESSAGES } from "../src/bridge/BridgeProtocol";
+import { OpenCodeProxy } from "../src/proxy/OpenCodeProxy";
+import { createOpenCodeWebViewTheme } from "../src/theme/WebViewTheme";
 
 type Command = "help" | "paths" | "install" | "status" | "logs" | "doctor" | "bridge" | "theme";
 
@@ -17,6 +19,7 @@ interface Args {
   lines: number;
   force: boolean;
   skipBuild: boolean;
+  themeSource: "runtime" | "fixture";
 }
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,6 +73,7 @@ function parseArgs(argv: string[]): Args {
     lines: 80,
     force: false,
     skipBuild: false,
+    themeSource: "runtime",
   };
 
   for (let index = 1; index < argv.length; index += 1) {
@@ -96,6 +100,10 @@ function parseArgs(argv: string[]): Args {
     }
     if (part === "--skip-build") {
       args.skipBuild = true;
+      continue;
+    }
+    if (part === "--fixture") {
+      args.themeSource = "fixture";
     }
   }
 
@@ -128,6 +136,7 @@ Options:
   --lines <n>           Log lines for logs/status. Default 80
   --force               Replace existing symlinks during install
   --skip-build          Skip build during doctor
+  --fixture             For theme: check current workspace proxy/theme code with a local HTML fixture
 `);
 }
 
@@ -445,6 +454,10 @@ function bridge(args: Args): void {
 }
 
 async function buildThemeReport(args: Args): Promise<ThemeReport> {
+  if (args.themeSource === "fixture") {
+    return buildFixtureThemeReport();
+  }
+
   const runtimeStatus = readJson(getRuntimePaths().statusFile);
   const runtimeThemeDiagnostics = runtimeStatus?.runtimeDiagnostics?.theme ?? null;
   const runtimeIframeDiagnostics = runtimeStatus?.runtimeDiagnostics?.iframe ?? null;
@@ -502,7 +515,62 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
     };
   }
 
-  const injectedTheme = extractInjectedTheme(html.body);
+  return buildThemeReportFromHtml({
+    mode,
+    url,
+    html,
+    runtimeDiagnostics: runtimeThemeDiagnostics,
+    iframeDiagnostics: runtimeIframeDiagnostics,
+    checks,
+    requireRuntimeDiagnostics: true,
+  });
+}
+
+async function buildFixtureThemeReport(): Promise<ThemeReport> {
+  const html = await fetchFixtureThemeHtml();
+  const checks: ThemeReport["checks"] = [
+    {
+      name: "fixture proxy HTML is reachable",
+      ok: html.ok,
+      detail: html.ok ? { status: html.status, contentType: html.contentType } : html.error,
+    },
+  ];
+
+  if (!html.ok) {
+    return {
+      ok: false,
+      mode: "obsidian",
+      url: html.url,
+      http: html,
+      injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
+      tokens: emptyThemeTokens(),
+      runtimeDiagnostics: null,
+      iframeDiagnostics: null,
+      checks,
+    };
+  }
+
+  return buildThemeReportFromHtml({
+    mode: "obsidian",
+    url: html.url,
+    html,
+    runtimeDiagnostics: null,
+    iframeDiagnostics: null,
+    checks,
+    requireRuntimeDiagnostics: false,
+  });
+}
+
+function buildThemeReportFromHtml(input: {
+  mode: ThemeReport["mode"];
+  url: string | null;
+  html: Awaited<ReturnType<typeof fetchText>>;
+  runtimeDiagnostics: unknown | null;
+  iframeDiagnostics: unknown | null;
+  checks: ThemeReport["checks"];
+  requireRuntimeDiagnostics: boolean;
+}): ThemeReport {
+  const injectedTheme = extractInjectedTheme(input.html.body);
   const variables = injectedTheme?.variables ?? {};
   const tokens = {
     rootBackground: pickVariables(variables, [
@@ -532,21 +600,21 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
     ]),
   };
   const injection = {
-    hasAppearanceStyle: html.body.includes("data-opencode-obsidian-appearance"),
-    hasThemeScript: html.body.includes("data-opencode-obsidian-theme"),
+    hasAppearanceStyle: input.html.body.includes("data-opencode-obsidian-appearance"),
+    hasThemeScript: input.html.body.includes("data-opencode-obsidian-theme"),
     colorScheme: typeof injectedTheme?.colorScheme === "string" ? injectedTheme.colorScheme : null,
   };
 
-  if (mode === "obsidian") {
-    checks.push({
+  if (input.mode === "obsidian") {
+    input.checks.push({
       name: "Obsidian appearance style is injected",
       ok: injection.hasAppearanceStyle,
     });
-    checks.push({
+    input.checks.push({
       name: "Obsidian theme script is injected",
       ok: injection.hasThemeScript,
     });
-    checks.push({
+    input.checks.push({
       name: "root background tokens use Obsidian page background",
       ok:
         typeof tokens.rootBackground["--opencode-obsidian-page-background"] === "string" &&
@@ -563,7 +631,7 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
         tokens.rootBackground["--background-bg-deep"] === "var(--v2-background-bg-deep)",
       detail: tokens.rootBackground,
     });
-    checks.push({
+    input.checks.push({
       name: "local surface tokens stay translucent",
       ok:
         [
@@ -579,7 +647,7 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
         tokens.surfaces["--background-bg-layer-03"] === "var(--v2-background-bg-layer-03)",
       detail: tokens.surfaces,
     });
-    checks.push({
+    input.checks.push({
       name: "text and border tokens use Obsidian variables",
       ok:
         tokens.textAndBorder["--text-strong"] === "var(--opencode-obsidian-text-normal)" &&
@@ -588,54 +656,127 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
         tokens.textAndBorder["--border-border-base"] === "var(--v2-border-border-base)",
       detail: tokens.textAndBorder,
     });
-    checks.push({
-      name: "runtime iframe theme diagnostics received",
-      ok: Boolean(runtimeThemeDiagnostics),
-      detail:
-        runtimeThemeDiagnostics ??
-        "No iframe diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
-    });
-    checks.push(
-      ...runtimeThemeChecks(
-        runtimeThemeDiagnostics,
-        tokens.rootBackground["--opencode-obsidian-page-background"]
-      )
-    );
-    checks.push({
-      name: "runtime iframe composition diagnostics received",
-      ok: Boolean(runtimeIframeDiagnostics),
-      detail:
-        runtimeIframeDiagnostics ??
-        "No iframe composition diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
-    });
+
+    if (input.requireRuntimeDiagnostics) {
+      input.checks.push({
+        name: "runtime iframe theme diagnostics received",
+        ok: Boolean(input.runtimeDiagnostics),
+        detail:
+          input.runtimeDiagnostics ??
+          "No iframe diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
+      });
+      input.checks.push(
+        ...runtimeThemeChecks(
+          input.runtimeDiagnostics,
+          tokens.rootBackground["--opencode-obsidian-page-background"]
+        )
+      );
+      input.checks.push({
+        name: "runtime iframe composition diagnostics received",
+        ok: Boolean(input.iframeDiagnostics),
+        detail:
+          input.iframeDiagnostics ??
+          "No iframe composition diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
+      });
+    }
   }
 
-  if (mode === "opencode") {
-    checks.push({
+  if (input.mode === "opencode") {
+    input.checks.push({
       name: "Obsidian appearance style is not injected",
       ok: !injection.hasAppearanceStyle,
     });
-    checks.push({
+    input.checks.push({
       name: "Obsidian theme script is not injected",
       ok: !injection.hasThemeScript,
     });
   }
 
   return {
-    ok: checks.every((check) => check.ok),
-    mode,
-    url,
+    ok: input.checks.every((check) => check.ok),
+    mode: input.mode,
+    url: input.url,
     http: {
-      ok: html.ok,
-      status: html.status,
-      contentType: html.contentType,
+      ok: input.html.ok,
+      status: input.html.status,
+      contentType: input.html.contentType,
     },
     injection,
     tokens,
-    runtimeDiagnostics: runtimeThemeDiagnostics,
-    iframeDiagnostics: runtimeIframeDiagnostics,
-    checks,
+    runtimeDiagnostics: input.runtimeDiagnostics,
+    iframeDiagnostics: input.iframeDiagnostics,
+    checks: input.checks,
   };
+}
+
+async function fetchFixtureThemeHtml(): Promise<
+  {
+    url: string | null;
+  } & Awaited<ReturnType<typeof fetchText>>
+> {
+  const backend = createServer((_, res) => {
+    res.writeHead(200, {
+      "content-type": "text/html",
+      "content-security-policy": "default-src 'self'",
+    });
+    res.end('<!doctype html><html><head></head><body><div id="root"></div></body></html>');
+  });
+
+  const backendPort = await listenOnRandomPort(backend);
+  const theme = createOpenCodeWebViewTheme({
+    colorScheme: "dark",
+    pageBackground: "rgba(0, 0, 0, 0.25)",
+    backgroundPrimary: "#000000",
+    backgroundSecondary: "rgb(29, 32, 33)",
+    backgroundModifierBorder: "rgb(60, 56, 54)",
+    backgroundModifierHover: "rgba(255, 255, 255, 0.08)",
+    textNormal: "#f1f1f1",
+    textMuted: "rgb(213, 196, 161)",
+    textFaint: "rgb(146, 131, 116)",
+    interactiveAccent: "hsl(41, 88%, 66%)",
+    fontInterface: '"Monaco Nerd Font Mono", ui-sans-serif',
+  });
+  const proxy = new OpenCodeProxy("127.0.0.1", backendPort, "obsidian", theme);
+
+  try {
+    const started = await proxy.start();
+    if (!started) {
+      return {
+        url: null,
+        ok: false,
+        body: "",
+        error: "fixture proxy failed to start",
+      };
+    }
+    const url = proxy.getProxyUrl("");
+    return {
+      url,
+      ...(await fetchText(url)),
+    };
+  } finally {
+    proxy.stop();
+    await closeServer(backend);
+  }
+}
+
+function listenOnRandomPort(server: ReturnType<typeof createServer>): Promise<number> {
+  return new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (typeof address === "object" && address && typeof address.port === "number") {
+        resolveListen(address.port);
+        return;
+      }
+      rejectListen(new Error("fixture server did not expose a TCP port"));
+    });
+  });
+}
+
+function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
+  return new Promise((resolveClose) => {
+    server.close(() => resolveClose());
+  });
 }
 
 function buildBridgeReport(args: Args): BridgeReport {

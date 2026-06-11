@@ -191,7 +191,8 @@ scripts/
 
 ### `harness theme` — Web UI 外观检查
 
-- 读取 XDG `status.json` 里的 `proxyUrl`，只访问本机 proxy HTML
+- 默认读取 XDG `status.json` 里的 `proxyUrl`，只访问本机 proxy HTML，验正在运行的 Obsidian 插件实例
+- `bun run dev:theme:fixture` 使用当前工作区代码启动本地 HTML fixture + `OpenCodeProxy`，不依赖 Obsidian 重载，用于确认刚修改的主题注入代码
 - `obsidian` 模式要求 `data-opencode-obsidian-*` 注入存在、根背景 token 使用 Obsidian 页面背景变量、局部 surface token 半透明
 - `opencode` 模式要求不注入 Obsidian 外观覆盖
 - `runtimeDiagnostics.theme` 来自 proxy 注入脚本，检查 OpenCode iframe 内部 DOM；`runtimeDiagnostics.iframe` 来自 Obsidian 父窗口，检查 iframe 元素和 Obsidian 祖先链。两者必须分开，因为 iframe 加载后父窗口不能可靠读取 OpenCode 内部 DOM

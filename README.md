@@ -127,13 +127,14 @@ bun run harness logs --lines 120
 bun run harness doctor --vault /path/to/vault
 bun run dev:bridge --opencode /path/to/opencode
 bun run dev:theme --vault /path/to/vault
+bun run dev:theme:fixture
 ```
 
 See the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/) for the state directory convention.
 
 When startup fails, the panel and settings page show the same diagnostics written to `status.json`: the effective start mode, command, stderr, health-check error, and log path.
 
-The intended path is visible first: a user should not have to know where logs live before seeing why startup failed. The harness commands move the same evidence between machines. For appearance issues, `bun run dev:theme` reads the running proxy HTML and reports whether the Obsidian/OpenCode appearance switch injected the expected tokens.
+The intended path is visible first: a user should not have to know where logs live before seeing why startup failed. The harness commands move the same evidence between machines. For appearance issues, `bun run dev:theme` reads the running Obsidian plugin proxy and reports whether the active instance injected the expected tokens. `bun run dev:theme:fixture` checks the current workspace code with a local HTML fixture, so agents can verify theme injection before Obsidian reloads the plugin.
 
 ### Reporting issues
 
