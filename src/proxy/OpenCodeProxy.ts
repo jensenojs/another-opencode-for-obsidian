@@ -2,6 +2,7 @@ import * as http from "http";
 import { EventEmitter } from "events";
 import { createLogger } from "../debug/RuntimeDiagnostics";
 import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../bridge/BridgeProtocol";
+import type { WebViewAppearance, WebViewTheme } from "../types";
 
 const INJECTED_SCRIPT = `
 <script>
@@ -27,19 +28,38 @@ const INJECTED_SCRIPT = `
 </script>
 `;
 
+const OBSIDIAN_APPEARANCE_STYLE = `
+<style data-opencode-obsidian-appearance>
+html,
+body,
+#root {
+  background: transparent !important;
+}
+</style>
+`;
+
 export class OpenCodeProxy extends EventEmitter {
   private server: http.Server | null = null;
   private targetHost: string;
   private targetPort: number;
+  private appearance: WebViewAppearance;
+  private theme: WebViewTheme | null;
   private effectivePort: number = 0;
   private logger = createLogger("proxy");
   private static readonly START_PORT = 4097;
   private static readonly MAX_ATTEMPTS = 10;
 
-  constructor(targetHost: string, targetPort: number) {
+  constructor(
+    targetHost: string,
+    targetPort: number,
+    appearance: WebViewAppearance = "opencode",
+    theme: WebViewTheme | null = null
+  ) {
     super();
     this.targetHost = targetHost;
     this.targetPort = targetPort;
+    this.appearance = appearance;
+    this.theme = theme;
   }
 
   getPort(): number {
@@ -53,6 +73,11 @@ export class OpenCodeProxy extends EventEmitter {
   updateTarget(targetHost: string, targetPort: number): void {
     this.targetHost = targetHost;
     this.targetPort = targetPort;
+  }
+
+  updateAppearance(appearance: WebViewAppearance, theme: WebViewTheme | null = null): void {
+    this.appearance = appearance;
+    this.theme = theme;
   }
 
   async start(): Promise<boolean> {
@@ -190,6 +215,53 @@ export class OpenCodeProxy extends EventEmitter {
   }
 
   private injectScript(body: string): string {
-    return body.replace("<head>", "<head>" + INJECTED_SCRIPT);
+    return body.replace("<head>", "<head>" + INJECTED_SCRIPT + this.getAppearanceInjection());
   }
+
+  private getAppearanceInjection(): string {
+    if (this.appearance !== "obsidian") {
+      return "";
+    }
+
+    return OBSIDIAN_APPEARANCE_STYLE + createThemeInjection(this.theme);
+  }
+}
+
+function createThemeInjection(theme: WebViewTheme | null): string {
+  if (!theme) {
+    return "";
+  }
+
+  const safeTheme: WebViewTheme = {
+    colorScheme: theme.colorScheme,
+    variables: {},
+  };
+  for (const [name, value] of Object.entries(theme.variables)) {
+    if (/^--[-_a-zA-Z0-9]+$/.test(name) && typeof value === "string" && value.length > 0) {
+      safeTheme.variables[name] = value;
+    }
+  }
+
+  const payload = JSON.stringify(safeTheme);
+
+  return `
+<script data-opencode-obsidian-theme>
+(function() {
+  var theme = ${payload};
+  function applyTheme() {
+    var root = document.documentElement;
+    root.dataset.opencodeObsidianAppearance = 'obsidian';
+    root.style.colorScheme = theme.colorScheme;
+    Object.keys(theme.variables).forEach(function(name) {
+      root.style.setProperty(name, theme.variables[name]);
+    });
+  }
+  applyTheme();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyTheme, { once: true });
+  }
+  window.addEventListener('load', applyTheme, { once: true });
+})();
+</script>
+`;
 }

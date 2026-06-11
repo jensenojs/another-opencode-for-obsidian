@@ -73,10 +73,11 @@ Enable "Use custom command" when you need more control over how OpenCode startsâ
 
 When using custom command:
 
-- The command is a template. Empty value means the default template.
-- The template must include `{hostname}` and `{port}` so the plugin and server share one endpoint.
+- Empty value uses the normal executable path mode.
+- A non-empty value is a shell command template. It must include `{hostname}` and `{port}` so the plugin and server share one endpoint.
 - `{cors}` expands to `app://obsidian.md`.
 - `{projectDirectory}` expands to the active project directory.
+- GUI-launched Obsidian may not inherit your terminal PATH. Use an absolute executable path or a leading `~` path in non-empty custom commands.
 
 Example:
 ```bash
@@ -84,6 +85,21 @@ opencode serve --hostname {hostname} --port {port} --cors {cors}
 ```
 
 Other settings (port, hostname, auto-start, view location, context injection) are available through the settings UI and are self-explanatory.
+
+### Web view appearance
+
+The embedded web view can use either:
+
+- `OpenCode`: keep OpenCode's own web UI styling.
+- `Obsidian`: read the active Obsidian theme CSS variables and map them onto OpenCode's design tokens inside the proxied web UI.
+
+The Obsidian mode uses the stable CSS-variable surfaces exposed by both apps. It reads Obsidian variables such as `--background-primary`, `--text-normal`, and `--interactive-accent`, then injects OpenCode token overrides such as `--background-base`, `--text-strong`, and `--border-weak-base` through the local proxy. It does not target OpenCode component class names.
+
+Relevant upstream surfaces:
+
+- Obsidian CSS variables: https://docs.obsidian.md/Reference/CSS+variables/CSS+variables
+- OpenCode theme tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/theme.css
+- OpenCode Tailwind token mapping: https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/tailwind/colors.css
 
 ### Context injection (experimental)
 
@@ -113,6 +129,21 @@ bun run dev:bridge --opencode /path/to/opencode
 ```
 
 See the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/) for the state directory convention.
+
+When startup fails, the panel and settings page show the same diagnostics written to `status.json`: the effective start mode, command, stderr, health-check error, and log path.
+
+The intended path is visible first: a user should not have to know where logs live before seeing why startup failed. The harness and issue template exist to move the same evidence between machines.
+
+### Reporting issues
+
+Please include the diagnostics requested by the bug report template when opening an issue:
+
+- Click "Copy diagnostics" in the plugin error panel and paste the JSON.
+- Include recent lines from the XDG log path shown in diagnostics.
+- Include Obsidian version, OS, OpenCode version, start mode, and the exact custom command or executable path.
+- Describe the project/vault path shape: spaces, Unicode, `%`, Windows drive letters, UNC paths, symlinks, or network mounts.
+
+The client follows OpenCode's JS SDK behavior for project directories: `x-opencode-directory` is percent-encoded before it is sent, and the server decodes it before loading the instance. This matters for non-ASCII paths and Windows-style paths.
 
 ### Bridge contract checks
 

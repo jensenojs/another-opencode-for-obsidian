@@ -224,7 +224,8 @@ export class OpenCodeClient {
         method,
         headers: {
           "Content-Type": "application/json",
-          "x-opencode-directory": this.projectDirectory,
+          // OpenCode's JS SDK percent-encodes this header; the server decodes it before loading the instance.
+          "x-opencode-directory": encodeURIComponent(this.projectDirectory),
         },
       };
       const response = await new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>((resolve, reject) => {

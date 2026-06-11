@@ -5,7 +5,7 @@ import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import * as ts from "typescript";
 import { getRuntimePaths } from "../src/debug/RuntimeDiagnostics";
-import { getCustomCommandTemplate } from "../src/types";
+import { getExplicitCustomCommand, usesExplicitCustomCommand } from "../src/types";
 import { BRIDGE_MESSAGES } from "../src/bridge/BridgeProtocol";
 
 type Command = "help" | "paths" | "install" | "status" | "logs" | "doctor" | "bridge";
@@ -1035,15 +1035,21 @@ function readJson(path: string): any | null {
 }
 
 function summarizeSettings(data: any): unknown {
+  const customCommand = String(data.customCommand ?? "");
+  const useCustomCommand = Boolean(data.useCustomCommand);
+
   return {
     port: data.port,
     hostname: data.hostname,
     autoStart: data.autoStart,
-    useCustomCommand: data.useCustomCommand,
-    customCommand: data.customCommand,
-    effectiveCustomCommand: getCustomCommandTemplate({
-      customCommand: String(data.customCommand ?? ""),
-    }),
+    useCustomCommand,
+    customCommand,
+    explicitCustomCommand: getExplicitCustomCommand({ customCommand }) || null,
+    effectiveStartMode: usesExplicitCustomCommand({
+      customCommand,
+      useCustomCommand,
+    }) ? "custom" : "path",
+    webViewAppearance: data.webViewAppearance,
     projectDirectory: data.projectDirectory,
     startupTimeout: data.startupTimeout,
     lastSessionUrl: data.lastSessionUrl,

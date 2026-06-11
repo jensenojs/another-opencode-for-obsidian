@@ -8,7 +8,7 @@ import {
 import { OpenCodeView } from "./ui/OpenCodeView";
 import { ViewManager } from "./ui/ViewManager";
 import { OpenCodeSettingTab } from "./settings/SettingsTab";
-import { ServerManager, ServerState } from "./server/ServerManager";
+import { ServerDiagnostics, ServerManager, ServerState } from "./server/ServerManager";
 import { registerOpenCodeIcons, OPENCODE_ICON_NAME } from "./icons";
 import { OpenCodeClient } from "./client/OpenCodeClient";
 import { ContextManager } from "./context/ContextManager";
@@ -16,6 +16,7 @@ import { ExecutableResolver } from "./server/ExecutableResolver";
 import { OpenCodeProxy } from "./proxy/OpenCodeProxy";
 import { createLogger, getRuntimePaths, writeRuntimeStatus } from "./debug/RuntimeDiagnostics";
 import { BRIDGE_MESSAGES, isBridgeMessage } from "./bridge/BridgeProtocol";
+import { captureObsidianWebViewTheme } from "./theme/WebViewTheme";
 
 export default class OpenCodePlugin extends Plugin {
   settings: OpenCodeSettings = DEFAULT_SETTINGS;
@@ -51,6 +52,7 @@ export default class OpenCodePlugin extends Plugin {
     const endpoint = createServerEndpoint(this.settings, projectDirectory);
 
     this.openCodeProxy = new OpenCodeProxy(endpoint.hostname, endpoint.port);
+    this.refreshProxyAppearance();
     const proxyStarted = await this.openCodeProxy.start();
     if (!proxyStarted) {
       this.logger.error("proxy failed to start");
@@ -158,8 +160,8 @@ export default class OpenCodePlugin extends Plugin {
     if (this.settings.autoStart) {
       this.app.workspace.onLayoutReady(async () => {
         await this.startServer();
-      });
-    }
+    });
+  }
 
     this.contextManager.updateSettings(this.settings);
     this.processManager.on("stateChange", (state: ServerState) => {
@@ -169,6 +171,12 @@ export default class OpenCodePlugin extends Plugin {
     });
 
     this.registerCleanupHandlers();
+    this.registerEvent(
+      this.app.workspace.on("css-change", () => {
+        this.refreshProxyAppearance();
+        this.refreshOpenCodeViews();
+      })
+    );
 
     this.writeStatus("loaded");
     this.logger.info("plugin loaded", {
@@ -253,6 +261,19 @@ export default class OpenCodePlugin extends Plugin {
     return this.processManager.getLastError() ?? null;
   }
 
+  getSettings(): OpenCodeSettings {
+    return this.settings;
+  }
+
+  getServerDiagnostics(): ServerDiagnostics & { logFile: string; statusFile: string } {
+    const paths = getRuntimePaths();
+    return {
+      ...this.processManager.getDiagnostics(),
+      logFile: paths.logFile,
+      statusFile: paths.statusFile,
+    };
+  }
+
   getServerUrl(): string {
     const endpoint = createServerEndpoint(this.settings, this.getProjectDirectory());
     return this.openCodeProxy.getProxyUrl(endpoint.encodedProjectDirectory);
@@ -293,6 +314,7 @@ export default class OpenCodePlugin extends Plugin {
 
   private refreshClientState(): void {
     this.openCodeProxy.updateTarget(this.settings.hostname, this.settings.port);
+    this.refreshProxyAppearance();
 
     const nextUiBaseUrl = this.getServerUrl();
     const nextApiBaseUrl = this.getApiBaseUrl();
@@ -309,6 +331,22 @@ export default class OpenCodePlugin extends Plugin {
     this.lastBaseUrl = nextUiBaseUrl;
     this.lastApiBaseUrl = nextApiBaseUrl;
     this.writeStatus("client-state-refreshed");
+  }
+
+  private refreshProxyAppearance(): void {
+    const theme =
+      this.settings.webViewAppearance === "obsidian"
+        ? captureObsidianWebViewTheme()
+        : null;
+    this.openCodeProxy.updateAppearance(this.settings.webViewAppearance, theme);
+  }
+
+  refreshOpenCodeViews(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(OPENCODE_VIEW_TYPE)) {
+      if (leaf.view instanceof OpenCodeView) {
+        leaf.view.refreshAppearance();
+      }
+    }
   }
 
   refreshContextForView(view: OpenCodeView): void {
@@ -348,6 +386,7 @@ export default class OpenCodePlugin extends Plugin {
     const projectDirectory = this.resolveProjectDirectory();
     const endpoint = createServerEndpoint(this.settings, projectDirectory);
     const proxyPort = this.openCodeProxy?.getPort() || null;
+    const diagnostics = this.processManager.getDiagnostics();
     const proxyUrl =
       proxyPort && proxyPort > 0
         ? this.openCodeProxy.getProxyUrl(endpoint.encodedProjectDirectory)
@@ -356,8 +395,18 @@ export default class OpenCodePlugin extends Plugin {
     writeRuntimeStatus({
       lifecycle,
       serverState: this.getServerState(),
-      lastError: this.getLastError(),
-      lastHealthError: this.processManager.getLastHealthError(),
+      lastError: diagnostics.lastError,
+      lastHealthError: diagnostics.lastHealthError,
+      lastCommand: diagnostics.lastCommand,
+      lastDisplayCommand: diagnostics.lastDisplayCommand,
+      lastStartMode: diagnostics.lastStartMode,
+      lastCwd: diagnostics.lastCwd,
+      lastStdout: diagnostics.lastStdout,
+      lastStderr: diagnostics.lastStderr,
+      lastExitCode: diagnostics.lastExitCode,
+      lastExitSignal: diagnostics.lastExitSignal,
+      lastProcessErrorStack: diagnostics.lastProcessErrorStack,
+      diagnosticHint: diagnostics.hint,
       pid: this.processManager.getPid(),
       hostname: endpoint.hostname,
       port: endpoint.port,
@@ -368,8 +417,10 @@ export default class OpenCodePlugin extends Plugin {
       proxyPort,
       projectDirectory,
       useCustomCommand: this.settings.useCustomCommand,
+      webViewAppearance: this.settings.webViewAppearance,
       autoStart: this.settings.autoStart,
       logFile: getRuntimePaths().logFile,
+      statusFile: getRuntimePaths().statusFile,
     });
   }
 }

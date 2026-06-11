@@ -4,7 +4,7 @@ import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { ServerManager, ServerState } from "../src/server/ServerManager";
-import { DEFAULT_CUSTOM_COMMAND, OpenCodeSettings } from "../src/types";
+import { CUSTOM_COMMAND_EXAMPLE, OpenCodeSettings } from "../src/types";
 
 process.env.XDG_STATE_HOME = mkdtempSync(join(tmpdir(), "opencode-obsidian-test-"));
 
@@ -31,7 +31,7 @@ function createTestSettings(port: number): OpenCodeSettings {
     injectWorkspaceContext: true,
     maxNotesInContext: 20,
     maxSelectionLength: 2000,
-    customCommand: DEFAULT_CUSTOM_COMMAND,
+    customCommand: "",
     useCustomCommand: false,
     lastSessionUrl: "",
   };
@@ -233,8 +233,7 @@ describe("ServerManager", () => {
       const port = getNextPort();
       const settings = createTestSettings(port);
       settings.useCustomCommand = true;
-      settings.customCommand =
-        "opencode serve --hostname {hostname} --port {port} --cors {cors}";
+      settings.customCommand = CUSTOM_COMMAND_EXAMPLE;
 
       currentManager = new ServerManager(settings, PROJECT_DIR);
 
@@ -332,7 +331,7 @@ describe("ServerManager", () => {
       expect(currentManager.getLastError() ?? "").toContain("{hostname}");
     });
 
-    test("uses the default command template when custom command is empty", async () => {
+    test("uses executable path mode when custom command is empty", async () => {
       const settings = createTestSettings(getNextPort());
       settings.useCustomCommand = true;
       settings.customCommand = "";
@@ -343,7 +342,27 @@ describe("ServerManager", () => {
 
       expect(success).toBe(true);
       expect(currentManager.getState()).toBe("running");
+      expect(currentManager.getDiagnostics().lastStartMode).toBe("path");
+      expect(currentManager.getDiagnostics().lastCommandArgs).toContain("serve");
     }, 30000);
+
+    test("includes stderr in early exit diagnostics", async () => {
+      const settings = createTestSettings(getNextPort());
+      settings.useCustomCommand = true;
+      settings.startupTimeout = 3000;
+      settings.customCommand = `${quoteCommandPart(process.execPath)} -e "console.error('opencode missing from gui shell'); process.exit(127); // {hostname} {port}"`;
+
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+
+      const success = await currentManager.start();
+      const diagnostics = currentManager.getDiagnostics();
+
+      expect(success).toBe(false);
+      expect(currentManager.getState()).toBe("error");
+      expect(currentManager.getLastError() ?? "").toContain("opencode missing from gui shell");
+      expect(diagnostics.lastStderr ?? "").toContain("opencode missing from gui shell");
+      expect(diagnostics.hint ?? "").toContain("leading-tilde executable path");
+    });
 
     test("rejects custom commands without port placeholder", async () => {
       const settings = createTestSettings(getNextPort());

@@ -1,0 +1,98 @@
+name: Bug report
+description: Report a reproducible OpenCode Obsidian plugin problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The plugin should show the useful failure details first. This template preserves that evidence so maintainers can see the same command, stderr, path, and runtime state you saw.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the user-visible failure and what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Visible diagnostics
+      description: Prefer the plugin error panel's "Copy diagnostics" JSON. If the panel is unavailable, paste the XDG status.json shown in the logs or docs.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: runtime-status
+    attributes:
+      label: Harness status or runtime status.json
+      description: For local development, paste `bun run harness status --vault /path/to/vault --lines 120`. Otherwise leave this empty if the visible diagnostics above already include status data.
+      render: json
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Recent runtime logs
+      description: Paste the last relevant lines from the XDG log path shown in plugin diagnostics. Redact secrets.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: obsidian
+    attributes:
+      label: Obsidian version and OS
+      placeholder: "Obsidian 1.x.y, macOS 15.x / Windows 11 / Linux ..."
+    validations:
+      required: true
+
+  - type: input
+    id: opencode
+    attributes:
+      label: OpenCode version and install method
+      placeholder: "opencode --version; Homebrew/npm/local checkout/custom build"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: start-mode
+    attributes:
+      label: Start mode
+      options:
+        - OpenCode executable path mode
+        - Custom command mode
+        - Existing external server
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: custom-command
+    attributes:
+      label: Custom command or executable path
+      description: Paste the exact command/path if custom command mode or executable path mode is relevant. Redact tokens only.
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: project-path-shape
+    attributes:
+      label: Project/vault path shape
+      description: Do not paste private path segments if needed; describe whether it contains spaces, Unicode, %, Windows drive letters, UNC paths, symlinks, or network mounts.
+      placeholder: "Contains Chinese characters and spaces; or C:\\Users\\Name\\Notes; or \\\\server\\share\\Notes"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: List exact steps from Obsidian startup to the failure.
+    validations:
+      required: true

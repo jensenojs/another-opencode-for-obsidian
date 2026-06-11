@@ -1,4 +1,10 @@
 export type ViewLocation = "sidebar" | "main";
+export type WebViewAppearance = "opencode" | "obsidian";
+
+export interface WebViewTheme {
+  colorScheme: "light" | "dark";
+  variables: Record<string, string>;
+}
 
 export interface ServerEndpoint {
   hostname: string;
@@ -22,10 +28,11 @@ export interface OpenCodeSettings {
   maxSelectionLength: number;
   customCommand: string;
   useCustomCommand: boolean;
+  webViewAppearance: WebViewAppearance;
   lastSessionUrl: string;
 }
 
-export const DEFAULT_CUSTOM_COMMAND =
+export const CUSTOM_COMMAND_EXAMPLE =
   "opencode serve --hostname {hostname} --port {port} --cors {cors}";
 
 export const DEFAULT_SETTINGS: OpenCodeSettings = {
@@ -39,17 +46,24 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
   injectWorkspaceContext: false,
   maxNotesInContext: 20,
   maxSelectionLength: 2000,
-  customCommand: DEFAULT_CUSTOM_COMMAND,
+  customCommand: "",
   useCustomCommand: false,
+  webViewAppearance: "opencode",
   lastSessionUrl: "",
 };
 
 export const OPENCODE_VIEW_TYPE = "opencode-view";
 
-export function getCustomCommandTemplate(
+export function getExplicitCustomCommand(
   settings: Pick<OpenCodeSettings, "customCommand">
 ): string {
-  return settings.customCommand.trim() || DEFAULT_CUSTOM_COMMAND;
+  return settings.customCommand.trim();
+}
+
+export function usesExplicitCustomCommand(
+  settings: Pick<OpenCodeSettings, "customCommand" | "useCustomCommand">
+): boolean {
+  return settings.useCustomCommand && getExplicitCustomCommand(settings).length > 0;
 }
 
 export function createServerEndpoint(

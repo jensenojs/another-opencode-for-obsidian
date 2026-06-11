@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import { OPENCODE_VIEW_TYPE } from "../types";
 import { OPENCODE_ICON_NAME } from "../icons";
 import type OpenCodePlugin from "../main";
@@ -63,6 +63,8 @@ export class OpenCodeView extends ItemView {
   }
 
   private updateView(): void {
+    this.applyAppearanceClass();
+
     switch (this.currentState) {
       case "stopped":
         this.renderStoppedState();
@@ -159,11 +161,12 @@ export class OpenCodeView extends ItemView {
     this.iframeEl = iframeContainer.createEl("iframe", {
       cls: "opencode-iframe",
       attr: {
-        src: iframeUrl,
-        frameborder: "0",
-        allow: "clipboard-read; clipboard-write",
-      },
-    });
+          src: iframeUrl,
+          frameborder: "0",
+          allow: "clipboard-read; clipboard-write",
+          allowtransparency: "true",
+        },
+      });
 
     this.iframeEl.addEventListener("error", () => {
       console.error("Failed to load OpenCode iframe");
@@ -194,8 +197,16 @@ export class OpenCodeView extends ItemView {
     this.iframeEl?.focus();
   }
 
+  refreshAppearance(): void {
+    this.applyAppearanceClass();
+    if (this.currentState === "running") {
+      this.reloadIframe();
+    }
+  }
+
   private renderErrorState(): void {
     this.contentEl.empty();
+    const diagnostics = this.plugin.getServerDiagnostics();
 
     const statusContainer = this.contentEl.createDiv({
       cls: "opencode-status-container opencode-error",
@@ -206,7 +217,7 @@ export class OpenCodeView extends ItemView {
 
     statusContainer.createEl("h3", { text: "Failed to start OpenCode" });
     
-    const errorMessage = this.plugin.getLastError();
+    const errorMessage = diagnostics.lastError;
     if (errorMessage) {
       statusContainer.createEl("p", {
         text: errorMessage,
@@ -218,6 +229,25 @@ export class OpenCodeView extends ItemView {
         cls: "opencode-status-message",
       });
     }
+
+    if (diagnostics.hint) {
+      statusContainer.createEl("p", {
+        text: diagnostics.hint,
+        cls: "opencode-status-message opencode-diagnostic-hint",
+      });
+    }
+
+    const detailsContainer = statusContainer.createDiv({
+      cls: "opencode-diagnostics",
+    });
+
+    this.createDiagnosticRow(detailsContainer, "Mode", diagnostics.lastStartMode);
+    this.createDiagnosticRow(detailsContainer, "Command", diagnostics.lastDisplayCommand);
+    this.createDiagnosticRow(detailsContainer, "Working directory", diagnostics.lastCwd);
+    this.createDiagnosticRow(detailsContainer, "Health check", diagnostics.lastHealthError);
+    this.createDiagnosticRow(detailsContainer, "Stderr", diagnostics.lastStderr, true);
+    this.createDiagnosticRow(detailsContainer, "Log", diagnostics.logFile);
+    this.createDiagnosticRow(detailsContainer, "Status", diagnostics.statusFile);
 
     const buttonContainer = statusContainer.createDiv({
       cls: "opencode-button-group",
@@ -238,6 +268,55 @@ export class OpenCodeView extends ItemView {
       (this.app as any).setting.open();
       (this.app as any).setting.openTabById("obsidian-opencode");
     });
+
+    const copyButton = buttonContainer.createEl("button", {
+      text: "Copy diagnostics",
+    });
+    copyButton.addEventListener("click", () => {
+      void navigator.clipboard.writeText(this.formatDiagnosticsForClipboard()).then(
+        () => new Notice("OpenCode diagnostics copied"),
+        () => new Notice("Failed to copy OpenCode diagnostics")
+      );
+    });
+  }
+
+  private createDiagnosticRow(
+    container: HTMLElement,
+    label: string,
+    value: string | number | null | undefined,
+    multiline = false
+  ): void {
+    if (value === null || typeof value === "undefined" || value === "") {
+      return;
+    }
+
+    const row = container.createDiv({ cls: "opencode-diagnostic-row" });
+    row.createDiv({ text: label, cls: "opencode-diagnostic-label" });
+
+    if (multiline) {
+      row.createEl("pre", {
+        text: String(value),
+        cls: "opencode-diagnostic-value opencode-diagnostic-pre",
+      });
+      return;
+    }
+
+    row.createEl("code", {
+      text: String(value),
+      cls: "opencode-diagnostic-value",
+    });
+  }
+
+  private formatDiagnosticsForClipboard(): string {
+    const diagnostics = this.plugin.getServerDiagnostics();
+    return JSON.stringify(diagnostics, null, 2);
+  }
+
+  private applyAppearanceClass(): void {
+    const appearance = this.plugin.getSettings().webViewAppearance;
+    this.contentEl.removeClass("opencode-appearance-opencode");
+    this.contentEl.removeClass("opencode-appearance-obsidian");
+    this.contentEl.addClass(`opencode-appearance-${appearance}`);
   }
 
   private reloadIframe(): void {

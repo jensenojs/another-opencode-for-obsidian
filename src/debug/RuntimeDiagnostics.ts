@@ -15,6 +15,16 @@ export interface RuntimeStatusSnapshot {
   serverState: string;
   lastError: string | null;
   lastHealthError: string | null;
+  lastCommand: string | null;
+  lastDisplayCommand: string | null;
+  lastStartMode: string | null;
+  lastCwd: string | null;
+  lastStdout: string | null;
+  lastStderr: string | null;
+  lastExitCode: number | null;
+  lastExitSignal: string | null;
+  lastProcessErrorStack: string | null;
+  diagnosticHint: string | null;
   pid: number | null;
   hostname: string;
   port: number;
@@ -25,8 +35,10 @@ export interface RuntimeStatusSnapshot {
   proxyPort: number | null;
   projectDirectory: string;
   useCustomCommand: boolean;
+  webViewAppearance: string;
   autoStart: boolean;
   logFile: string;
+  statusFile: string;
 }
 
 const LOG_MAX_BYTES = 1024 * 1024;

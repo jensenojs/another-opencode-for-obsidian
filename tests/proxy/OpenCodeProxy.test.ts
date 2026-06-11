@@ -51,6 +51,56 @@ describe("OpenCodeProxy", () => {
     expect(body).toContain(BRIDGE_NAMESPACE);
     expect(body).toContain(BRIDGE_MESSAGES.proxyLoaded);
     expect(body).toContain(BRIDGE_MESSAGES.viewToggle);
+    expect(body).not.toContain("data-opencode-obsidian-appearance");
+  });
+
+  test("injects Obsidian appearance style when configured", async () => {
+    const targetPort = await listenTarget((_req, res) => {
+      res.writeHead(200, {
+        "content-type": "text/html",
+      });
+      res.end("<html><head></head><body>OpenCode</body></html>");
+    });
+
+    proxy = new OpenCodeProxy("127.0.0.1", targetPort, "obsidian");
+    const started = await proxy.start();
+
+    expect(started).toBe(true);
+
+    const response = await fetch(proxy.getProxyUrl("project"));
+    const body = await response.text();
+
+    expect(body).toContain("data-opencode-obsidian-appearance");
+    expect(body).toContain("background: transparent");
+  });
+
+  test("injects Obsidian theme variables when provided", async () => {
+    const targetPort = await listenTarget((_req, res) => {
+      res.writeHead(200, {
+        "content-type": "text/html",
+      });
+      res.end("<html><head></head><body>OpenCode</body></html>");
+    });
+
+    proxy = new OpenCodeProxy("127.0.0.1", targetPort, "obsidian", {
+      colorScheme: "dark",
+      variables: {
+        "--background-base": "#000000",
+        "--text-strong": "#f1f1f1",
+        "background-base": "invalid",
+      },
+    });
+    const started = await proxy.start();
+
+    expect(started).toBe(true);
+
+    const response = await fetch(proxy.getProxyUrl("project"));
+    const body = await response.text();
+
+    expect(body).toContain("data-opencode-obsidian-theme");
+    expect(body).toContain('"--background-base":"#000000"');
+    expect(body).toContain('"--text-strong":"#f1f1f1"');
+    expect(body).not.toContain("background-base\":\"invalid");
   });
 });
 

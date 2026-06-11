@@ -5,7 +5,8 @@ import {
   OpenCodeSettings,
   ServerEndpoint,
   createServerEndpoint,
-  getCustomCommandTemplate,
+  getExplicitCustomCommand,
+  usesExplicitCustomCommand,
 } from "../types";
 import { ServerState } from "./types";
 import { OpenCodeProcess } from "./process/OpenCodeProcess";
@@ -16,12 +17,53 @@ import { createLogger } from "../debug/RuntimeDiagnostics";
 
 export type { ServerState } from "./types";
 
+type StartMode = "path" | "custom";
+
+interface StartPlan {
+  mode: StartMode;
+  command: string;
+  args: string[];
+  spawnOptions: SpawnOptions;
+  displayCommand: string;
+  usesShell: boolean;
+  cwd: string;
+}
+
+export interface ServerDiagnostics {
+  state: ServerState;
+  lastError: string | null;
+  lastHealthError: string | null;
+  lastCommand: string | null;
+  lastCommandArgs: string[];
+  lastDisplayCommand: string | null;
+  lastStartMode: StartMode | null;
+  lastCwd: string | null;
+  lastStdout: string | null;
+  lastStderr: string | null;
+  lastExitCode: number | null;
+  lastExitSignal: NodeJS.Signals | null;
+  lastProcessErrorStack: string | null;
+  hint: string | null;
+}
+
+const MAX_PROCESS_OUTPUT_CHARS = 4000;
+
 export class ServerManager extends EventEmitter {
   private process: ChildProcess | null = null;
   private state: ServerState = "stopped";
   private lastError: string | null = null;
   private lastHealthError: string | null = null;
   private earlyExitCode: number | null = null;
+  private lastCommand: string | null = null;
+  private lastCommandArgs: string[] = [];
+  private lastDisplayCommand: string | null = null;
+  private lastStartMode: StartMode | null = null;
+  private lastCwd: string | null = null;
+  private lastStdout: string | null = null;
+  private lastStderr: string | null = null;
+  private lastExitCode: number | null = null;
+  private lastExitSignal: NodeJS.Signals | null = null;
+  private lastProcessErrorStack: string | null = null;
   private settings: OpenCodeSettings;
   private projectDirectory: string;
   private processImpl: OpenCodeProcess;
@@ -56,6 +98,25 @@ export class ServerManager extends EventEmitter {
     return this.lastHealthError;
   }
 
+  getDiagnostics(): ServerDiagnostics {
+    return {
+      state: this.state,
+      lastError: this.lastError,
+      lastHealthError: this.lastHealthError,
+      lastCommand: this.lastCommand,
+      lastCommandArgs: [...this.lastCommandArgs],
+      lastDisplayCommand: this.lastDisplayCommand,
+      lastStartMode: this.lastStartMode,
+      lastCwd: this.lastCwd,
+      lastStdout: this.lastStdout,
+      lastStderr: this.lastStderr,
+      lastExitCode: this.lastExitCode,
+      lastExitSignal: this.lastExitSignal,
+      lastProcessErrorStack: this.lastProcessErrorStack,
+      hint: this.getDiagnosticHint(),
+    };
+  }
+
   getPid(): number | null {
     return this.process?.pid ?? null;
   }
@@ -77,41 +138,13 @@ export class ServerManager extends EventEmitter {
     this.lastError = null;
     this.lastHealthError = null;
     this.earlyExitCode = null;
+    this.resetProcessDiagnostics();
 
     if (!this.projectDirectory) {
       return this.setError("Project directory (vault) not configured");
     }
 
     const endpoint = this.getEndpoint();
-    let executablePath: string;
-    let spawnOptions: SpawnOptions;
-    
-    if (this.settings.useCustomCommand) {
-      const resolvedCommand = this.resolveCustomCommand(endpoint);
-      if (typeof resolvedCommand !== "string") {
-        return this.setError(resolvedCommand.message);
-      }
-      executablePath = resolvedCommand;
-      spawnOptions = {
-        cwd: this.projectDirectory,
-        env: { ...process.env, NODE_USE_SYSTEM_CA: "1" },
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: true,
-      };
-    } else {
-      executablePath = ExecutableResolver.resolve(this.settings.opencodePath);
-      
-      const commandError = await this.processImpl.verifyCommand(executablePath);
-      if (commandError) {
-        return this.setError(commandError);
-      }
-      
-      spawnOptions = {
-        cwd: this.projectDirectory,
-        env: { ...process.env, NODE_USE_SYSTEM_CA: "1" },
-        stdio: ["ignore", "pipe", "pipe"],
-      };
-    }
 
     if (await this.checkServerHealth()) {
       this.logger.info("server already running", {
@@ -122,49 +155,49 @@ export class ServerManager extends EventEmitter {
       return true;
     }
 
+    const startPlan = await this.createStartPlan(endpoint);
+    if ("message" in startPlan) {
+      return this.setError(startPlan.message);
+    }
+
+    this.rememberStartPlan(startPlan);
+
     this.logger.info("starting server", {
-      mode: this.settings.useCustomCommand ? "custom" : "path",
-      command: executablePath,
+      mode: startPlan.mode,
+      command: startPlan.displayCommand,
+      rawCommand: startPlan.command,
+      args: startPlan.args,
       port: endpoint.port,
       hostname: endpoint.hostname,
-      cwd: this.projectDirectory,
+      cwd: startPlan.cwd,
       projectDirectory: this.projectDirectory,
+      shell: startPlan.usesShell,
     });
 
-    if (this.settings.useCustomCommand) {
-      this.process = this.processImpl.start(
-        executablePath,
-        [],
-        spawnOptions
-      );
-    } else {
-      this.process = this.processImpl.start(
-        executablePath,
-        [
-          "serve",
-          "--port",
-          endpoint.port.toString(),
-          "--hostname",
-          endpoint.hostname,
-          "--cors",
-          "app://obsidian.md",
-        ],
-        spawnOptions
-      );
-    }
+    this.process = this.processImpl.start(
+      startPlan.command,
+      startPlan.args,
+      startPlan.spawnOptions
+    );
 
     this.logger.info("process spawned", { pid: this.process.pid });
 
     this.process.stdout?.on("data", (data) => {
-      this.logger.info("process stdout", { text: data.toString().trim() });
+      const text = data.toString().trim();
+      this.rememberProcessOutput("stdout", text);
+      this.logger.info("process stdout", { text });
     });
 
     this.process.stderr?.on("data", (data) => {
-      this.logger.error("process stderr", { text: data.toString().trim() });
+      const text = data.toString().trim();
+      this.rememberProcessOutput("stderr", text);
+      this.logger.error("process stderr", { text });
     });
 
     this.process.on("exit", (code, signal) => {
       this.logger.info("process exited", { code, signal });
+      this.lastExitCode = code;
+      this.lastExitSignal = signal;
       this.process = null;
 
       if (this.state === "starting" && code !== null && code !== 0) {
@@ -178,14 +211,12 @@ export class ServerManager extends EventEmitter {
 
     this.process.on("error", (err: NodeJS.ErrnoException) => {
       this.logger.error("failed to start process", err);
+      this.lastProcessErrorStack = err.stack ?? null;
       this.process = null;
 
       if (err.code === "ENOENT") {
-        const command = this.settings.useCustomCommand 
-          ? this.settings.customCommand 
-          : this.settings.opencodePath;
         this.setError(
-          `Executable not found: '${command}'`
+          `Executable not found: '${this.lastDisplayCommand ?? this.settings.opencodePath}'`
         );
       } else {
         this.setError(`Failed to start: ${err.message}`);
@@ -203,9 +234,7 @@ export class ServerManager extends EventEmitter {
     }
 
     if (this.earlyExitCode !== null) {
-      return this.setError(
-        `Process exited unexpectedly (exit code ${this.earlyExitCode})`
-      );
+      return this.setError(this.formatEarlyExitError(this.earlyExitCode));
     }
 
     if (!this.process) {
@@ -252,11 +281,69 @@ export class ServerManager extends EventEmitter {
     return createServerEndpoint(this.settings, this.projectDirectory);
   }
 
-  private resolveCustomCommand(
+  private async createStartPlan(
     endpoint: ServerEndpoint
-  ): string | { message: string } {
-    const command = getCustomCommandTemplate(this.settings);
+  ): Promise<StartPlan | { message: string }> {
+    const baseOptions: SpawnOptions = {
+      cwd: this.projectDirectory,
+      env: { ...process.env, NODE_USE_SYSTEM_CA: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    };
 
+    if (usesExplicitCustomCommand(this.settings)) {
+      const resolvedCommand = this.resolveCustomCommand(
+        endpoint,
+        getExplicitCustomCommand(this.settings)
+      );
+      if (typeof resolvedCommand !== "string") {
+        return resolvedCommand;
+      }
+
+      return {
+        mode: "custom",
+        command: resolvedCommand,
+        args: [],
+        spawnOptions: {
+          ...baseOptions,
+          shell: true,
+        },
+        displayCommand: resolvedCommand,
+        usesShell: true,
+        cwd: this.projectDirectory,
+      };
+    }
+
+    const executablePath = ExecutableResolver.resolve(this.settings.opencodePath);
+    const commandError = await this.processImpl.verifyCommand(executablePath);
+    if (commandError) {
+      return { message: commandError };
+    }
+
+    const args = [
+      "serve",
+      "--port",
+      endpoint.port.toString(),
+      "--hostname",
+      endpoint.hostname,
+      "--cors",
+      "app://obsidian.md",
+    ];
+
+    return {
+      mode: "path",
+      command: executablePath,
+      args,
+      spawnOptions: baseOptions,
+      displayCommand: formatCommand(executablePath, args),
+      usesShell: false,
+      cwd: this.projectDirectory,
+    };
+  }
+
+  private resolveCustomCommand(
+    endpoint: ServerEndpoint,
+    command: string
+  ): string | { message: string } {
     if (!command.includes("{hostname}")) {
       return {
         message: "Custom command must include {hostname} so the plugin can use one server endpoint",
@@ -274,6 +361,81 @@ export class ServerManager extends EventEmitter {
       .replace(/\{port\}/g, endpoint.port.toString())
       .replace(/\{cors\}/g, "app://obsidian.md")
       .replace(/\{projectDirectory\}/g, this.projectDirectory);
+  }
+
+  private rememberStartPlan(startPlan: StartPlan): void {
+    this.lastCommand = startPlan.command;
+    this.lastCommandArgs = [...startPlan.args];
+    this.lastDisplayCommand = startPlan.displayCommand;
+    this.lastStartMode = startPlan.mode;
+    this.lastCwd = startPlan.cwd;
+  }
+
+  private resetProcessDiagnostics(): void {
+    this.lastCommand = null;
+    this.lastCommandArgs = [];
+    this.lastDisplayCommand = null;
+    this.lastStartMode = null;
+    this.lastCwd = null;
+    this.lastStdout = null;
+    this.lastStderr = null;
+    this.lastExitCode = null;
+    this.lastExitSignal = null;
+    this.lastProcessErrorStack = null;
+  }
+
+  private rememberProcessOutput(kind: "stdout" | "stderr", text: string): void {
+    if (!text) {
+      return;
+    }
+
+    const previous = kind === "stdout" ? this.lastStdout : this.lastStderr;
+    const next = truncateProcessOutput(
+      previous ? `${previous}\n${text}` : text
+    );
+
+    if (kind === "stdout") {
+      this.lastStdout = next;
+      return;
+    }
+    this.lastStderr = next;
+  }
+
+  private formatEarlyExitError(code: number): string {
+    const stderr = this.lastStderr?.trim();
+    if (!stderr) {
+      return `Process exited unexpectedly (exit code ${code})`;
+    }
+    return `Process exited unexpectedly (exit code ${code}): ${collapseWhitespace(stderr)}`;
+  }
+
+  private getDiagnosticHint(): string | null {
+    const evidence = [
+      this.lastError,
+      this.lastStderr,
+      this.lastProcessErrorStack,
+    ].filter(Boolean).join("\n");
+
+    if (
+      this.earlyExitCode === 127 ||
+      this.lastExitCode === 127 ||
+      /command not found|not recognized|ENOENT|executable not found/i.test(evidence)
+    ) {
+      if (this.lastStartMode === "custom") {
+        return "Custom commands run through Obsidian's GUI shell. Use an absolute or leading-tilde executable path, or leave Custom command empty to use OpenCode executable path mode.";
+      }
+      return "OpenCode executable was not found. Set OpenCode executable path to an absolute path, or use Autodetect in Settings.";
+    }
+
+    if (this.lastStartMode === "custom" && this.lastHealthError) {
+      return "The custom command started, but the configured health endpoint did not become healthy. Keep {hostname} and {port} wired to the same server the command starts.";
+    }
+
+    if (this.lastHealthError) {
+      return `Last health check: ${this.lastHealthError}`;
+    }
+
+    return null;
   }
 
   private async checkServerHealth(): Promise<boolean> {
@@ -345,4 +507,26 @@ export class ServerManager extends EventEmitter {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+}
+
+function formatCommand(command: string, args: string[]): string {
+  return [command, ...args].map(quoteCommandPart).join(" ");
+}
+
+function quoteCommandPart(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value;
+  }
+  return JSON.stringify(value);
+}
+
+function truncateProcessOutput(value: string): string {
+  if (value.length <= MAX_PROCESS_OUTPUT_CHARS) {
+    return value;
+  }
+  return `...${value.slice(-MAX_PROCESS_OUTPUT_CHARS)}`;
+}
+
+function collapseWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }

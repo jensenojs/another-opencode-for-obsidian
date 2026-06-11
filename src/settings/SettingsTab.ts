@@ -2,13 +2,16 @@ import { App, Plugin, PluginSettingTab, Setting, Notice } from "obsidian";
 import { existsSync, statSync } from "fs";
 import { homedir } from "os";
 import {
-  DEFAULT_CUSTOM_COMMAND,
+  CUSTOM_COMMAND_EXAMPLE,
+  OPENCODE_VIEW_TYPE,
   OpenCodeSettings,
   ViewLocation,
-  getCustomCommandTemplate,
+  WebViewAppearance,
 } from "../types";
 import { ServerManager } from "../server/ServerManager";
 import { ExecutableResolver } from "../server/ExecutableResolver";
+import { getRuntimePaths } from "../debug/RuntimeDiagnostics";
+import { OpenCodeView } from "../ui/OpenCodeView";
 
 function expandTilde(path: string): string {
   if (path === "~") {
@@ -70,18 +73,15 @@ export class OpenCodeSettingTab extends PluginSettingTab {
 
     const customCmdSetting = new Setting(containerEl)
       .setName("Use custom command")
-      .setDesc("Use a shell command template instead of the executable path")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.settings.useCustomCommand)
-          .onChange(async (value) => {
-            this.settings.useCustomCommand = value;
-            if (value) {
-              this.settings.customCommand = getCustomCommandTemplate(this.settings);
-            }
-            await this.onSettingsChange();
-            this.display();
-          })
+        .setDesc("Use a shell command template instead of the executable path")
+        .addToggle((toggle) =>
+          toggle
+            .setValue(this.settings.useCustomCommand)
+            .onChange(async (value) => {
+              this.settings.useCustomCommand = value;
+              await this.onSettingsChange();
+              this.display();
+            })
       );
     
     const descEl = customCmdSetting.descEl;
@@ -96,16 +96,16 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     });
 
     if (this.settings.useCustomCommand) {
-      new Setting(containerEl)
-        .setName("Custom command")
-        .setDesc("Command template to start OpenCode. Must include {hostname} and {port}. Optional variables: {cors}, {projectDirectory}.")
-        .addTextArea((text) => {
-          text
-            .setPlaceholder(DEFAULT_CUSTOM_COMMAND)
-            .setValue(getCustomCommandTemplate(this.settings))
-            .onChange(async (value) => {
-              this.settings.customCommand = value;
-              await this.onSettingsChange();
+        new Setting(containerEl)
+          .setName("Custom command")
+          .setDesc("Leave empty to use OpenCode executable path mode. Non-empty commands run through the system shell and must include {hostname} and {port}. Optional variables: {cors}, {projectDirectory}.")
+          .addTextArea((text) => {
+            text
+              .setPlaceholder(CUSTOM_COMMAND_EXAMPLE)
+              .setValue(this.settings.customCommand)
+              .onChange(async (value) => {
+                this.settings.customCommand = value;
+                await this.onSettingsChange();
             });
           text.inputEl.rows = 3;
           text.inputEl.style.width = "100%";
@@ -176,8 +176,8 @@ export class OpenCodeSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
-      .setName("Default view location")
+      new Setting(containerEl)
+        .setName("Default view location")
       .setDesc(
         "Where to open the OpenCode panel: sidebar opens in the right panel, main opens as a tab in the editor area"
       )
@@ -189,10 +189,27 @@ export class OpenCodeSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.settings.defaultViewLocation = value as ViewLocation;
             await this.onSettingsChange();
-          })
-      );
+            })
+        );
 
-    containerEl.createEl("h3", { text: "Workspace Context" });
+      new Setting(containerEl)
+        .setName("Web view appearance")
+        .setDesc(
+          "Choose whether the embedded web view keeps OpenCode styling or maps Obsidian theme variables into OpenCode."
+        )
+        .addDropdown((dropdown) =>
+          dropdown
+            .addOption("opencode", "OpenCode")
+            .addOption("obsidian", "Obsidian")
+            .setValue(this.settings.webViewAppearance)
+            .onChange(async (value) => {
+              this.settings.webViewAppearance = value as WebViewAppearance;
+              await this.onSettingsChange();
+              this.refreshOpenCodeViews();
+            })
+        );
+
+      containerEl.createEl("h3", { text: "Workspace Context" });
 
     new Setting(containerEl)
       .setName("Inject workspace context")
@@ -303,13 +320,25 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     });
 
     if (state === "error") {
-      const errorMsg = this.serverManager.getLastError();
+      const diagnostics = this.serverManager.getDiagnostics();
+      const paths = getRuntimePaths();
+      const errorMsg = diagnostics.lastError;
       if (errorMsg) {
         const errorEl = container.createDiv({ cls: "opencode-error-details" });
         errorEl.createEl("div", {
           text: errorMsg,
           cls: "opencode-error-text"
         });
+        if (diagnostics.hint) {
+          errorEl.createEl("div", {
+            text: diagnostics.hint,
+            cls: "opencode-diagnostic-hint",
+          });
+        }
+        this.renderDiagnosticLine(errorEl, "Command", diagnostics.lastDisplayCommand);
+        this.renderDiagnosticLine(errorEl, "Stderr", diagnostics.lastStderr);
+        this.renderDiagnosticLine(errorEl, "Log", paths.logFile);
+        this.renderDiagnosticLine(errorEl, "Status", paths.statusFile);
       }
     }
 
@@ -365,6 +394,28 @@ export class OpenCodeSettingTab extends PluginSettingTab {
         text: "Please wait...",
         cls: "opencode-status-waiting",
       });
+    }
+  }
+
+  private renderDiagnosticLine(
+    container: HTMLElement,
+    label: string,
+    value: string | null | undefined
+  ): void {
+    if (!value) {
+      return;
+    }
+
+    const row = container.createDiv({ cls: "opencode-diagnostic-row" });
+    row.createDiv({ text: label, cls: "opencode-diagnostic-label" });
+    row.createEl("code", { text: value, cls: "opencode-diagnostic-value" });
+  }
+
+  private refreshOpenCodeViews(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(OPENCODE_VIEW_TYPE)) {
+      if (leaf.view instanceof OpenCodeView) {
+        leaf.view.refreshAppearance();
+      }
     }
   }
 }
