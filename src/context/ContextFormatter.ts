@@ -1,6 +1,8 @@
 export interface SelectedTextContext {
   text: string;
   sourcePath: string;
+  selectionStartLine?: number;
+  selectionEndLine?: number;
 }
 
 export interface WorkspaceContextSnapshot {
@@ -35,7 +37,7 @@ export function formatWorkspaceContext(
 
   if (selection) {
     lines.push("");
-    lines.push(`Selected text (from ${selection.sourcePath}):`);
+    lines.push(`Selected text (from ${formatSelectionSource(selection)}):`);
     lines.push('"""');
     lines.push(selection.text);
     lines.push('"""');
@@ -43,6 +45,18 @@ export function formatWorkspaceContext(
 
   lines.push("</obsidian-context>");
   return lines.join("\n");
+}
+
+function formatSelectionSource(selection: SelectedTextContext): string {
+  if (selection.selectionStartLine === undefined || selection.selectionEndLine === undefined) {
+    return selection.sourcePath;
+  }
+
+  if (selection.selectionStartLine === selection.selectionEndLine) {
+    return `${selection.sourcePath}:${selection.selectionStartLine}`;
+  }
+
+  return `${selection.sourcePath}:${selection.selectionStartLine}-${selection.selectionEndLine}`;
 }
 
 function truncateSelection(

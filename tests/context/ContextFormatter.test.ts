@@ -22,6 +22,8 @@ describe("formatWorkspaceContext", () => {
           selection: {
             sourcePath: "a.md",
             text: "selected",
+            selectionStartLine: 4,
+            selectionEndLine: 6,
           },
         },
         { maxNotes: 20, maxSelectionLength: 2000 }
@@ -31,7 +33,30 @@ Currently open notes in Obsidian:
 - a.md
 - b.md
 
-Selected text (from a.md):
+Selected text (from a.md:4-6):
+"""
+selected
+"""
+</obsidian-context>`);
+  });
+
+  test("formats a single-line selection location", () => {
+    expect(
+      formatWorkspaceContext(
+        {
+          openNotePaths: [],
+          selection: {
+            sourcePath: "a.md",
+            text: "selected",
+            selectionStartLine: 4,
+            selectionEndLine: 4,
+          },
+        },
+        { maxNotes: 20, maxSelectionLength: 2000 }
+      )
+    ).toBe(`<obsidian-context>
+
+Selected text (from a.md:4):
 """
 selected
 """

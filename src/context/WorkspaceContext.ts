@@ -1,9 +1,10 @@
 import { App, MarkdownView } from "obsidian";
 import type { SelectedTextContext, WorkspaceContextSnapshot } from "./ContextFormatter";
+import { getSelectionLineRange } from "./SelectionLineRange";
 
 export class WorkspaceContext {
   private app: App;
-  private lastSelection: { text: string; sourcePath: string } | null = null;
+  private lastSelection: SelectedTextContext | null = null;
   private lastMarkdownView: MarkdownView | null = null;
 
   constructor(app: App) {
@@ -15,14 +16,9 @@ export class WorkspaceContext {
       this.lastMarkdownView = view;
     }
 
-    const sourcePath = view?.file?.path;
-    const selection = view?.editor?.getSelection() ?? "";
-
-    if (sourcePath && selection.trim()) {
-      this.lastSelection = {
-        text: selection,
-        sourcePath,
-      };
+    const selectionContext = this.getSelectionContext(view);
+    if (selectionContext) {
+      this.lastSelection = selectionContext;
     }
   }
 
@@ -43,23 +39,35 @@ export class WorkspaceContext {
 
     this.trackViewSelection(view);
 
-    const sourcePath = view?.file?.path;
-    const selection = view?.editor?.getSelection() ?? "";
-    let selectionContext: SelectedTextContext | null = null;
-
-    if (sourcePath && selection.trim()) {
-      selectionContext = {
-        text: selection,
-        sourcePath,
-      };
+    const selectionContext = this.getSelectionContext(view) ?? this.lastSelection;
+    if (selectionContext) {
       this.lastSelection = selectionContext;
-    } else if (this.lastSelection) {
-      selectionContext = this.lastSelection;
     }
 
     return {
       openNotePaths,
       selection: selectionContext,
     };
+  }
+
+  private getSelectionContext(view: MarkdownView | null): SelectedTextContext | null {
+    const sourcePath = view?.file?.path;
+    const selection = view?.editor?.getSelection() ?? "";
+
+    if (!view || !sourcePath || !selection.trim()) {
+      return null;
+    }
+
+    return {
+      text: selection,
+      sourcePath,
+      ...this.getSelectionLineRange(view),
+    };
+  }
+
+  private getSelectionLineRange(
+    view: MarkdownView
+  ): Pick<SelectedTextContext, "selectionStartLine" | "selectionEndLine"> {
+    return getSelectionLineRange(view.editor.listSelections()[0]);
   }
 }
