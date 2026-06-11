@@ -8,7 +8,9 @@ describe("RuntimeDiagnostics", () => {
     });
 
     expect(paths.stateDir).toBe("/tmp/opencode-obsidian-state/opencode-obsidian");
-    expect(paths.logFile).toBe("/tmp/opencode-obsidian-state/opencode-obsidian/opencode-obsidian.log");
+    expect(paths.logFile).toBe(
+      "/tmp/opencode-obsidian-state/opencode-obsidian/opencode-obsidian.log"
+    );
     expect(paths.statusFile).toBe("/tmp/opencode-obsidian-state/opencode-obsidian/status.json");
   });
 });

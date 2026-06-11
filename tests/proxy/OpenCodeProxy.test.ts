@@ -85,7 +85,8 @@ describe("OpenCodeProxy", () => {
     proxy = new OpenCodeProxy("127.0.0.1", targetPort, "obsidian", {
       colorScheme: "dark",
       variables: {
-        "--background-base": "#000000",
+        "--background-base": "transparent",
+        "--surface-raised-base": "color-mix(in srgb, #222222 64%, transparent)",
         "--text-strong": "#f1f1f1",
         "background-base": "invalid",
       },
@@ -98,15 +99,16 @@ describe("OpenCodeProxy", () => {
     const body = await response.text();
 
     expect(body).toContain("data-opencode-obsidian-theme");
-    expect(body).toContain('"--background-base":"#000000"');
+    expect(body).toContain('"--background-base":"transparent"');
+    expect(body).toContain(
+      '"--surface-raised-base":"color-mix(in srgb, #222222 64%, transparent)"'
+    );
     expect(body).toContain('"--text-strong":"#f1f1f1"');
-    expect(body).not.toContain("background-base\":\"invalid");
+    expect(body).not.toContain('background-base":"invalid');
   });
 });
 
-async function listenTarget(
-  handler: http.RequestListener
-): Promise<number> {
+async function listenTarget(handler: http.RequestListener): Promise<number> {
   targetServer = http.createServer(handler);
 
   await new Promise<void>((resolve) => {

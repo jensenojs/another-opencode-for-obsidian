@@ -23,8 +23,7 @@ const OBSIDIAN_FALLBACKS: ObsidianThemeValues = {
   textMuted: "#c8c8c8",
   textFaint: "#8f8f8f",
   interactiveAccent: "#f5c45c",
-  fontInterface:
-    'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  fontInterface: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 };
 
 // This bridge consumes both apps' theme-token surfaces:
@@ -38,7 +37,11 @@ export function captureObsidianWebViewTheme(source: HTMLElement = document.body)
   return createOpenCodeWebViewTheme({
     colorScheme,
     backgroundPrimary: cssVar(styles, "--background-primary", OBSIDIAN_FALLBACKS.backgroundPrimary),
-    backgroundSecondary: cssVar(styles, "--background-secondary", OBSIDIAN_FALLBACKS.backgroundSecondary),
+    backgroundSecondary: cssVar(
+      styles,
+      "--background-secondary",
+      OBSIDIAN_FALLBACKS.backgroundSecondary
+    ),
     backgroundModifierBorder: cssVar(
       styles,
       "--background-modifier-border",
@@ -58,6 +61,17 @@ export function captureObsidianWebViewTheme(source: HTMLElement = document.body)
 }
 
 export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebViewTheme {
+  const transparent = "transparent";
+  const subtleSurface = "color-mix(in srgb, var(--opencode-obsidian-text-normal) 7%, transparent)";
+  const baseSurface =
+    "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 48%, transparent)";
+  const raisedSurface =
+    "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 64%, transparent)";
+  const strongSurface =
+    "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 76%, transparent)";
+  const strongerSurface =
+    "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 84%, transparent)";
+
   const variables = {
     "--opencode-obsidian-background-primary": obsidian.backgroundPrimary,
     "--opencode-obsidian-background-secondary": obsidian.backgroundSecondary,
@@ -70,42 +84,58 @@ export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebVi
     "--font-family-sans": obsidian.fontInterface,
     "--font-sans": obsidian.fontInterface,
 
-    "--background-base": "var(--opencode-obsidian-background-primary)",
-    "--background-weak": "var(--opencode-obsidian-background-secondary)",
-    "--background-strong": "var(--opencode-obsidian-background-primary)",
-    "--background-stronger": "var(--opencode-obsidian-background-primary)",
+    // Obsidian mode lets the Obsidian pane own the page background. Local
+    // OpenCode surfaces below add contrast without targeting component classes.
+    "--background-base": transparent,
+    "--background-weak": transparent,
+    "--background-strong": transparent,
+    "--background-stronger": transparent,
 
     "--surface-base": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 6%, transparent)",
-    "--base": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 7%, transparent)",
-    "--base2": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 7%, transparent)",
-    "--base3": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 7%, transparent)",
+    "--base": subtleSurface,
+    "--base2": subtleSurface,
+    "--base3": subtleSurface,
     "--surface-base-hover": "var(--opencode-obsidian-hover)",
-    "--surface-base-active": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 13%, transparent)",
-    "--surface-base-interactive-active": "color-mix(in srgb, var(--opencode-obsidian-accent) 18%, transparent)",
-    "--surface-inset-base": "var(--opencode-obsidian-background-secondary)",
-    "--surface-inset-base-hover": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 10%, transparent)",
-    "--surface-inset-strong": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 12%, transparent)",
-    "--surface-inset-strong-hover": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 16%, transparent)",
-    "--surface-raised-base": "var(--opencode-obsidian-background-secondary)",
-    "--surface-raised-base-hover": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 10%, transparent)",
-    "--surface-raised-base-active": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 14%, transparent)",
-    "--surface-raised-strong": "var(--opencode-obsidian-background-secondary)",
-    "--surface-raised-strong-hover": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 10%, var(--opencode-obsidian-background-secondary))",
-    "--surface-raised-stronger": "var(--opencode-obsidian-background-secondary)",
-    "--surface-raised-stronger-hover": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 12%, var(--opencode-obsidian-background-secondary))",
-    "--surface-raised-stronger-non-alpha": "var(--opencode-obsidian-background-secondary)",
+    "--surface-base-active":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 13%, transparent)",
+    "--surface-base-interactive-active":
+      "color-mix(in srgb, var(--opencode-obsidian-accent) 18%, transparent)",
+    "--surface-inset-base": baseSurface,
+    "--surface-inset-base-hover":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 10%, transparent)",
+    "--surface-inset-strong":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 12%, transparent)",
+    "--surface-inset-strong-hover":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 16%, transparent)",
+    "--surface-raised-base": raisedSurface,
+    "--surface-float-base": strongSurface,
+    "--surface-float-base-hover": strongerSurface,
+    "--surface-raised-base-hover":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 10%, transparent)",
+    "--surface-raised-base-active":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 14%, transparent)",
+    "--surface-raised-strong": strongSurface,
+    "--surface-raised-strong-hover": strongerSurface,
+    "--surface-raised-stronger": strongerSurface,
+    "--surface-raised-stronger-hover": strongerSurface,
+    "--surface-stronger-non-alpha": strongerSurface,
+    "--surface-raised-stronger-non-alpha": strongerSurface,
     "--surface-weak": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 9%, transparent)",
     "--surface-weaker": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 6%, transparent)",
-    "--surface-strong": "var(--opencode-obsidian-background-secondary)",
-    "--surface-interactive-base": "color-mix(in srgb, var(--opencode-obsidian-accent) 22%, transparent)",
-    "--surface-interactive-hover": "color-mix(in srgb, var(--opencode-obsidian-accent) 30%, transparent)",
-    "--surface-interactive-weak": "color-mix(in srgb, var(--opencode-obsidian-accent) 12%, transparent)",
-    "--surface-interactive-weak-hover": "color-mix(in srgb, var(--opencode-obsidian-accent) 18%, transparent)",
+    "--surface-strong": strongSurface,
+    "--surface-interactive-base":
+      "color-mix(in srgb, var(--opencode-obsidian-accent) 22%, transparent)",
+    "--surface-interactive-hover":
+      "color-mix(in srgb, var(--opencode-obsidian-accent) 30%, transparent)",
+    "--surface-interactive-weak":
+      "color-mix(in srgb, var(--opencode-obsidian-accent) 12%, transparent)",
+    "--surface-interactive-weak-hover":
+      "color-mix(in srgb, var(--opencode-obsidian-accent) 18%, transparent)",
 
-    "--input-base": "var(--opencode-obsidian-background-primary)",
-    "--input-hover": "var(--opencode-obsidian-background-secondary)",
-    "--input-active": "var(--opencode-obsidian-background-primary)",
-    "--input-focus": "var(--opencode-obsidian-background-primary)",
+    "--input-base": baseSurface,
+    "--input-hover": raisedSurface,
+    "--input-active": raisedSurface,
+    "--input-focus": raisedSurface,
     "--input-selected": "color-mix(in srgb, var(--opencode-obsidian-accent) 24%, transparent)",
 
     "--text-base": "var(--opencode-obsidian-text-muted)",
@@ -116,20 +146,26 @@ export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebVi
     "--text-interactive-base": "var(--opencode-obsidian-accent)",
 
     "--button-primary-base": "var(--opencode-obsidian-accent)",
-    "--button-secondary-base": "var(--opencode-obsidian-background-secondary)",
+    "--button-secondary-base": raisedSurface,
     "--button-secondary-hover": "var(--opencode-obsidian-hover)",
     "--button-ghost-hover": "var(--opencode-obsidian-hover)",
-    "--button-ghost-hover2": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 14%, transparent)",
+    "--button-ghost-hover2":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 14%, transparent)",
 
     "--border-base": "var(--opencode-obsidian-border)",
-    "--border-hover": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 35%, var(--opencode-obsidian-border))",
-    "--border-active": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 45%, var(--opencode-obsidian-border))",
+    "--border-hover":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 35%, var(--opencode-obsidian-border))",
+    "--border-active":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 45%, var(--opencode-obsidian-border))",
     "--border-focus": "var(--opencode-obsidian-accent)",
     "--border-selected": "var(--opencode-obsidian-accent)",
     "--border-weak-base": "var(--opencode-obsidian-border)",
-    "--border-weak-hover": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 25%, var(--opencode-obsidian-border))",
-    "--border-weak-active": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 35%, var(--opencode-obsidian-border))",
-    "--border-weak-selected": "color-mix(in srgb, var(--opencode-obsidian-accent) 38%, transparent)",
+    "--border-weak-hover":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 25%, var(--opencode-obsidian-border))",
+    "--border-weak-active":
+      "color-mix(in srgb, var(--opencode-obsidian-text-normal) 35%, var(--opencode-obsidian-border))",
+    "--border-weak-selected":
+      "color-mix(in srgb, var(--opencode-obsidian-accent) 38%, transparent)",
     "--border-weaker-base": "color-mix(in srgb, var(--opencode-obsidian-border) 60%, transparent)",
     "--border-interactive-base": "var(--opencode-obsidian-accent)",
     "--border-interactive-hover": "var(--opencode-obsidian-accent)",
@@ -151,12 +187,13 @@ export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebVi
     "--markdown-link": "var(--opencode-obsidian-accent)",
     "--markdown-link-text": "var(--opencode-obsidian-accent)",
 
-    "--v2-background-bg-base": "var(--opencode-obsidian-background-primary)",
-    "--v2-background-bg-deep": "var(--opencode-obsidian-background-primary)",
-    "--v2-background-bg-layer-01": "var(--opencode-obsidian-background-secondary)",
-    "--v2-background-bg-layer-02": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 10%, var(--opencode-obsidian-background-secondary))",
-    "--v2-background-bg-layer-04": "color-mix(in srgb, var(--opencode-obsidian-text-normal) 18%, var(--opencode-obsidian-background-secondary))",
-    "--v2-background-bg-button-neutral": "var(--opencode-obsidian-background-secondary)",
+    "--v2-background-bg-base": transparent,
+    "--v2-background-bg-deep": transparent,
+    "--v2-background-bg-layer-01": baseSurface,
+    "--v2-background-bg-layer-02": raisedSurface,
+    "--v2-background-bg-layer-03": strongSurface,
+    "--v2-background-bg-layer-04": strongerSurface,
+    "--v2-background-bg-button-neutral": raisedSurface,
     "--v2-background-bg-accent": "var(--opencode-obsidian-accent)",
     "--v2-text-text-base": "var(--opencode-obsidian-text-normal)",
     "--v2-text-text-muted": "var(--opencode-obsidian-text-muted)",
@@ -165,7 +202,8 @@ export function createOpenCodeWebViewTheme(obsidian: ObsidianThemeValues): WebVi
     "--v2-icon-icon-base": "var(--opencode-obsidian-text-normal)",
     "--v2-icon-icon-muted": "var(--opencode-obsidian-text-muted)",
     "--v2-icon-icon-accent": "var(--opencode-obsidian-accent)",
-    "--v2-border-border-muted": "color-mix(in srgb, var(--opencode-obsidian-border) 60%, transparent)",
+    "--v2-border-border-muted":
+      "color-mix(in srgb, var(--opencode-obsidian-border) 60%, transparent)",
     "--v2-border-border-base": "var(--opencode-obsidian-border)",
     "--v2-border-border-focus": "var(--opencode-obsidian-accent)",
   };

@@ -73,8 +73,7 @@ export class ServerManager extends EventEmitter {
     super();
     this.settings = settings;
     this.projectDirectory = projectDirectory;
-    this.processImpl =
-      process.platform === "win32" ? new WindowsProcess() : new PosixProcess();
+    this.processImpl = process.platform === "win32" ? new WindowsProcess() : new PosixProcess();
   }
 
   updateSettings(settings: OpenCodeSettings): void {
@@ -390,9 +389,7 @@ export class ServerManager extends EventEmitter {
     }
 
     const previous = kind === "stdout" ? this.lastStdout : this.lastStderr;
-    const next = truncateProcessOutput(
-      previous ? `${previous}\n${text}` : text
-    );
+    const next = truncateProcessOutput(previous ? `${previous}\n${text}` : text);
 
     if (kind === "stdout") {
       this.lastStdout = next;
@@ -410,11 +407,9 @@ export class ServerManager extends EventEmitter {
   }
 
   private getDiagnosticHint(): string | null {
-    const evidence = [
-      this.lastError,
-      this.lastStderr,
-      this.lastProcessErrorStack,
-    ].filter(Boolean).join("\n");
+    const evidence = [this.lastError, this.lastStderr, this.lastProcessErrorStack]
+      .filter(Boolean)
+      .join("\n");
 
     if (
       this.earlyExitCode === 127 ||

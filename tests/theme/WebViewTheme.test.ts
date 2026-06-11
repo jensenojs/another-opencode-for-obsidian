@@ -18,12 +18,24 @@ describe("createOpenCodeWebViewTheme", () => {
 
     expect(theme.colorScheme).toBe("dark");
     expect(theme.variables["--opencode-obsidian-background-primary"]).toBe("#000000");
-    expect(theme.variables["--background-base"]).toBe("var(--opencode-obsidian-background-primary)");
-    expect(theme.variables["--surface-raised-base"]).toBe("var(--opencode-obsidian-background-secondary)");
+    expect(theme.variables["--background-base"]).toBe("transparent");
+    expect(theme.variables["--background-strong"]).toBe("transparent");
+    expect(theme.variables["--surface-raised-base"]).toBe(
+      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 64%, transparent)"
+    );
+    expect(theme.variables["--surface-float-base"]).toBe(
+      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 76%, transparent)"
+    );
+    expect(theme.variables["--input-base"]).toBe(
+      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 48%, transparent)"
+    );
     expect(theme.variables["--text-strong"]).toBe("var(--opencode-obsidian-text-normal)");
     expect(theme.variables["--border-weak-base"]).toBe("var(--opencode-obsidian-border)");
     expect(theme.variables["--text-interactive-base"]).toBe("var(--opencode-obsidian-accent)");
-    expect(theme.variables["--v2-background-bg-base"]).toBe("var(--opencode-obsidian-background-primary)");
+    expect(theme.variables["--v2-background-bg-base"]).toBe("transparent");
+    expect(theme.variables["--v2-background-bg-layer-03"]).toBe(
+      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 76%, transparent)"
+    );
     expect(theme.variables["--font-family-sans"]).toBe('"Monaco Nerd Font Mono", ui-sans-serif');
   });
 });

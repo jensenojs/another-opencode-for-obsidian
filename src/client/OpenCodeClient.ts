@@ -129,10 +129,7 @@ export class OpenCodeClient {
     return latestSession.id ?? null;
   }
 
-  async updateContext(params: {
-    sessionId: string;
-    contextText: string | null;
-  }): Promise<void> {
+  async updateContext(params: { sessionId: string; contextText: string | null }): Promise<void> {
     const { sessionId, contextText } = params;
 
     if (this.trackedSessionId && this.trackedSessionId !== sessionId) {
@@ -159,7 +156,10 @@ export class OpenCodeClient {
     }
   }
 
-  private async sendPrompt(sessionId: string, contextText: string): Promise<OpenCodeMessageWithParts | null> {
+  private async sendPrompt(
+    sessionId: string,
+    contextText: string
+  ): Promise<OpenCodeMessageWithParts | null> {
     const result = await this.request<OpenCodeMessageWithParts>(
       "POST",
       `/session/${sessionId}/message`,
@@ -181,7 +181,10 @@ export class OpenCodeClient {
     return message;
   }
 
-  private async updatePart(part: OpenCodePart, updates: { text?: string; ignored?: boolean }): Promise<boolean> {
+  private async updatePart(
+    part: OpenCodePart,
+    updates: { text?: string; ignored?: boolean }
+  ): Promise<boolean> {
     const result = await this.request<OpenCodePart>(
       "PATCH",
       `/session/${part.sessionID}/message/${part.messageID}/part/${part.id}`,
@@ -212,7 +215,11 @@ export class OpenCodeClient {
     return true;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<OpenCodeResponse<T>> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown
+  ): Promise<OpenCodeResponse<T>> {
     try {
       const url = `${this.apiBaseUrl}${path}`;
       const urlObj = new URL(url);
@@ -228,7 +235,11 @@ export class OpenCodeClient {
           "x-opencode-directory": encodeURIComponent(this.projectDirectory),
         },
       };
-      const response = await new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>((resolve, reject) => {
+      const response = await new Promise<{
+        ok: boolean;
+        status: number;
+        json: () => Promise<unknown>;
+      }>((resolve, reject) => {
         const req = http.request(options, (res: import("http").IncomingMessage) => {
           let data = "";
           res.on("data", (chunk: Buffer) => (data += chunk));

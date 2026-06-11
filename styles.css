@@ -8,53 +8,6 @@
   overflow: hidden;
 }
 
-/* Header */
-.opencode-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background-color: var(--background-secondary);
-  flex-shrink: 0;
-}
-
-.opencode-header-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-}
-
-.opencode-header-title svg {
-  width: 16px;
-  height: 16px;
-}
-
-.opencode-header-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.opencode-header-actions button {
-  background: transparent;
-  border: none;
-  padding: 4px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--text-muted);
-}
-
-.opencode-header-actions button:hover {
-  background-color: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-
-.opencode-header-actions button svg {
-  width: 16px;
-  height: 16px;
-}
-
 /* iframe container */
 .opencode-iframe-container {
   flex: 1;

@@ -66,22 +66,14 @@ export class ContextManager {
     const layoutChangeRef = this.app.workspace.on("layout-change", () => {
       this.scheduleRefresh();
     });
-    const editorChangeRef = this.app.workspace.on(
-      "editor-change",
-      (_editor, view) => {
-        if (view instanceof MarkdownView) {
-          this.workspaceContext.trackViewSelection(view);
-        }
-        this.scheduleRefresh(500);
+    const editorChangeRef = this.app.workspace.on("editor-change", (_editor, view) => {
+      if (view instanceof MarkdownView) {
+        this.workspaceContext.trackViewSelection(view);
       }
-    );
+      this.scheduleRefresh(500);
+    });
 
-    this.contextEventRefs = [
-      activeLeafRef,
-      fileOpenRef,
-      layoutChangeRef,
-      editorChangeRef,
-    ];
+    this.contextEventRefs = [activeLeafRef, fileOpenRef, layoutChangeRef, editorChangeRef];
     this.contextEventRefs.forEach((ref) => this.registerEvent(ref));
   }
 

@@ -6,11 +6,7 @@ import { createLogger } from "../../debug/RuntimeDiagnostics";
 const logger = createLogger("posix-process");
 
 export class PosixProcess implements OpenCodeProcess {
-  start(
-    command: string,
-    args: string[],
-    options: SpawnOptions
-  ): ChildProcess {
+  start(command: string, args: string[], options: SpawnOptions): ChildProcess {
     return spawn(command, args, {
       ...options,
       detached: true,
@@ -46,8 +42,8 @@ export class PosixProcess implements OpenCodeProcess {
   }
 
   async verifyCommand(command: string): Promise<string | null> {
-    if (command.startsWith('/') || command.startsWith('./')) {
-      const fs = require('fs');
+    if (command.startsWith("/") || command.startsWith("./")) {
+      const fs = require("fs");
       try {
         fs.accessSync(command, fs.constants.X_OK);
         return null;
@@ -61,10 +57,7 @@ export class PosixProcess implements OpenCodeProcess {
     return null;
   }
 
-  private async killProcessGroup(
-    pid: number,
-    signal: "SIGTERM" | "SIGKILL"
-  ): Promise<void> {
+  private async killProcessGroup(pid: number, signal: "SIGTERM" | "SIGKILL"): Promise<void> {
     try {
       process.kill(-pid, signal);
     } catch (error) {
@@ -72,10 +65,7 @@ export class PosixProcess implements OpenCodeProcess {
     }
   }
 
-  private async waitForExit(
-    process: ChildProcess,
-    timeoutMs: number
-  ): Promise<boolean> {
+  private async waitForExit(process: ChildProcess, timeoutMs: number): Promise<boolean> {
     if (process.exitCode !== null || process.signalCode !== null) {
       return true;
     }

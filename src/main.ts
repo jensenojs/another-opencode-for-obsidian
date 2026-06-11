@@ -14,7 +14,12 @@ import { OpenCodeClient } from "./client/OpenCodeClient";
 import { ContextManager } from "./context/ContextManager";
 import { ExecutableResolver } from "./server/ExecutableResolver";
 import { OpenCodeProxy } from "./proxy/OpenCodeProxy";
-import { createLogger, getRuntimePaths, writeRuntimeStatus } from "./debug/RuntimeDiagnostics";
+import {
+  createLogger,
+  getRuntimePaths,
+  type RuntimeDiagnosticsSnapshot,
+  writeRuntimeStatus,
+} from "./debug/RuntimeDiagnostics";
 import { BRIDGE_MESSAGES, isBridgeMessage } from "./bridge/BridgeProtocol";
 import { captureObsidianWebViewTheme } from "./theme/WebViewTheme";
 
@@ -28,6 +33,9 @@ export default class OpenCodePlugin extends Plugin {
   private cachedIframeUrl: string | null = null;
   private lastBaseUrl: string | null = null;
   private lastApiBaseUrl: string | null = null;
+  private runtimeDiagnostics: RuntimeDiagnosticsSnapshot = {
+    theme: null,
+  };
   private openCodeProxy: OpenCodeProxy;
   private logger = createLogger("plugin");
 
@@ -64,6 +72,11 @@ export default class OpenCodePlugin extends Plugin {
       }
       if (event.data.type === BRIDGE_MESSAGES.proxyLoaded) {
         this.logger.info("bridge script loaded", { origin: event.origin });
+      }
+      if (event.data.type === BRIDGE_MESSAGES.themeDiagnostics) {
+        this.runtimeDiagnostics.theme = event.data.payload ?? null;
+        this.logger.info("theme diagnostics", this.runtimeDiagnostics.theme);
+        this.writeStatus("theme-diagnostics");
       }
       if (event.data.type === BRIDGE_MESSAGES.viewToggle) {
         void this.viewManager.toggleView();
@@ -111,17 +124,12 @@ export default class OpenCodePlugin extends Plugin {
 
     this.logger.info("configured project directory", { projectDirectory });
 
-    this.registerView(
-      OPENCODE_VIEW_TYPE,
-      (leaf) => new OpenCodeView(leaf, this)
+    this.registerView(OPENCODE_VIEW_TYPE, (leaf) => new OpenCodeView(leaf, this));
+    this.addSettingTab(
+      new OpenCodeSettingTab(this.app, this, this.settings, this.processManager, () =>
+        this.saveSettings()
+      )
     );
-    this.addSettingTab(new OpenCodeSettingTab(
-      this.app,
-      this,
-      this.settings,
-      this.processManager,
-      () => this.saveSettings()
-    ));
 
     this.addRibbonIcon(OPENCODE_ICON_NAME, "OpenCode", () => {
       void this.viewManager.activateView();
@@ -160,8 +168,8 @@ export default class OpenCodePlugin extends Plugin {
     if (this.settings.autoStart) {
       this.app.workspace.onLayoutReady(async () => {
         await this.startServer();
-    });
-  }
+      });
+    }
 
     this.contextManager.updateSettings(this.settings);
     this.processManager.on("stateChange", (state: ServerState) => {
@@ -206,7 +214,7 @@ export default class OpenCodePlugin extends Plugin {
     this.logger.info("attempting to autodetect opencode executable");
 
     const detectedPath = ExecutableResolver.resolve("opencode");
-    
+
     if (detectedPath && detectedPath !== "opencode") {
       this.logger.info("autodetected opencode executable", { path: detectedPath });
       this.settings.opencodePath = detectedPath;
@@ -335,9 +343,7 @@ export default class OpenCodePlugin extends Plugin {
 
   private refreshProxyAppearance(): void {
     const theme =
-      this.settings.webViewAppearance === "obsidian"
-        ? captureObsidianWebViewTheme()
-        : null;
+      this.settings.webViewAppearance === "obsidian" ? captureObsidianWebViewTheme() : null;
     this.openCodeProxy.updateAppearance(this.settings.webViewAppearance, theme);
   }
 
@@ -418,6 +424,7 @@ export default class OpenCodePlugin extends Plugin {
       projectDirectory,
       useCustomCommand: this.settings.useCustomCommand,
       webViewAppearance: this.settings.webViewAppearance,
+      runtimeDiagnostics: this.runtimeDiagnostics,
       autoStart: this.settings.autoStart,
       logFile: getRuntimePaths().logFile,
       statusFile: getRuntimePaths().statusFile,

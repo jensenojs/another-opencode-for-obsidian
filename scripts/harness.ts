@@ -8,7 +8,7 @@ import { getRuntimePaths } from "../src/debug/RuntimeDiagnostics";
 import { getExplicitCustomCommand, usesExplicitCustomCommand } from "../src/types";
 import { BRIDGE_MESSAGES } from "../src/bridge/BridgeProtocol";
 
-type Command = "help" | "paths" | "install" | "status" | "logs" | "doctor" | "bridge";
+type Command = "help" | "paths" | "install" | "status" | "logs" | "doctor" | "bridge" | "theme";
 
 interface Args {
   command: Command;
@@ -21,7 +21,8 @@ interface Args {
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const defaultVault = process.env.OPENCODE_OBSIDIAN_VAULT || "/Users/oujinsai/obsidian";
-const defaultOpenCodeSource = process.env.OPENCODE_SOURCE || "/Users/oujinsai/Projects/ai-cli/opencode";
+const defaultOpenCodeSource =
+  process.env.OPENCODE_SOURCE || "/Users/oujinsai/Projects/ai-cli/opencode";
 const pluginId = "opencode-obsidian";
 
 async function main(): Promise<void> {
@@ -53,6 +54,10 @@ async function main(): Promise<void> {
   }
   if (args.command === "bridge") {
     bridge(args);
+    return;
+  }
+  if (args.command === "theme") {
+    await theme(args);
   }
 }
 
@@ -94,7 +99,11 @@ function parseArgs(argv: string[]): Args {
     }
   }
 
-  if (!["help", "paths", "install", "status", "logs", "doctor", "bridge"].includes(args.command)) {
+  if (
+    !["help", "paths", "install", "status", "logs", "doctor", "bridge", "theme"].includes(
+      args.command
+    )
+  ) {
     args.command = "help";
   }
 
@@ -111,6 +120,7 @@ Commands:
   logs                  Print the XDG runtime log tail
   doctor                Run build and runtime checks
   bridge                Check bridge contracts against OpenCode and Obsidian declarations
+  theme                 Check the current proxy theme injection
 
 Options:
   --vault <path>        Vault path. Defaults to OPENCODE_OBSIDIAN_VAULT or /Users/oujinsai/obsidian
@@ -123,15 +133,21 @@ Options:
 
 function printPaths(args: Args): void {
   const paths = getRuntimePaths();
-  console.log(JSON.stringify({
-    repoRoot,
-    vault: args.vault,
-    opencodeSource: args.opencode,
-    pluginDir: pluginDir(args.vault),
-    stateDir: paths.stateDir,
-    logFile: paths.logFile,
-    statusFile: paths.statusFile,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        repoRoot,
+        vault: args.vault,
+        opencodeSource: args.opencode,
+        pluginDir: pluginDir(args.vault),
+        stateDir: paths.stateDir,
+        logFile: paths.logFile,
+        statusFile: paths.statusFile,
+      },
+      null,
+      2
+    )
+  );
 }
 
 function install(args: Args): void {
@@ -200,6 +216,14 @@ function logs(args: Args): void {
   console.log(lines);
 }
 
+async function theme(args: Args): Promise<void> {
+  const report = await buildThemeReport(args);
+  console.log(JSON.stringify(report, null, 2));
+  if (!report.ok) {
+    process.exitCode = 1;
+  }
+}
+
 async function doctor(args: Args): Promise<void> {
   const checks: Array<{ name: string; ok: boolean; detail?: unknown }> = [];
 
@@ -226,7 +250,10 @@ async function doctor(args: Args): Promise<void> {
     checks.push({
       name: "bun run build",
       ok: build.status === 0,
-      detail: build.status === 0 ? lastLines(build.stdout, 8) : lastLines(build.stderr || build.stdout, 20),
+      detail:
+        build.status === 0
+          ? lastLines(build.stdout, 8)
+          : lastLines(build.stderr || build.stdout, 20),
     });
   }
 
@@ -237,7 +264,8 @@ async function doctor(args: Args): Promise<void> {
   checks.push({
     name: "opencode --version",
     ok: opencode.status === 0,
-    detail: opencode.status === 0 ? opencode.stdout.trim() : (opencode.stderr || opencode.stdout).trim(),
+    detail:
+      opencode.status === 0 ? opencode.stdout.trim() : (opencode.stderr || opencode.stdout).trim(),
   });
 
   const bridgeReport = buildBridgeReport(args);
@@ -262,11 +290,22 @@ async function doctor(args: Args): Promise<void> {
     });
   }
 
-  printCheckResults(checks.map((check) => ({
-    path: check.name,
-    ok: check.ok,
-    action: check.detail,
-  })));
+  if (runtimeStatus?.proxyUrl) {
+    const themeReport = await buildThemeReport(args);
+    checks.push({
+      name: "web view theme",
+      ok: themeReport.ok,
+      detail: themeReport,
+    });
+  }
+
+  printCheckResults(
+    checks.map((check) => ({
+      path: check.name,
+      ok: check.ok,
+      action: check.detail,
+    }))
+  );
 
   if (checks.some((check) => !check.ok)) {
     process.exitCode = 1;
@@ -359,10 +398,37 @@ interface WorkspaceEventReport {
   event: string;
 }
 
+interface ThemeReport {
+  ok: boolean;
+  mode: "obsidian" | "opencode" | "unknown";
+  url: string | null;
+  http: {
+    ok: boolean;
+    status?: number;
+    contentType?: string | null;
+    error?: string;
+  };
+  injection: {
+    hasAppearanceStyle: boolean;
+    hasThemeScript: boolean;
+    colorScheme: string | null;
+  };
+  tokens: {
+    rootBackground: Record<string, string | null>;
+    surfaces: Record<string, string | null>;
+    textAndBorder: Record<string, string | null>;
+  };
+  runtimeDiagnostics: unknown | null;
+  checks: Array<{ name: string; ok: boolean; detail?: unknown }>;
+}
+
 const httpMethods = new Set<HttpMethod>(["get", "post", "patch", "put", "delete"]);
-const opencodeOpenApiReferenceUrl = "https://github.com/sst/opencode/blob/dev/packages/sdk/openapi.json";
-const opencodeHooksReferenceUrl = "https://github.com/sst/opencode/blob/dev/packages/plugin/src/index.ts";
-const obsidianTypesReferenceUrl = "https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts";
+const opencodeOpenApiReferenceUrl =
+  "https://github.com/sst/opencode/blob/dev/packages/sdk/openapi.json";
+const opencodeHooksReferenceUrl =
+  "https://github.com/sst/opencode/blob/dev/packages/plugin/src/index.ts";
+const obsidianTypesReferenceUrl =
+  "https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts";
 
 // Bridge checks use local contract files as the gold standard:
 // - OpenCode HTTP: packages/sdk/openapi.json
@@ -377,6 +443,150 @@ function bridge(args: Args): void {
   }
 }
 
+async function buildThemeReport(args: Args): Promise<ThemeReport> {
+  const runtimeStatus = readJson(getRuntimePaths().statusFile);
+  const runtimeThemeDiagnostics = runtimeStatus?.runtimeDiagnostics?.theme ?? null;
+  const data = readJson(join(pluginDir(args.vault), "data.json"));
+  const mode =
+    data?.webViewAppearance === "obsidian" || data?.webViewAppearance === "opencode"
+      ? data.webViewAppearance
+      : "unknown";
+  const url = typeof runtimeStatus?.proxyUrl === "string" ? runtimeStatus.proxyUrl : null;
+  const checks: ThemeReport["checks"] = [];
+
+  checks.push({
+    name: "settings.webViewAppearance is known",
+    ok: mode !== "unknown",
+    detail: data?.webViewAppearance,
+  });
+  checks.push({
+    name: "runtime status has proxyUrl",
+    ok: Boolean(url),
+    detail: url,
+  });
+
+  if (!url) {
+    return {
+      ok: false,
+      mode,
+      url,
+      http: { ok: false, error: "status.json has no proxyUrl; start Obsidian/plugin first" },
+      injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
+      tokens: emptyThemeTokens(),
+      runtimeDiagnostics: runtimeThemeDiagnostics,
+      checks,
+    };
+  }
+
+  const html = await fetchText(url);
+  checks.push({
+    name: "proxy HTML is reachable",
+    ok: html.ok,
+    detail: html.ok ? { status: html.status, contentType: html.contentType } : html.error,
+  });
+
+  if (!html.ok) {
+    return {
+      ok: false,
+      mode,
+      url,
+      http: html,
+      injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
+      tokens: emptyThemeTokens(),
+      runtimeDiagnostics: runtimeThemeDiagnostics,
+      checks,
+    };
+  }
+
+  const injectedTheme = extractInjectedTheme(html.body);
+  const variables = injectedTheme?.variables ?? {};
+  const tokens = {
+    rootBackground: pickVariables(variables, [
+      "--background-base",
+      "--background-weak",
+      "--background-strong",
+      "--background-stronger",
+      "--v2-background-bg-base",
+      "--v2-background-bg-deep",
+    ]),
+    surfaces: pickVariables(variables, [
+      "--surface-raised-base",
+      "--surface-float-base",
+      "--input-base",
+      "--v2-background-bg-layer-03",
+    ]),
+    textAndBorder: pickVariables(variables, ["--text-strong", "--border-weak-base"]),
+  };
+  const injection = {
+    hasAppearanceStyle: html.body.includes("data-opencode-obsidian-appearance"),
+    hasThemeScript: html.body.includes("data-opencode-obsidian-theme"),
+    colorScheme: typeof injectedTheme?.colorScheme === "string" ? injectedTheme.colorScheme : null,
+  };
+
+  if (mode === "obsidian") {
+    checks.push({
+      name: "Obsidian appearance style is injected",
+      ok: injection.hasAppearanceStyle,
+    });
+    checks.push({
+      name: "Obsidian theme script is injected",
+      ok: injection.hasThemeScript,
+    });
+    checks.push({
+      name: "root background tokens are transparent",
+      ok: Object.values(tokens.rootBackground).every((value) => value === "transparent"),
+      detail: tokens.rootBackground,
+    });
+    checks.push({
+      name: "local surface tokens stay translucent",
+      ok: Object.values(tokens.surfaces).every(
+        (value) => typeof value === "string" && value.includes("transparent")
+      ),
+      detail: tokens.surfaces,
+    });
+    checks.push({
+      name: "text and border tokens use Obsidian variables",
+      ok:
+        tokens.textAndBorder["--text-strong"] === "var(--opencode-obsidian-text-normal)" &&
+        tokens.textAndBorder["--border-weak-base"] === "var(--opencode-obsidian-border)",
+      detail: tokens.textAndBorder,
+    });
+    checks.push({
+      name: "runtime iframe theme diagnostics received",
+      ok: Boolean(runtimeThemeDiagnostics),
+      detail:
+        runtimeThemeDiagnostics ??
+        "No iframe diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
+    });
+  }
+
+  if (mode === "opencode") {
+    checks.push({
+      name: "Obsidian appearance style is not injected",
+      ok: !injection.hasAppearanceStyle,
+    });
+    checks.push({
+      name: "Obsidian theme script is not injected",
+      ok: !injection.hasThemeScript,
+    });
+  }
+
+  return {
+    ok: checks.every((check) => check.ok),
+    mode,
+    url,
+    http: {
+      ok: html.ok,
+      status: html.status,
+      contentType: html.contentType,
+    },
+    injection,
+    tokens,
+    runtimeDiagnostics: runtimeThemeDiagnostics,
+    checks,
+  };
+}
+
 function buildBridgeReport(args: Args): BridgeReport {
   const openapiPath = join(args.opencode, "packages", "sdk", "openapi.json");
   const hooksPath = join(args.opencode, "packages", "plugin", "src", "index.ts");
@@ -386,7 +596,10 @@ function buildBridgeReport(args: Args): BridgeReport {
   const openapiSource = sourceReport(openapiPath, opencodeOpenApiReferenceUrl);
   const hooksSource = sourceReport(hooksPath, opencodeHooksReferenceUrl);
   const obsidianTypesSource = sourceReport(obsidianTypesPath, obsidianTypesReferenceUrl);
-  const localBridgeProtocolSource = sourceReport(localBridgeProtocolPath, "src/bridge/BridgeProtocol.ts");
+  const localBridgeProtocolSource = sourceReport(
+    localBridgeProtocolPath,
+    "src/bridge/BridgeProtocol.ts"
+  );
 
   const openapi = openapiSource.exists ? readJson(openapiPath) : null;
   const operations = collectOpenApiOperations(openapi);
@@ -411,14 +624,17 @@ function buildBridgeReport(args: Args): BridgeReport {
     contractResolution: {
       mode: "local",
       network: "not-used",
-      updatePath: "Update the local OpenCode checkout or npm dependencies, then rerun bun run harness bridge.",
+      updatePath:
+        "Update the local OpenCode checkout or npm dependencies, then rerun bun run harness bridge.",
     },
     selectedContracts: {
       opencodeSource: args.opencode,
       opencodeGitHead: gitHead(args.opencode),
       openapiVersion: typeof openapi?.info?.version === "string" ? openapi.info.version : null,
       openapiSpecVersion: typeof openapi?.openapi === "string" ? openapi.openapi : null,
-      obsidianPackageVersion: packageVersion(join(repoRoot, "node_modules", "obsidian", "package.json")),
+      obsidianPackageVersion: packageVersion(
+        join(repoRoot, "node_modules", "obsidian", "package.json")
+      ),
     },
     sources: {
       openapi: openapiSource,
@@ -468,7 +684,8 @@ function collectOpenApiOperations(openapi: any): OpenApiOperation[] {
       operations.push({
         method: normalizedMethod,
         path,
-        operationId: typeof (raw as any)?.operationId === "string" ? (raw as any).operationId : null,
+        operationId:
+          typeof (raw as any)?.operationId === "string" ? (raw as any).operationId : null,
         raw,
       });
     }
@@ -524,10 +741,7 @@ function extractHealthUrlUse(filePath: string): LocalApiUse[] {
   const uses: LocalApiUse[] = [];
 
   const visit = (node: ts.Node): void => {
-    if (
-      ts.isPropertyAssignment(node) &&
-      propertyNameText(node.name) === "healthUrl"
-    ) {
+    if (ts.isPropertyAssignment(node) && propertyNameText(node.name) === "healthUrl") {
       const rawPath = expressionToTemplatePattern(node.initializer);
       if (rawPath) {
         uses.push({
@@ -556,11 +770,7 @@ function isRequestCall(node: ts.CallExpression): boolean {
   );
 }
 
-function checkApiUse(
-  use: LocalApiUse,
-  operations: OpenApiOperation[],
-  openapi: any
-): ApiUseReport {
+function checkApiUse(use: LocalApiUse, operations: OpenApiOperation[], openapi: any): ApiUseReport {
   const operation = findOperation(use, operations);
   const undeclaredQueryParams = operation
     ? findUndeclaredQueryParams(use, operation)
@@ -590,10 +800,9 @@ function checkApiUse(
 }
 
 function findOperation(use: LocalApiUse, operations: OpenApiOperation[]): OpenApiOperation | null {
-  const candidates = operations.filter((operation) => (
-    operation.method === use.method &&
-    pathShapeMatches(use.path, operation.path)
-  ));
+  const candidates = operations.filter(
+    (operation) => operation.method === use.method && pathShapeMatches(use.path, operation.path)
+  );
   return candidates[0] ?? null;
 }
 
@@ -626,7 +835,11 @@ function findUndeclaredQueryParams(use: LocalApiUse, operation: OpenApiOperation
   return use.queryParams.filter((param) => !declared.has(param));
 }
 
-function checkBody(use: LocalApiUse, operation: OpenApiOperation, openapi: any): {
+function checkBody(
+  use: LocalApiUse,
+  operation: OpenApiOperation,
+  openapi: any
+): {
   unknownBodyKeys: string[];
   missingBodyKeys: string[];
   bodyNotAllowed: boolean;
@@ -657,9 +870,10 @@ function checkBody(use: LocalApiUse, operation: OpenApiOperation, openapi: any):
     };
   }
 
-  const unknownBodyKeys = shape.properties.length > 0
-    ? use.body.keys.filter((key) => !shape.properties.includes(key))
-    : [];
+  const unknownBodyKeys =
+    shape.properties.length > 0
+      ? use.body.keys.filter((key) => !shape.properties.includes(key))
+      : [];
   const missingBodyKeys = use.body.hasSpread
     ? []
     : shape.required.filter((key) => !use.body?.keys.includes(key));
@@ -700,7 +914,9 @@ function resolveObjectShape(
   if (schema.properties && typeof schema.properties === "object") {
     return {
       properties: Object.keys(schema.properties),
-      required: Array.isArray(schema.required) ? schema.required.filter((item: unknown) => typeof item === "string") : [],
+      required: Array.isArray(schema.required)
+        ? schema.required.filter((item: unknown) => typeof item === "string")
+        : [],
     };
   }
 
@@ -711,7 +927,9 @@ function mergeShapes(shapes: Array<{ properties: string[]; required: string[] } 
   properties: string[];
   required: string[];
 } | null {
-  const present = shapes.filter((shape): shape is { properties: string[]; required: string[] } => Boolean(shape));
+  const present = shapes.filter((shape): shape is { properties: string[]; required: string[] } =>
+    Boolean(shape)
+  );
   if (present.length === 0) {
     return null;
   }
@@ -781,9 +999,10 @@ function extractObsidianWorkspaceEvents(filePath: string): string[] {
           continue;
         }
         const firstParam = member.parameters[0];
-        const event = firstParam?.type && ts.isLiteralTypeNode(firstParam.type)
-          ? literalText(firstParam.type.literal)
-          : null;
+        const event =
+          firstParam?.type && ts.isLiteralTypeNode(firstParam.type)
+            ? literalText(firstParam.type.literal)
+            : null;
         if (event) {
           events.push(event);
         }
@@ -877,10 +1096,7 @@ function expressionToTemplatePattern(node: ts.Expression): string | null {
     return "{}";
   }
 
-  if (
-    ts.isBinaryExpression(node) &&
-    node.operatorToken.kind === ts.SyntaxKind.PlusToken
-  ) {
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
     const left = expressionToTemplatePattern(node.left);
     const right = expressionToTemplatePattern(node.right);
     return left !== null && right !== null ? left + right : null;
@@ -921,9 +1137,7 @@ function extractObjectBody(node: ts.Expression): { keys: string[]; hasSpread: bo
 
 function toOpenApiPath(rawPath: string): string {
   const pathWithoutQuery = rawPath.split("?")[0];
-  return pathWithoutQuery
-    .replace(/^https?:\/\/[^/]+/, "")
-    .replace(/^\{\}(?=\/)/, "");
+  return pathWithoutQuery.replace(/^https?:\/\/[^/]+/, "").replace(/^\{\}(?=\/)/, "");
 }
 
 function extractQueryParams(rawPath: string): string[] {
@@ -985,7 +1199,11 @@ function pluginDir(vault: string): string {
   return join(vault, ".obsidian", "plugins", pluginId);
 }
 
-function linkFile(target: string, linkPath: string, force: boolean): { path: string; ok: boolean; action: string } {
+function linkFile(
+  target: string,
+  linkPath: string,
+  force: boolean
+): { path: string; ok: boolean; action: string } {
   if (!existsSync(target)) {
     return { path: linkPath, ok: false, action: `missing target ${target}` };
   }
@@ -1048,7 +1266,9 @@ function summarizeSettings(data: any): unknown {
     effectiveStartMode: usesExplicitCustomCommand({
       customCommand,
       useCustomCommand,
-    }) ? "custom" : "path",
+    })
+      ? "custom"
+      : "path",
     webViewAppearance: data.webViewAppearance,
     projectDirectory: data.projectDirectory,
     startupTimeout: data.startupTimeout,
@@ -1072,12 +1292,85 @@ function isPluginEnabled(vault: string): boolean {
 function printCheckResults(results: Array<{ path: string; ok: boolean; action: unknown }>): void {
   for (const result of results) {
     const status = result.ok ? "ok" : "fail";
-    const detail = typeof result.action === "string" ? result.action : JSON.stringify(result.action);
+    const detail =
+      typeof result.action === "string" ? result.action : JSON.stringify(result.action);
     console.log(`${status}\t${result.path}\t${detail}`);
   }
 }
 
-async function probeHealth(url: string): Promise<{ ok: boolean; healthy?: boolean; status?: number; error?: string }> {
+async function fetchText(url: string): Promise<{
+  ok: boolean;
+  status?: number;
+  contentType?: string | null;
+  body: string;
+  error?: string;
+}> {
+  return new Promise((resolveFetch) => {
+    const req = request(url, { method: "GET", timeout: 2000 }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        const status = res.statusCode ?? 500;
+        resolveFetch({
+          ok: status >= 200 && status < 300,
+          status,
+          contentType: Array.isArray(res.headers["content-type"])
+            ? res.headers["content-type"].join(", ")
+            : (res.headers["content-type"] ?? null),
+          body,
+        });
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      resolveFetch({ ok: false, body: "", error: "timeout" });
+    });
+    req.on("error", (error) => {
+      resolveFetch({ ok: false, body: "", error: error.message });
+    });
+    req.end();
+  });
+}
+
+function extractInjectedTheme(
+  body: string
+): { colorScheme?: unknown; variables?: Record<string, string> } | null {
+  const match = body.match(/var theme = (\{[\s\S]*?\});/);
+  if (!match) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(match[1]);
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function pickVariables(
+  variables: Record<string, string>,
+  names: string[]
+): Record<string, string | null> {
+  return Object.fromEntries(names.map((name) => [name, variables[name] ?? null]));
+}
+
+function emptyThemeTokens(): ThemeReport["tokens"] {
+  return {
+    rootBackground: {},
+    surfaces: {},
+    textAndBorder: {},
+  };
+}
+
+async function probeHealth(
+  url: string
+): Promise<{ ok: boolean; healthy?: boolean; status?: number; error?: string }> {
   return new Promise((resolveProbe) => {
     const req = request(url, { method: "GET", timeout: 2000 }, (res) => {
       let body = "";

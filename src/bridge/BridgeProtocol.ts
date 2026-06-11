@@ -6,15 +6,16 @@ export const BRIDGE_VERSION = 1;
 export const BRIDGE_MESSAGES = {
   proxyLoaded: "proxy:loaded",
   viewToggle: "view:toggle",
+  themeDiagnostics: "theme:diagnostics",
 } as const;
 
-export type BridgeMessageType =
-  (typeof BRIDGE_MESSAGES)[keyof typeof BRIDGE_MESSAGES];
+export type BridgeMessageType = (typeof BRIDGE_MESSAGES)[keyof typeof BRIDGE_MESSAGES];
 
 export interface BridgeMessage {
   ns: typeof BRIDGE_NAMESPACE;
   version: typeof BRIDGE_VERSION;
   type: BridgeMessageType;
+  payload?: unknown;
 }
 
 export function isBridgeMessage(value: unknown): value is BridgeMessage {

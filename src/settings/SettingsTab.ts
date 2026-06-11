@@ -73,22 +73,20 @@ export class OpenCodeSettingTab extends PluginSettingTab {
 
     const customCmdSetting = new Setting(containerEl)
       .setName("Use custom command")
-        .setDesc("Use a shell command template instead of the executable path")
-        .addToggle((toggle) =>
-          toggle
-            .setValue(this.settings.useCustomCommand)
-            .onChange(async (value) => {
-              this.settings.useCustomCommand = value;
-              await this.onSettingsChange();
-              this.display();
-            })
+      .setDesc("Use a shell command template instead of the executable path")
+      .addToggle((toggle) =>
+        toggle.setValue(this.settings.useCustomCommand).onChange(async (value) => {
+          this.settings.useCustomCommand = value;
+          await this.onSettingsChange();
+          this.display();
+        })
       );
-    
+
     const descEl = customCmdSetting.descEl;
     descEl.createEl("br");
     const linkEl = descEl.createEl("a", {
       text: "Learn more",
-      href: "https://github.com/mtymek/opencode-obsidian#custom-command-mode"
+      href: "https://github.com/mtymek/opencode-obsidian#custom-command-mode",
     });
     linkEl.addEventListener("click", (e) => {
       e.preventDefault();
@@ -96,16 +94,18 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     });
 
     if (this.settings.useCustomCommand) {
-        new Setting(containerEl)
-          .setName("Custom command")
-          .setDesc("Leave empty to use OpenCode executable path mode. Non-empty commands run through the system shell and must include {hostname} and {port}. Optional variables: {cors}, {projectDirectory}.")
-          .addTextArea((text) => {
-            text
-              .setPlaceholder(CUSTOM_COMMAND_EXAMPLE)
-              .setValue(this.settings.customCommand)
-              .onChange(async (value) => {
-                this.settings.customCommand = value;
-                await this.onSettingsChange();
+      new Setting(containerEl)
+        .setName("Custom command")
+        .setDesc(
+          "Leave empty to use OpenCode executable path mode. Non-empty commands run through the system shell and must include {hostname} and {port}. Optional variables: {cors}, {projectDirectory}."
+        )
+        .addTextArea((text) => {
+          text
+            .setPlaceholder(CUSTOM_COMMAND_EXAMPLE)
+            .setValue(this.settings.customCommand)
+            .onChange(async (value) => {
+              this.settings.customCommand = value;
+              await this.onSettingsChange();
             });
           text.inputEl.rows = 3;
           text.inputEl.style.width = "100%";
@@ -123,29 +123,25 @@ export class OpenCodeSettingTab extends PluginSettingTab {
               await this.onSettingsChange();
             })
         );
-      
+
       pathSetting.addButton((button) => {
-        button
-          .setButtonText("Autodetect")
-          .onClick(async () => {
-            const detectedPath = ExecutableResolver.resolve("opencode");
-            if (detectedPath && detectedPath !== "opencode") {
-              this.settings.opencodePath = detectedPath;
-              await this.onSettingsChange();
-              this.display();
-              new Notice(`OpenCode executable found at ${detectedPath}`);
-            } else {
-              new Notice("Could not find opencode. Please check your installation.");
-            }
-          });
+        button.setButtonText("Autodetect").onClick(async () => {
+          const detectedPath = ExecutableResolver.resolve("opencode");
+          if (detectedPath && detectedPath !== "opencode") {
+            this.settings.opencodePath = detectedPath;
+            await this.onSettingsChange();
+            this.display();
+            new Notice(`OpenCode executable found at ${detectedPath}`);
+          } else {
+            new Notice("Could not find opencode. Please check your installation.");
+          }
+        });
       });
     }
 
     new Setting(containerEl)
       .setName("Project directory")
-      .setDesc(
-        "Override the starting directory for OpenCode. Leave empty to use the vault root."
-      )
+      .setDesc("Override the starting directory for OpenCode. Leave empty to use the vault root.")
       .addText((text) =>
         text
           .setPlaceholder("/path/to/project or ~/project")
@@ -168,16 +164,14 @@ export class OpenCodeSettingTab extends PluginSettingTab {
         "Automatically start the OpenCode server when Obsidian opens (not recommended for faster startup)"
       )
       .addToggle((toggle) =>
-        toggle
-          .setValue(this.settings.autoStart)
-          .onChange(async (value) => {
-            this.settings.autoStart = value;
-            await this.onSettingsChange();
-          })
+        toggle.setValue(this.settings.autoStart).onChange(async (value) => {
+          this.settings.autoStart = value;
+          await this.onSettingsChange();
+        })
       );
 
-      new Setting(containerEl)
-        .setName("Default view location")
+    new Setting(containerEl)
+      .setName("Default view location")
       .setDesc(
         "Where to open the OpenCode panel: sidebar opens in the right panel, main opens as a tab in the editor area"
       )
@@ -189,40 +183,36 @@ export class OpenCodeSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.settings.defaultViewLocation = value as ViewLocation;
             await this.onSettingsChange();
-            })
-        );
+          })
+      );
 
-      new Setting(containerEl)
-        .setName("Web view appearance")
-        .setDesc(
-          "Choose whether the embedded web view keeps OpenCode styling or maps Obsidian theme variables into OpenCode."
-        )
-        .addDropdown((dropdown) =>
-          dropdown
-            .addOption("opencode", "OpenCode")
-            .addOption("obsidian", "Obsidian")
-            .setValue(this.settings.webViewAppearance)
-            .onChange(async (value) => {
-              this.settings.webViewAppearance = value as WebViewAppearance;
-              await this.onSettingsChange();
-              this.refreshOpenCodeViews();
-            })
-        );
+    new Setting(containerEl)
+      .setName("Web view appearance")
+      .setDesc(
+        "Use Obsidian to inherit the active vault theme, or switch to OpenCode to keep the web UI's native styling."
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("opencode", "OpenCode")
+          .addOption("obsidian", "Obsidian")
+          .setValue(this.settings.webViewAppearance)
+          .onChange(async (value) => {
+            this.settings.webViewAppearance = value as WebViewAppearance;
+            await this.onSettingsChange();
+            this.refreshOpenCodeViews();
+          })
+      );
 
-      containerEl.createEl("h3", { text: "Workspace Context" });
+    containerEl.createEl("h3", { text: "Workspace Context" });
 
     new Setting(containerEl)
       .setName("Inject workspace context")
-      .setDesc(
-        "Includes open note paths and selected text in OpenCode when the view is focused"
-      )
+      .setDesc("Includes open note paths and selected text in OpenCode when the view is focused")
       .addToggle((toggle) =>
-        toggle
-          .setValue(this.settings.injectWorkspaceContext)
-          .onChange(async (value) => {
-            this.settings.injectWorkspaceContext = value;
-            await this.onSettingsChange();
-          })
+        toggle.setValue(this.settings.injectWorkspaceContext).onChange(async (value) => {
+          this.settings.injectWorkspaceContext = value;
+          await this.onSettingsChange();
+        })
       );
 
     new Setting(containerEl)
@@ -327,7 +317,7 @@ export class OpenCodeSettingTab extends PluginSettingTab {
         const errorEl = container.createDiv({ cls: "opencode-error-details" });
         errorEl.createEl("div", {
           text: errorMsg,
-          cls: "opencode-error-text"
+          cls: "opencode-error-text",
         });
         if (diagnostics.hint) {
           errorEl.createEl("div", {

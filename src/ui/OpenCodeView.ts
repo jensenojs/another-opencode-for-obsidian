@@ -51,7 +51,7 @@ export class OpenCodeView extends ItemView {
       this.unsubscribeStateChange();
       this.unsubscribeStateChange = null;
     }
-    
+
     if (this.iframeEl) {
       const iframeUrl = this.iframeEl.src;
       if (iframeUrl.includes("/session/")) {
@@ -126,31 +126,6 @@ export class OpenCodeView extends ItemView {
   private renderRunningState(): void {
     this.contentEl.empty();
 
-    const headerEl = this.contentEl.createDiv({ cls: "opencode-header" });
-
-    const titleSection = headerEl.createDiv({ cls: "opencode-header-title" });
-    const iconEl = titleSection.createSpan();
-    setIcon(iconEl, OPENCODE_ICON_NAME);
-    titleSection.createSpan({ text: "OpenCode" });
-
-    const actionsEl = headerEl.createDiv({ cls: "opencode-header-actions" });
-
-    const reloadButton = actionsEl.createEl("button", {
-      attr: { "aria-label": "Reload" },
-    });
-    setIcon(reloadButton, "refresh-cw");
-    reloadButton.addEventListener("click", () => {
-      this.reloadIframe();
-    });
-
-    const stopButton = actionsEl.createEl("button", {
-      attr: { "aria-label": "Stop server" },
-    });
-    setIcon(stopButton, "square");
-    stopButton.addEventListener("click", () => {
-      this.plugin.stopServer();
-    });
-
     const iframeContainer = this.contentEl.createDiv({
       cls: "opencode-iframe-container",
     });
@@ -161,12 +136,12 @@ export class OpenCodeView extends ItemView {
     this.iframeEl = iframeContainer.createEl("iframe", {
       cls: "opencode-iframe",
       attr: {
-          src: iframeUrl,
-          frameborder: "0",
-          allow: "clipboard-read; clipboard-write",
-          allowtransparency: "true",
-        },
-      });
+        src: iframeUrl,
+        frameborder: "0",
+        allow: "clipboard-read; clipboard-write",
+        allowtransparency: "true",
+      },
+    });
 
     this.iframeEl.addEventListener("error", () => {
       console.error("Failed to load OpenCode iframe");
@@ -216,7 +191,7 @@ export class OpenCodeView extends ItemView {
     setIcon(iconEl, "alert-circle");
 
     statusContainer.createEl("h3", { text: "Failed to start OpenCode" });
-    
+
     const errorMessage = diagnostics.lastError;
     if (errorMessage) {
       statusContainer.createEl("p", {

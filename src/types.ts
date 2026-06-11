@@ -48,7 +48,7 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
   maxSelectionLength: 2000,
   customCommand: "",
   useCustomCommand: false,
-  webViewAppearance: "opencode",
+  webViewAppearance: "obsidian",
   lastSessionUrl: "",
 };
 

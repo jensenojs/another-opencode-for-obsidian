@@ -90,15 +90,15 @@ afterEach(async () => {
 
 describe("ServerManager", () => {
   describe("happy path", () => {
-     test("starts server and transitions to running state", async () => {
-       const port = getNextPort();
-       const settings = createTestSettings(port);
-       const stateHistory: ServerState[] = [];
+    test("starts server and transitions to running state", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
+      const stateHistory: ServerState[] = [];
 
-       currentManager = new ServerManager(settings, PROJECT_DIR);
-       currentManager.on("stateChange", (state: ServerState) => {
-         stateHistory.push(state);
-       });
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+      currentManager.on("stateChange", (state: ServerState) => {
+        stateHistory.push(state);
+      });
 
       expect(currentManager.getState()).toBe("stopped");
 
@@ -110,28 +110,28 @@ describe("ServerManager", () => {
       expect(stateHistory).toContain("running");
     }, 30000); // Increased timeout for database migration on first run
 
-     test("reports correct server URL with encoded project directory", async () => {
-       const port = getNextPort();
-       const settings = createTestSettings(port);
+    test("reports correct server URL with encoded project directory", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
 
-       currentManager = new ServerManager(settings, PROJECT_DIR);
+      currentManager = new ServerManager(settings, PROJECT_DIR);
 
       const url = currentManager.getUrl();
       const expectedBase = `http://127.0.0.1:${port}`;
-      const expectedPath = Buffer.from(PROJECT_DIR).toString('base64');
+      const expectedPath = Buffer.from(PROJECT_DIR).toString("base64");
 
       expect(url).toBe(`${expectedBase}/${expectedPath}`);
     });
 
-     test("stops server gracefully and transitions to stopped state", async () => {
-       const port = getNextPort();
-       const settings = createTestSettings(port);
-       const stateHistory: ServerState[] = [];
+    test("stops server gracefully and transitions to stopped state", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
+      const stateHistory: ServerState[] = [];
 
-       currentManager = new ServerManager(settings, PROJECT_DIR);
-       currentManager.on("stateChange", (state: ServerState) => {
-         stateHistory.push(state);
-       });
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+      currentManager.on("stateChange", (state: ServerState) => {
+        stateHistory.push(state);
+      });
 
       await currentManager.start();
       expect(currentManager.getState()).toBe("running");
@@ -142,15 +142,15 @@ describe("ServerManager", () => {
       expect(stateHistory).toContain("stopped");
     });
 
-     test("state callbacks fire in correct order: starting -> running", async () => {
-       const port = getNextPort();
-       const settings = createTestSettings(port);
-       const stateHistory: ServerState[] = [];
+    test("state callbacks fire in correct order: starting -> running", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
+      const stateHistory: ServerState[] = [];
 
-       currentManager = new ServerManager(settings, PROJECT_DIR);
-       currentManager.on("stateChange", (state: ServerState) => {
-         stateHistory.push(state);
-       });
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+      currentManager.on("stateChange", (state: ServerState) => {
+        stateHistory.push(state);
+      });
 
       await currentManager.start();
 
@@ -162,11 +162,11 @@ describe("ServerManager", () => {
       expect(runningIndex).toBeGreaterThan(startingIndex);
     });
 
-     test("can restart after stop", async () => {
-       const port = getNextPort();
-       const settings = createTestSettings(port);
+    test("can restart after stop", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
 
-       currentManager = new ServerManager(settings, PROJECT_DIR);
+      currentManager = new ServerManager(settings, PROJECT_DIR);
 
       // First start
       const firstStart = await currentManager.start();
@@ -186,11 +186,11 @@ describe("ServerManager", () => {
       expect(currentManager.getState()).toBe("running");
     });
 
-     test("returns true immediately if already running", async () => {
-       const port = getNextPort();
-       const settings = createTestSettings(port);
+    test("returns true immediately if already running", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
 
-       currentManager = new ServerManager(settings, PROJECT_DIR);
+      currentManager = new ServerManager(settings, PROJECT_DIR);
 
       // First start
       await currentManager.start();
@@ -211,11 +211,11 @@ describe("ServerManager", () => {
       expect(stateHistory).toEqual([]);
     });
 
-     test("health check endpoint is accessible when running", async () => {
-       const port = getNextPort();
-       const settings = createTestSettings(port);
+    test("health check endpoint is accessible when running", async () => {
+      const port = getNextPort();
+      const settings = createTestSettings(port);
 
-       currentManager = new ServerManager(settings, PROJECT_DIR);
+      currentManager = new ServerManager(settings, PROJECT_DIR);
 
       await currentManager.start();
 
@@ -297,7 +297,7 @@ describe("ServerManager", () => {
       await currentManager.start();
 
       const url = currentManager.getUrl();
-      
+
       await currentManager.stop();
 
       // Wait a bit then verify server is not accessible
@@ -432,7 +432,7 @@ describe("ServerManager", () => {
       const url = manager.getUrl();
 
       expect(url).toContain("http://127.0.0.1:");
-      expect(url).toContain(Buffer.from(chinesePath).toString('base64'));
+      expect(url).toContain(Buffer.from(chinesePath).toString("base64"));
     });
 
     test("getUrl handles Japanese characters in project directory", () => {
@@ -442,7 +442,7 @@ describe("ServerManager", () => {
 
       const url = manager.getUrl();
 
-      expect(url).toContain(Buffer.from(japanesePath).toString('base64'));
+      expect(url).toContain(Buffer.from(japanesePath).toString("base64"));
     });
 
     test("getUrl handles emoji in project directory", () => {
@@ -452,7 +452,7 @@ describe("ServerManager", () => {
 
       const url = manager.getUrl();
 
-      expect(url).toContain(Buffer.from(emojiPath).toString('base64'));
+      expect(url).toContain(Buffer.from(emojiPath).toString("base64"));
     });
   });
 });

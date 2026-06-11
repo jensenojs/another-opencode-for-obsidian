@@ -36,9 +36,14 @@ export interface RuntimeStatusSnapshot {
   projectDirectory: string;
   useCustomCommand: boolean;
   webViewAppearance: string;
+  runtimeDiagnostics: RuntimeDiagnosticsSnapshot;
   autoStart: boolean;
   logFile: string;
   statusFile: string;
+}
+
+export interface RuntimeDiagnosticsSnapshot {
+  theme: unknown | null;
 }
 
 const LOG_MAX_BYTES = 1024 * 1024;
@@ -126,7 +131,12 @@ function rotateIfNeeded(logFile: string): void {
   renameSync(logFile, rotated);
 }
 
-function mirrorToConsole(level: LogLevel, component: string, message: string, data?: unknown): void {
+function mirrorToConsole(
+  level: LogLevel,
+  component: string,
+  message: string,
+  data?: unknown
+): void {
   const prefix = `${LOG_PREFIX} ${component}: ${message}`;
   if (level === "error") {
     console.error(prefix, data ?? "");
@@ -142,29 +152,33 @@ function mirrorToConsole(level: LogLevel, component: string, message: string, da
 function stringifyRuntimeJson(value: unknown, spaces?: number): string {
   const seen = new WeakSet<object>();
 
-  return JSON.stringify(value, (key, item) => {
-    const redacted = redactSecrets(key, item);
-    if (redacted !== item) {
-      return redacted;
-    }
-    if (item instanceof Error) {
-      return {
-        name: item.name,
-        message: item.message,
-        stack: item.stack,
-      };
-    }
-    if (typeof item === "object" && item !== null) {
-      if (seen.has(item)) {
-        return "[circular]";
+  return JSON.stringify(
+    value,
+    (key, item) => {
+      const redacted = redactSecrets(key, item);
+      if (redacted !== item) {
+        return redacted;
       }
-      seen.add(item);
-    }
-    if (typeof item === "undefined") {
-      return null;
-    }
-    return item;
-  }, spaces);
+      if (item instanceof Error) {
+        return {
+          name: item.name,
+          message: item.message,
+          stack: item.stack,
+        };
+      }
+      if (typeof item === "object" && item !== null) {
+        if (seen.has(item)) {
+          return "[circular]";
+        }
+        seen.add(item);
+      }
+      if (typeof item === "undefined") {
+        return null;
+      }
+      return item;
+    },
+    spaces
+  );
 }
 
 function redactSecrets(key: string, value: unknown): unknown {

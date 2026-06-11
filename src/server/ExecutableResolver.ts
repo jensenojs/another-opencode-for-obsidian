@@ -13,9 +13,9 @@ export class ExecutableResolver {
     }
 
     const execName = basename(configuredPath) || configuredPath;
-    
+
     const searchDirs = this.getSearchDirectories();
-    
+
     for (const dir of searchDirs) {
       const fullPath = join(dir, execName);
       if (existsSync(fullPath)) {
@@ -33,13 +33,15 @@ export class ExecutableResolver {
   static resolveFromPath(execName: string): string | null {
     try {
       const command = platform() === "win32" ? "where" : "which";
-      const result = execSync(`${command} "${execName}"`, { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] });
+      const result = execSync(`${command} "${execName}"`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "ignore"],
+      });
       const path = result.trim().split("\n")[0];
       if (path && existsSync(path)) {
         return path;
       }
-    } catch {
-    }
+    } catch {}
     return null;
   }
 
@@ -92,8 +94,7 @@ export class ExecutableResolver {
           }
         }
       }
-    } catch {
-    }
+    } catch {}
 
     return nvmDirs;
   }

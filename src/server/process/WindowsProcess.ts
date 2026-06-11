@@ -8,11 +8,7 @@ export class WindowsProcess implements OpenCodeProcess {
   private static currentProcess: ChildProcess | null = null;
   private static cleanupHandlerRegistered = false;
 
-  start(
-    command: string,
-    args: string[],
-    options: SpawnOptions
-  ): ChildProcess {
+  start(command: string, args: string[], options: SpawnOptions): ChildProcess {
     const process = spawn(command, args, {
       ...options,
       shell: true,
@@ -48,17 +44,14 @@ export class WindowsProcess implements OpenCodeProcess {
         if (childPid && !isNaN(parseInt(childPid))) {
           try {
             execSync(`taskkill /F /PID ${childPid}`, { stdio: "ignore" });
-          } catch {
-          }
+          } catch {}
         }
       }
-    } catch {
-    }
+    } catch {}
 
     try {
       await this.execAsync(`taskkill /F /PID ${pid}`);
-    } catch {
-    }
+    } catch {}
 
     WindowsProcess.currentProcess = null;
 
@@ -96,19 +89,15 @@ export class WindowsProcess implements OpenCodeProcess {
           if (childPid && !isNaN(parseInt(childPid))) {
             try {
               execSync(`taskkill /F /PID ${childPid}`, { stdio: "ignore" });
-            } catch {
-            }
+            } catch {}
           }
         }
-      } catch {
-      }
+      } catch {}
 
       try {
         execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
-      } catch {
-      }
-    } catch {
-    }
+      } catch {}
+    } catch {}
   }
 
   async verifyCommand(command: string): Promise<string | null> {
@@ -120,10 +109,7 @@ export class WindowsProcess implements OpenCodeProcess {
     }
   }
 
-  private async waitForExit(
-    process: ChildProcess,
-    timeoutMs: number
-  ): Promise<void> {
+  private async waitForExit(process: ChildProcess, timeoutMs: number): Promise<void> {
     if (process.exitCode !== null || process.signalCode !== null) {
       return;
     }

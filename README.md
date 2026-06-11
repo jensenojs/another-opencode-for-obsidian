@@ -1,11 +1,11 @@
 # OpenCode plugin for Obsidian
 
-
 Give your notes AI capability by embedding Opencode [OpenCode](https://opencode.ai) AI assistant directly in Obsidian:
 
 <img src="./assets/opencode_in_obsidian.png" alt="OpenCode embeded in Obsidian" />
 
 **Use cases:**
+
 - Summarize and distill long-form content
 - Draft, edit, and refine your writing
 - Query and explore your knowledge base
@@ -18,7 +18,7 @@ _Note: plugin author is not afiliated with OpenCode or Obsidian - this is a 3rd 
 ## Requirements
 
 - Desktop only (uses Node.js child processes)
-- [OpenCode CLI](https://opencode.ai) installed 
+- [OpenCode CLI](https://opencode.ai) installed
 - [Bun](https://bun.sh) installed
 
 ## Installation
@@ -64,7 +64,6 @@ If you want to contribute or develop the plugin:
 - `Cmd/Ctrl+Shift+O` to toggle the panel
 - Server starts automatically when you open the panel
 
-
 ## Settings
 
 ### Custom Command Mode
@@ -80,6 +79,7 @@ When using custom command:
 - GUI-launched Obsidian may not inherit your terminal PATH. Use an absolute executable path or a leading `~` path in non-empty custom commands.
 
 Example:
+
 ```bash
 opencode serve --hostname {hostname} --port {port} --cors {cors}
 ```
@@ -90,10 +90,10 @@ Other settings (port, hostname, auto-start, view location, context injection) ar
 
 The embedded web view can use either:
 
+- `Obsidian`: inherit the active Obsidian theme. Page-level OpenCode background tokens stay transparent, while local controls and panels use translucent surfaces derived from Obsidian variables.
 - `OpenCode`: keep OpenCode's own web UI styling.
-- `Obsidian`: read the active Obsidian theme CSS variables and map them onto OpenCode's design tokens inside the proxied web UI.
 
-The Obsidian mode uses the stable CSS-variable surfaces exposed by both apps. It reads Obsidian variables such as `--background-primary`, `--text-normal`, and `--interactive-accent`, then injects OpenCode token overrides such as `--background-base`, `--text-strong`, and `--border-weak-base` through the local proxy. It does not target OpenCode component class names.
+The Obsidian mode uses the stable CSS-variable surfaces exposed by both apps. It reads Obsidian variables such as `--background-primary`, `--text-normal`, and `--interactive-accent`, then injects OpenCode token overrides such as `--background-base`, `--surface-raised-base`, `--text-strong`, and `--border-weak-base` through the local proxy. The page background tokens are transparent so Obsidian owns the pane material; local OpenCode surfaces remain translucent for readability. This code does not target OpenCode component class names.
 
 Relevant upstream surfaces:
 
@@ -126,13 +126,14 @@ bun run harness status --vault /path/to/vault
 bun run harness logs --lines 120
 bun run harness doctor --vault /path/to/vault
 bun run dev:bridge --opencode /path/to/opencode
+bun run dev:theme --vault /path/to/vault
 ```
 
 See the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/) for the state directory convention.
 
 When startup fails, the panel and settings page show the same diagnostics written to `status.json`: the effective start mode, command, stderr, health-check error, and log path.
 
-The intended path is visible first: a user should not have to know where logs live before seeing why startup failed. The harness and issue template exist to move the same evidence between machines.
+The intended path is visible first: a user should not have to know where logs live before seeing why startup failed. The harness commands move the same evidence between machines. For appearance issues, `bun run dev:theme` reads the running proxy HTML and reports whether the Obsidian/OpenCode appearance switch injected the expected tokens.
 
 ### Reporting issues
 
@@ -160,6 +161,7 @@ The command does not fetch remote URLs. To test a newer upstream, update the loc
 If you see "Executable not found at 'opencode'" despite opencode being installed:
 
 1. Find your opencode.cmd path:
+
    ```
    where opencode.cmd
    ```

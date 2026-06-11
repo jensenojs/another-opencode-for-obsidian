@@ -2,11 +2,7 @@ import { ChildProcess, SpawnOptions } from "child_process";
 
 export interface OpenCodeProcess {
   /** Start the process. Returns a handle to listen for events. */
-  start(
-    command: string,
-    args: string[],
-    options: SpawnOptions
-  ): ChildProcess;
+  start(command: string, args: string[], options: SpawnOptions): ChildProcess;
 
   /** Stop the process gracefully, then forcefully if needed.
    *  Resolves when process has exited.

@@ -33,31 +33,29 @@ describe("OpenCodeClient", () => {
 
   for (const projectDirectory of projectDirectories) {
     test(`percent-encodes the project directory header for ${projectDirectory}`, async () => {
-    let directoryHeader: string | string[] | undefined;
-    let requestUrl: string | undefined;
+      let directoryHeader: string | string[] | undefined;
+      let requestUrl: string | undefined;
 
-    const server = http.createServer((req, res) => {
-      directoryHeader = req.headers["x-opencode-directory"];
-      requestUrl = req.url;
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end("[]");
-    });
+      const server = http.createServer((req, res) => {
+        directoryHeader = req.headers["x-opencode-directory"];
+        requestUrl = req.url;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("[]");
+      });
 
-    const port = await listen(server);
-    const client = new OpenCodeClient(
-      `http://127.0.0.1:${port}`,
-      `http://127.0.0.1:${port}`,
-      projectDirectory
-    );
+      const port = await listen(server);
+      const client = new OpenCodeClient(
+        `http://127.0.0.1:${port}`,
+        `http://127.0.0.1:${port}`,
+        projectDirectory
+      );
 
       try {
         const initialized = await client.initializeProject();
 
         expect(initialized).toBe(true);
         expect(directoryHeader).toBe(encodeURIComponent(projectDirectory));
-        expect(requestUrl).toBe(
-          `/session?directory=${encodeURIComponent(projectDirectory)}`
-        );
+        expect(requestUrl).toBe(`/session?directory=${encodeURIComponent(projectDirectory)}`);
       } finally {
         await close(server);
       }
