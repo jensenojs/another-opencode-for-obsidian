@@ -22,6 +22,10 @@ import {
   type RuntimeDiagnosticsSnapshot,
   writeRuntimeStatus,
 } from "./debug/RuntimeDiagnostics";
+import {
+  formatServerDiagnosticsForClipboard,
+  formatStartFailureNotice,
+} from "./debug/ServerDiagnosticsText";
 import { BRIDGE_MESSAGES, isBridgeMessage } from "./bridge/BridgeProtocol";
 import { captureObsidianWebViewTheme } from "./theme/WebViewTheme";
 
@@ -169,6 +173,14 @@ export default class OpenCodePlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "copy-opencode-diagnostics",
+      name: "Copy OpenCode diagnostics",
+      callback: () => {
+        void this.copyServerDiagnosticsToClipboard();
+      },
+    });
+
+    this.addCommand({
       id: "add-selection-to-context",
       name: "Add selection to OpenCode context",
       editorCallback: (editor, ctx) => {
@@ -305,12 +317,7 @@ export default class OpenCodePlugin extends Plugin {
         this.logger.warn("failed to initialize project on server");
       }
     } else {
-      const error = this.processManager.getLastError();
-      if (error) {
-        new Notice(`OpenCode failed to start: ${error}`, 10000);
-      } else {
-        new Notice("OpenCode failed to start. Check Settings for details.", 5000);
-      }
+      new Notice(formatStartFailureNotice(this.getServerDiagnostics()), 15000);
     }
     this.writeStatus(success ? "start-success" : "start-failed");
     return success;
@@ -372,6 +379,22 @@ export default class OpenCodePlugin extends Plugin {
       logFile: paths.logFile,
       statusFile: paths.statusFile,
     };
+  }
+
+  async copyServerDiagnosticsToClipboard(): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(
+        formatServerDiagnosticsForClipboard(this.getServerDiagnostics())
+      );
+      new Notice("OpenCode diagnostics copied");
+      return true;
+    } catch (error) {
+      this.logger.error("failed to copy diagnostics", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      new Notice("Failed to copy OpenCode diagnostics");
+      return false;
+    }
   }
 
   getServerUrl(): string {

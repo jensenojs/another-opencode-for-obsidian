@@ -1,4 +1,4 @@
-import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
 import { OPENCODE_VIEW_TYPE } from "../types";
 import { OPENCODE_ICON_NAME } from "../icons";
 import type OpenCodePlugin from "../main";
@@ -259,10 +259,7 @@ export class OpenCodeView extends ItemView {
       text: "Copy diagnostics",
     });
     copyButton.addEventListener("click", () => {
-      void navigator.clipboard.writeText(this.formatDiagnosticsForClipboard()).then(
-        () => new Notice("OpenCode diagnostics copied"),
-        () => new Notice("Failed to copy OpenCode diagnostics")
-      );
+      void this.plugin.copyServerDiagnosticsToClipboard();
     });
   }
 
@@ -291,11 +288,6 @@ export class OpenCodeView extends ItemView {
       text: String(value),
       cls: "opencode-diagnostic-value",
     });
-  }
-
-  private formatDiagnosticsForClipboard(): string {
-    const diagnostics = this.plugin.getServerDiagnostics();
-    return JSON.stringify(diagnostics, null, 2);
   }
 
   private applyAppearanceClass(): void {
