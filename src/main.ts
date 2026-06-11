@@ -13,6 +13,7 @@ import { registerOpenCodeIcons, OPENCODE_ICON_NAME } from "./icons";
 import { OpenCodeClient } from "./client/OpenCodeClient";
 import { ContextManager } from "./context/ContextManager";
 import { ContextStatusBar } from "./context/ContextStatusBar";
+import { getSelectionLineRange } from "./context/SelectionLineRange";
 import { ExecutableResolver } from "./server/ExecutableResolver";
 import { OpenCodeProxy } from "./proxy/OpenCodeProxy";
 import {
@@ -155,6 +156,39 @@ export default class OpenCodePlugin extends Plugin {
         {
           modifiers: ["Mod", "Shift"],
           key: "o",
+        },
+      ],
+    });
+
+    this.addCommand({
+      id: "add-selection-to-context",
+      name: "Add selection to OpenCode context",
+      editorCallback: (editor, ctx) => {
+        const sourcePath = ctx.file?.path;
+        const selectedText = editor.getSelection();
+        if (!sourcePath || !selectedText.trim()) {
+          new Notice("Select text in a note before adding OpenCode context");
+          return;
+        }
+
+        const range = getSelectionLineRange(editor.listSelections()[0]);
+        void this.contextManager
+          .addSelectionForCurrentSession(
+            selectedText,
+            sourcePath,
+            range.selectionStartLine,
+            range.selectionEndLine
+          )
+          .then((item) => {
+            if (!item) {
+              new Notice("OpenCode context was not added. Open an active OpenCode session first.");
+            }
+          });
+      },
+      hotkeys: [
+        {
+          modifiers: ["Mod", "Shift"],
+          key: "Enter",
         },
       ],
     });

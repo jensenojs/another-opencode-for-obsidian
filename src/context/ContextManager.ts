@@ -187,6 +187,25 @@ export class ContextManager {
     });
   }
 
+  async addSelectionForCurrentSession(
+    text: string,
+    sourceFile: string,
+    startLine?: number,
+    endLine?: number
+  ): Promise<ContextItem | null> {
+    const iframeUrl = this.getCachedIframeUrl();
+    if (!iframeUrl) {
+      return null;
+    }
+
+    const sessionId = this.client.resolveSessionId(iframeUrl);
+    if (!sessionId) {
+      return null;
+    }
+
+    return this.addManual(sessionId, text, sourceFile, startLine, endLine);
+  }
+
   async removeItem(sessionId: string, itemId: string): Promise<boolean> {
     const item = this.items.find((candidate) => candidate.id === itemId);
     if (!item) {

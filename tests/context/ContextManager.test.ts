@@ -93,6 +93,35 @@ describe("ContextManager", () => {
     expect(manager.getItems()).toEqual([item]);
   });
 
+  test("adds selected text to the current OpenCode session", async () => {
+    const calls: Array<{ sessionId: string; text: string }> = [];
+    const manager = new ContextManager({
+      app: createApp(),
+      settings: createSettings(),
+      client: {
+        resolveSessionId: () => "ses_1",
+        addContextMessage: async (sessionId: string, text: string) => {
+          calls.push({ sessionId, text });
+          return { messageId: "msg_1", partId: "prt_1" };
+        },
+      } as unknown as OpenCodeClient,
+      getServerState: () => "running",
+      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
+      setCachedIframeUrl: () => {},
+      registerEvent: () => {},
+    });
+
+    const item = await manager.addSelectionForCurrentSession("selected text", "note.md", 2, 3);
+
+    expect(calls).toEqual([{ sessionId: "ses_1", text: "selected text" }]);
+    expect(item).toMatchObject({
+      label: "note.md:2-3",
+      sourceFile: "note.md",
+      startLine: 2,
+      endLine: 3,
+    });
+  });
+
   test("removes context only after the remote part is ignored", async () => {
     const ignored: string[] = [];
     const manager = createManager({
