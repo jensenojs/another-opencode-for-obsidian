@@ -1,4 +1,4 @@
-import { Plugin, Notice } from "obsidian";
+import { MarkdownView, Notice, Plugin } from "obsidian";
 import {
   OpenCodeSettings,
   DEFAULT_SETTINGS,
@@ -194,6 +194,14 @@ export default class OpenCodePlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "add-current-note-to-context",
+      name: "Add current note to OpenCode context",
+      callback: () => {
+        void this.addCurrentNoteToContext();
+      },
+    });
+
+    this.addCommand({
       id: "start-opencode-server",
       name: "Start OpenCode server",
       callback: () => {
@@ -304,6 +312,37 @@ export default class OpenCodePlugin extends Plugin {
     await this.processManager.stop();
     new Notice("OpenCode server stopped");
     this.writeStatus("stop");
+  }
+
+  private async addCurrentNoteToContext(): Promise<void> {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = view?.file;
+    if (!file) {
+      new Notice("Open a note before adding it to OpenCode context");
+      return;
+    }
+
+    let text: string;
+    try {
+      text = await this.app.vault.cachedRead(file);
+    } catch (error) {
+      this.logger.error("failed to read current note", {
+        path: file.path,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      new Notice("OpenCode could not read the current note. Check the plugin log.");
+      return;
+    }
+
+    if (!text.trim()) {
+      new Notice("Current note is empty");
+      return;
+    }
+
+    const item = await this.contextManager.addCurrentNoteForCurrentSession(file.path, text);
+    if (!item) {
+      new Notice("OpenCode context was not added. Open an active OpenCode session first.");
+    }
   }
 
   getServerState(): ServerState {

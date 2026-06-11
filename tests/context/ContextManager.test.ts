@@ -187,6 +187,65 @@ describe("ContextManager", () => {
     });
   });
 
+  test("adds the current note to the current OpenCode session", async () => {
+    const calls: Array<{ sessionId: string; text: string }> = [];
+    const manager = new ContextManager({
+      app: createApp(),
+      settings: createSettings(),
+      client: {
+        resolveSessionId: () => "ses_1",
+        addContextMessage: async (sessionId: string, text: string) => {
+          calls.push({ sessionId, text });
+          return { messageId: "msg_1", partId: "prt_1" };
+        },
+      } as unknown as OpenCodeClient,
+      getServerState: () => "running",
+      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
+      setCachedIframeUrl: () => {},
+      registerEvent: () => {},
+    });
+
+    const item = await manager.addCurrentNoteForCurrentSession(
+      "notes/current.md",
+      "line 1\nline 2"
+    );
+
+    expect(calls).toEqual([{ sessionId: "ses_1", text: "line 1\nline 2" }]);
+    expect(item).toMatchObject({
+      type: "manual",
+      label: "notes/current.md:1-2",
+      text: "line 1\nline 2",
+      sourceFile: "notes/current.md",
+      startLine: 1,
+      endLine: 2,
+    });
+  });
+
+  test("does not add an empty current note", async () => {
+    const calls: string[] = [];
+    const manager = new ContextManager({
+      app: createApp(),
+      settings: createSettings(),
+      client: {
+        resolveSessionId: () => "ses_1",
+        addContextMessage: async (_sessionId: string, text: string) => {
+          calls.push(text);
+          return { messageId: "msg_1", partId: "prt_1" };
+        },
+      } as unknown as OpenCodeClient,
+      getServerState: () => "running",
+      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
+      setCachedIframeUrl: () => {},
+      registerEvent: () => {},
+    });
+
+    const item = await manager.addCurrentNoteForCurrentSession("notes/current.md", " \n ");
+
+    expect(item).toBeNull();
+    expect(calls).toEqual([]);
+    expect(manager.getItems()).toEqual([]);
+  });
+
   test("auto-adds changed editor selection when enabled", async () => {
     const settings = createSettings();
     settings.autoAddSelectionContext = true;

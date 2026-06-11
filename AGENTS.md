@@ -131,6 +131,7 @@ scripts/
 - 监听 Obsidian workspace 事件（active-leaf-change、editor-change 等）
 - 防抖 2 秒后触发上下文刷新
 - 调用 `WorkspaceContext` 收集数据，通过 `OpenCodeClient` 发送到 opencode 会话
+- `add-selection-to-context` 和 `add-current-note-to-context` 都创建 `type: "manual"` 的 `ContextItem`，复用同一套可见、可删除、可跳转、可复制诊断的生命周期
 - `injectWorkspaceContext` 控制自动 workspace 摘要（打开笔记路径 + 当前选区）是否作为一个 auto item 维护
 - `autoAddSelectionContext` 控制 editor-change 后是否把变化后的选区追加为 manual item；它复用 `addSelectionForCurrentSession()`，不新增 ContextItem 身份字段或第二套状态源
 - `autoAddBacklinksContext` 控制 active note 的反向链接是否作为 auto item 维护；`ContextManager` 只路由 workspace/metadataCache 事件和当前文件路径，不在这里解析 backlink 图

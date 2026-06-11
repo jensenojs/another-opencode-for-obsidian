@@ -272,6 +272,14 @@ export class ContextManager {
     return this.addManual(sessionId, text, sourceFile, startLine, endLine);
   }
 
+  async addCurrentNoteForCurrentSession(
+    sourceFile: string,
+    text: string
+  ): Promise<ContextItem | null> {
+    const endLine = text.length > 0 ? text.split(/\r\n|\r|\n/).length : undefined;
+    return this.addSelectionForCurrentSession(text, sourceFile, 1, endLine);
+  }
+
   async addAutoForCurrentSession(params: {
     label: string;
     text: string;
