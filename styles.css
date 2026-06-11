@@ -264,10 +264,25 @@
   color: var(--text-normal);
 }
 
+.opencode-ctx-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .opencode-ctx-popover-title {
+  min-width: 0;
   font-size: 0.85em;
   font-weight: 600;
   color: var(--text-muted);
+}
+
+.opencode-ctx-copy {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 0.78em;
 }
 
 .opencode-ctx-empty {

@@ -134,7 +134,9 @@ See the [XDG Base Directory Specification](https://specifications.freedesktop.or
 
 When startup fails, the panel and settings page show the same diagnostics written to `status.json`: the effective start mode, command, stderr, health-check error, and log path.
 
-The intended path is visible first: a user should not have to know where logs live before seeing why startup failed. The harness commands move the same evidence between machines. For appearance issues, `bun run dev:theme` reads the running Obsidian plugin proxy and reports whether the active instance injected the expected tokens. `bun run dev:theme:fixture` checks the current workspace code with a local HTML fixture, so agents can verify theme injection before Obsidian reloads the plugin.
+The intended path is visible first: a user should not have to know where logs live before seeing why startup failed. The harness commands move the same evidence between machines. For appearance issues, `bun run dev:theme` reads the running Obsidian plugin proxy and reports whether the active instance injected the expected tokens. Its `summary` and `actions` fields explain common runtime failures such as a stopped OpenCode server, collapsed pane, or missing iframe diagnostics. `bun run dev:theme:fixture` checks the current workspace code with a local HTML fixture, so agents can verify theme injection before Obsidian reloads the plugin.
+
+The context popover includes a copy action for diagnostics. It copies item metadata such as type, label, source file, line range, message/part IDs, text length, and creation time. It does not copy full note text.
 
 ### Reporting issues
 

@@ -409,6 +409,8 @@ interface WorkspaceEventReport {
 
 interface ThemeReport {
   ok: boolean;
+  summary: string;
+  actions: string[];
   mode: "obsidian" | "opencode" | "unknown";
   url: string | null;
   http: {
@@ -430,6 +432,11 @@ interface ThemeReport {
   runtimeDiagnostics: unknown | null;
   iframeDiagnostics: unknown | null;
   checks: Array<{ name: string; ok: boolean; detail?: unknown }>;
+}
+
+interface ThemeRuntimeStatus {
+  serverState?: unknown;
+  healthProbe?: unknown;
 }
 
 const httpMethods = new Set<HttpMethod>(["get", "post", "patch", "put", "delete"]);
@@ -481,17 +488,25 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
   });
 
   if (!url) {
-    return {
-      ok: false,
-      mode,
-      url,
-      http: { ok: false, error: "status.json has no proxyUrl; start Obsidian/plugin first" },
-      injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
-      tokens: emptyThemeTokens(),
-      runtimeDiagnostics: runtimeThemeDiagnostics,
-      iframeDiagnostics: runtimeIframeDiagnostics,
-      checks,
-    };
+    return withThemeAdvice(
+      {
+        ok: false,
+        summary: "",
+        actions: [],
+        mode,
+        url,
+        http: { ok: false, error: "status.json has no proxyUrl; start Obsidian/plugin first" },
+        injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
+        tokens: emptyThemeTokens(),
+        runtimeDiagnostics: runtimeThemeDiagnostics,
+        iframeDiagnostics: runtimeIframeDiagnostics,
+        checks,
+      },
+      {
+        requireRuntimeDiagnostics: true,
+        runtimeStatus,
+      }
+    );
   }
 
   const html = await fetchText(url);
@@ -502,28 +517,42 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
   });
 
   if (!html.ok) {
-    return {
-      ok: false,
+    return withThemeAdvice(
+      {
+        ok: false,
+        summary: "",
+        actions: [],
+        mode,
+        url,
+        http: html,
+        injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
+        tokens: emptyThemeTokens(),
+        runtimeDiagnostics: runtimeThemeDiagnostics,
+        iframeDiagnostics: runtimeIframeDiagnostics,
+        checks,
+      },
+      {
+        requireRuntimeDiagnostics: true,
+        runtimeStatus,
+      }
+    );
+  }
+
+  return withThemeAdvice(
+    buildThemeReportFromHtml({
       mode,
       url,
-      http: html,
-      injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
-      tokens: emptyThemeTokens(),
+      html,
       runtimeDiagnostics: runtimeThemeDiagnostics,
       iframeDiagnostics: runtimeIframeDiagnostics,
       checks,
-    };
-  }
-
-  return buildThemeReportFromHtml({
-    mode,
-    url,
-    html,
-    runtimeDiagnostics: runtimeThemeDiagnostics,
-    iframeDiagnostics: runtimeIframeDiagnostics,
-    checks,
-    requireRuntimeDiagnostics: true,
-  });
+      requireRuntimeDiagnostics: true,
+    }),
+    {
+      requireRuntimeDiagnostics: true,
+      runtimeStatus,
+    }
+  );
 }
 
 async function buildFixtureThemeReport(): Promise<ThemeReport> {
@@ -537,28 +566,40 @@ async function buildFixtureThemeReport(): Promise<ThemeReport> {
   ];
 
   if (!html.ok) {
-    return {
-      ok: false,
+    return withThemeAdvice(
+      {
+        ok: false,
+        summary: "",
+        actions: [],
+        mode: "obsidian",
+        url: html.url,
+        http: html,
+        injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
+        tokens: emptyThemeTokens(),
+        runtimeDiagnostics: null,
+        iframeDiagnostics: null,
+        checks,
+      },
+      {
+        requireRuntimeDiagnostics: false,
+      }
+    );
+  }
+
+  return withThemeAdvice(
+    buildThemeReportFromHtml({
       mode: "obsidian",
       url: html.url,
-      http: html,
-      injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
-      tokens: emptyThemeTokens(),
+      html,
       runtimeDiagnostics: null,
       iframeDiagnostics: null,
       checks,
-    };
-  }
-
-  return buildThemeReportFromHtml({
-    mode: "obsidian",
-    url: html.url,
-    html,
-    runtimeDiagnostics: null,
-    iframeDiagnostics: null,
-    checks,
-    requireRuntimeDiagnostics: false,
-  });
+      requireRuntimeDiagnostics: false,
+    }),
+    {
+      requireRuntimeDiagnostics: false,
+    }
+  );
 }
 
 function buildThemeReportFromHtml(input: {
@@ -694,6 +735,8 @@ function buildThemeReportFromHtml(input: {
 
   return {
     ok: input.checks.every((check) => check.ok),
+    summary: "",
+    actions: [],
     mode: input.mode,
     url: input.url,
     http: {
@@ -707,6 +750,128 @@ function buildThemeReportFromHtml(input: {
     iframeDiagnostics: input.iframeDiagnostics,
     checks: input.checks,
   };
+}
+
+function withThemeAdvice(
+  report: ThemeReport,
+  options: {
+    requireRuntimeDiagnostics: boolean;
+    runtimeStatus?: ThemeRuntimeStatus | null;
+  }
+): ThemeReport {
+  const advice = themeAdvice(report, options);
+  return {
+    ...report,
+    summary: advice.summary,
+    actions: advice.actions,
+  };
+}
+
+function themeAdvice(
+  report: ThemeReport,
+  options: {
+    requireRuntimeDiagnostics: boolean;
+    runtimeStatus?: ThemeRuntimeStatus | null;
+  }
+): { summary: string; actions: string[] } {
+  if (report.ok) {
+    return {
+      summary: options.requireRuntimeDiagnostics
+        ? "Runtime theme checks passed against the running Obsidian plugin."
+        : "Fixture theme checks passed against the current workspace code.",
+      actions: [],
+    };
+  }
+
+  if (!options.requireRuntimeDiagnostics) {
+    return {
+      summary: "Fixture theme check failed against the current workspace code.",
+      actions: ["Run `bun run check` and inspect the failed theme checks above."],
+    };
+  }
+
+  if (!report.url) {
+    return {
+      summary: "Obsidian runtime has not published a proxy URL yet.",
+      actions: [
+        "Run `bun run dev:install --vault /Users/oujinsai/obsidian`.",
+        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian command id=opencode-obsidian:start-opencode-server`.",
+      ],
+    };
+  }
+
+  if (!report.http.ok) {
+    const serverState = options.runtimeStatus?.serverState;
+    if (serverState === "stopped" || report.http.status === 502) {
+      return {
+        summary:
+          "Runtime proxy is reachable, but the OpenCode server behind it is not serving HTML.",
+        actions: [
+          "Run `obsidian command id=opencode-obsidian:start-opencode-server`.",
+          "Then run `bun run dev:theme` before `--shutdown-after-last-client` exits the server.",
+          "Use `bun run dev:theme:fixture` when you only need to verify current workspace theme code.",
+        ],
+      };
+    }
+    return {
+      summary: "Runtime proxy HTML request failed.",
+      actions: [
+        "Run `bun run dev:status --vault /Users/oujinsai/obsidian --lines 40`.",
+        "Inspect the `runtime.status.healthProbe` and recent proxy log entries.",
+      ],
+    };
+  }
+
+  if (!report.runtimeDiagnostics && isCollapsedIframeDiagnostics(report.iframeDiagnostics)) {
+    return {
+      summary:
+        "Runtime proxy injection is valid, but the OpenCode iframe is inside a collapsed Obsidian pane.",
+      actions: [
+        "Open the OpenCode pane in Obsidian so the iframe has non-zero width and height.",
+        "Run `obsidian command id=opencode-obsidian:toggle-opencode-view` only when the right sidebar is collapsed.",
+        "Rerun `bun run dev:theme` while the pane is visible.",
+      ],
+    };
+  }
+
+  if (!report.runtimeDiagnostics) {
+    return {
+      summary:
+        "Runtime proxy injection is valid, but the iframe has not reported internal theme diagnostics.",
+      actions: [
+        "Keep the OpenCode pane visible and rerun `bun run dev:theme` after the iframe finishes loading.",
+        "Check `$XDG_STATE_HOME/opencode-obsidian/opencode-obsidian.log` for `theme diagnostics` entries.",
+        "Use `bun run dev:theme:fixture` to isolate workspace code from Obsidian window state.",
+      ],
+    };
+  }
+
+  return {
+    summary: "Runtime theme checks failed; inspect the failed check details above.",
+    actions: ["Compare `runtimeDiagnostics.variables` with the injected `tokens` section."],
+  };
+}
+
+function isCollapsedIframeDiagnostics(diagnostics: unknown): boolean {
+  if (!diagnostics || typeof diagnostics !== "object") {
+    return false;
+  }
+
+  const iframe = (diagnostics as any).iframe;
+  const iframeArea = typeof iframe?.area === "number" ? iframe.area : null;
+  if (iframeArea === 0) {
+    return true;
+  }
+
+  const ancestors = Array.isArray((diagnostics as any).ancestors)
+    ? (diagnostics as any).ancestors
+    : [];
+  return ancestors.some(
+    (ancestor: any) =>
+      typeof ancestor?.className === "string" &&
+      ancestor.className.includes("is-sidedock-collapsed")
+  );
 }
 
 async function fetchFixtureThemeHtml(): Promise<

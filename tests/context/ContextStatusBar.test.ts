@@ -1,5 +1,8 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test";
-import type { ContextStatusBar as ContextStatusBarClass } from "../../src/context/ContextStatusBar";
+import type {
+  ContextStatusBar as ContextStatusBarClass,
+  formatContextDiagnostics as formatContextDiagnosticsFn,
+} from "../../src/context/ContextStatusBar";
 import type { ContextItem } from "../../src/types";
 
 mock.module("obsidian", () => ({
@@ -11,9 +14,11 @@ mock.module("obsidian", () => ({
 }));
 
 let ContextStatusBar: typeof ContextStatusBarClass;
+let formatContextDiagnostics: typeof formatContextDiagnosticsFn;
 
 beforeAll(async () => {
-  ({ ContextStatusBar } = await import("../../src/context/ContextStatusBar"));
+  ({ ContextStatusBar, formatContextDiagnostics } =
+    await import("../../src/context/ContextStatusBar"));
 });
 
 class FakeStatusElement {
@@ -93,5 +98,25 @@ describe("ContextStatusBar", () => {
 
     expect(unsubscribed).toBe(true);
     expect(statusEl.removed).toBe(true);
+  });
+
+  test("formats context diagnostics without copying full context text", () => {
+    const payload = JSON.parse(formatContextDiagnostics([manualItem]));
+
+    expect(payload.itemCount).toBe(1);
+    expect(payload.items[0]).toEqual({
+      id: "msg_1:prt_1",
+      type: "manual",
+      label: "Selection",
+      sourceFile: "note.md",
+      startLine: null,
+      endLine: null,
+      messageId: "msg_1",
+      partId: "prt_1",
+      textLength: "selected text".length,
+      createdAt: "1970-01-01T00:00:00.123Z",
+    });
+    expect(JSON.stringify(payload)).not.toContain("selected text");
+    expect(JSON.stringify(payload)).not.toContain("sourceKey");
   });
 });

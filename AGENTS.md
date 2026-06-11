@@ -193,6 +193,7 @@ scripts/
 
 - 默认读取 XDG `status.json` 里的 `proxyUrl`，只访问本机 proxy HTML，验正在运行的 Obsidian 插件实例
 - `bun run dev:theme:fixture` 使用当前工作区代码启动本地 HTML fixture + `OpenCodeProxy`，不依赖 Obsidian 重载，用于确认刚修改的主题注入代码
+- `dev:theme` 输出里的 `summary` 和 `actions` 是第一阅读入口。失败时先看这里判断是 server stopped、proxy 502、pane collapsed，还是 iframe 内部 theme diagnostics 未回写
 - `obsidian` 模式要求 `data-opencode-obsidian-*` 注入存在、根背景 token 使用 Obsidian 页面背景变量、局部 surface token 半透明
 - `opencode` 模式要求不注入 Obsidian 外观覆盖
 - `runtimeDiagnostics.theme` 来自 proxy 注入脚本，检查 OpenCode iframe 内部 DOM；`runtimeDiagnostics.iframe` 来自 Obsidian 父窗口，检查 iframe 元素和 Obsidian 祖先链。两者必须分开，因为 iframe 加载后父窗口不能可靠读取 OpenCode 内部 DOM
@@ -363,7 +364,7 @@ bun run harness doctor --vault /Users/oujinsai/obsidian
 
 ## 已知限制与后续工作
 
-- **上下文注入不可见**: 当前将打开笔记路径和选中文本作为静默后台上下文发送，用户看不到发送了什么、也没有控制权。计划添加可见的上下文面板和手动控制。
+- **上下文面板仍需增强**: StatusBar 浮层已经能显示、跳转、移除和复制 context diagnostics。后续要补的是更强的手动选择入口，以及把 note/folder/search result 等候选来源统一接入现有 `ContextItem` 生命周期。
 - **未使用的 opencode API**: `file.read`、`find.*`、`tui.*`、`event.subscribe`、`session.fork/diff/todo` 等 API 尚未集成，这些都是可增强双向交互的接口。
 - **代理端口不可见**: 设置面板不显示代理端口（自动检测，目前工作正常但不够透明）。
 - **代理扩展潜力**: 当前代理基础设施可以支持 Obsidian 与 opencode 之间的双向文件同步，但尚未实现。

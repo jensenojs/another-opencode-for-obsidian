@@ -1,4 +1,4 @@
-import { setIcon } from "obsidian";
+import { Notice, setIcon } from "obsidian";
 import type { ContextItem } from "../types";
 
 interface ContextStatusBarDeps {
@@ -96,9 +96,21 @@ export class ContextStatusBar {
     }
 
     this.popoverEl.empty();
-    this.popoverEl.createDiv({
+    const headerEl = this.popoverEl.createDiv({ cls: "opencode-ctx-popover-header" });
+    headerEl.createDiv({
       cls: "opencode-ctx-popover-title",
       text: `OpenCode context (${items.length})`,
+    });
+    const copyButton = headerEl.createEl("button", {
+      cls: "opencode-ctx-copy",
+      text: "Copy diagnostics",
+      attr: { type: "button" },
+    });
+    copyButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await navigator.clipboard.writeText(formatContextDiagnostics(items));
+      new Notice("OpenCode context diagnostics copied");
     });
 
     if (items.length === 0) {
@@ -163,4 +175,26 @@ export class ContextStatusBar {
     }
     return `${item.sourceFile}:${item.startLine}-${item.endLine}`;
   }
+}
+
+export function formatContextDiagnostics(items: ContextItem[]): string {
+  return JSON.stringify(
+    {
+      itemCount: items.length,
+      items: items.map((item) => ({
+        id: item.id,
+        type: item.type,
+        label: item.label,
+        sourceFile: item.sourceFile,
+        startLine: item.startLine ?? null,
+        endLine: item.endLine ?? null,
+        messageId: item.messageId ?? null,
+        partId: item.partId ?? null,
+        textLength: item.text.length,
+        createdAt: new Date(item.createdAt).toISOString(),
+      })),
+    },
+    null,
+    2
+  );
 }
