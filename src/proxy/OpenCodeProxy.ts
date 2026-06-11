@@ -376,13 +376,12 @@ function createThemeInjection(theme: WebViewTheme | null): string {
       }
     }
     function scheduleThemeDiagnostics(reason) {
-      requestAnimationFrame(function() {
-        setTimeout(function() {
-          postThemeDiagnostics(reason);
-        }, 120);
-      });
+      setTimeout(function() {
+        postThemeDiagnostics(reason);
+      }, 120);
     }
     applyTheme();
+    postThemeDiagnostics('after-apply');
     scheduleThemeDiagnostics('initial');
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function() {

@@ -6,9 +6,10 @@ import { fileURLToPath } from "url";
 import * as ts from "typescript";
 import { getRuntimePaths } from "../src/debug/RuntimeDiagnostics";
 import { getExplicitCustomCommand, usesExplicitCustomCommand } from "../src/types";
-import { BRIDGE_MESSAGES } from "../src/bridge/BridgeProtocol";
+import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../src/bridge/BridgeProtocol";
 import { OpenCodeProxy } from "../src/proxy/OpenCodeProxy";
 import { createOpenCodeWebViewTheme } from "../src/theme/WebViewTheme";
+import { Window } from "happy-dom";
 
 type Command = "help" | "paths" | "install" | "status" | "logs" | "doctor" | "bridge" | "theme";
 
@@ -429,6 +430,7 @@ interface ThemeReport {
     surfaces: Record<string, string | null>;
     textAndBorder: Record<string, string | null>;
   };
+  scriptDiagnostics: unknown | null;
   runtimeDiagnostics: unknown | null;
   iframeDiagnostics: unknown | null;
   checks: Array<{ name: string; ok: boolean; detail?: unknown }>;
@@ -437,6 +439,11 @@ interface ThemeReport {
 interface ThemeRuntimeStatus {
   serverState?: unknown;
   healthProbe?: unknown;
+}
+
+interface ThemeScriptExecution {
+  diagnostics: unknown | null;
+  error: string | null;
 }
 
 const httpMethods = new Set<HttpMethod>(["get", "post", "patch", "put", "delete"]);
@@ -498,6 +505,7 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
         http: { ok: false, error: "status.json has no proxyUrl; start Obsidian/plugin first" },
         injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
         tokens: emptyThemeTokens(),
+        scriptDiagnostics: runtimeThemeDiagnostics,
         runtimeDiagnostics: runtimeThemeDiagnostics,
         iframeDiagnostics: runtimeIframeDiagnostics,
         checks,
@@ -527,6 +535,7 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
         http: html,
         injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
         tokens: emptyThemeTokens(),
+        scriptDiagnostics: runtimeThemeDiagnostics,
         runtimeDiagnostics: runtimeThemeDiagnostics,
         iframeDiagnostics: runtimeIframeDiagnostics,
         checks,
@@ -543,6 +552,7 @@ async function buildThemeReport(args: Args): Promise<ThemeReport> {
       mode,
       url,
       html,
+      scriptDiagnostics: runtimeThemeDiagnostics,
       runtimeDiagnostics: runtimeThemeDiagnostics,
       iframeDiagnostics: runtimeIframeDiagnostics,
       checks,
@@ -576,6 +586,7 @@ async function buildFixtureThemeReport(): Promise<ThemeReport> {
         http: html,
         injection: { hasAppearanceStyle: false, hasThemeScript: false, colorScheme: null },
         tokens: emptyThemeTokens(),
+        scriptDiagnostics: null,
         runtimeDiagnostics: null,
         iframeDiagnostics: null,
         checks,
@@ -586,11 +597,15 @@ async function buildFixtureThemeReport(): Promise<ThemeReport> {
     );
   }
 
+  const scriptExecution = await runThemeDiagnosticsFixture(html.body, html.url);
+
   return withThemeAdvice(
     buildThemeReportFromHtml({
       mode: "obsidian",
       url: html.url,
       html,
+      scriptDiagnostics: scriptExecution.diagnostics,
+      scriptDiagnosticsError: scriptExecution.error,
       runtimeDiagnostics: null,
       iframeDiagnostics: null,
       checks,
@@ -606,6 +621,8 @@ function buildThemeReportFromHtml(input: {
   mode: ThemeReport["mode"];
   url: string | null;
   html: Awaited<ReturnType<typeof fetchText>>;
+  scriptDiagnostics: unknown | null;
+  scriptDiagnosticsError?: string | null;
   runtimeDiagnostics: unknown | null;
   iframeDiagnostics: unknown | null;
   checks: ThemeReport["checks"];
@@ -698,13 +715,25 @@ function buildThemeReportFromHtml(input: {
       detail: tokens.textAndBorder,
     });
 
+    if (!input.requireRuntimeDiagnostics) {
+      input.checks.push({
+        name: "fixture theme script posts diagnostics",
+        ok: Boolean(input.scriptDiagnostics),
+        detail:
+          input.scriptDiagnostics ??
+          input.scriptDiagnosticsError ??
+          "The fixture executed the proxied HTML, but no theme:diagnostics message was posted.",
+      });
+      input.checks.push(...themeDiagnosticsResolvedChecks(input.scriptDiagnostics, variables));
+    }
+
     if (input.requireRuntimeDiagnostics) {
       input.checks.push({
         name: "runtime iframe theme diagnostics received",
         ok: Boolean(input.runtimeDiagnostics),
         detail:
           input.runtimeDiagnostics ??
-          "No iframe diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
+          "No iframe diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:open-opencode-view`, then rerun this harness command.",
       });
       input.checks.push(
         ...runtimeThemeChecks(
@@ -717,7 +746,7 @@ function buildThemeReportFromHtml(input: {
         ok: Boolean(input.iframeDiagnostics),
         detail:
           input.iframeDiagnostics ??
-          "No iframe composition diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:toggle-opencode-view`, then rerun this harness command.",
+          "No iframe composition diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:open-opencode-view`, then rerun this harness command.",
       });
     }
   }
@@ -746,6 +775,7 @@ function buildThemeReportFromHtml(input: {
     },
     injection,
     tokens,
+    scriptDiagnostics: input.scriptDiagnostics,
     runtimeDiagnostics: input.runtimeDiagnostics,
     iframeDiagnostics: input.iframeDiagnostics,
     checks: input.checks,
@@ -829,7 +859,7 @@ function themeAdvice(
         "Runtime proxy injection is valid, but the OpenCode iframe is inside a collapsed Obsidian pane.",
       actions: [
         "Open the OpenCode pane in Obsidian so the iframe has non-zero width and height.",
-        "Run `obsidian command id=opencode-obsidian:toggle-opencode-view` only when the right sidebar is collapsed.",
+        "Run `obsidian command id=opencode-obsidian:open-opencode-view` to reveal the pane without toggling it closed.",
         "Rerun `bun run dev:theme` while the pane is visible.",
       ],
     };
@@ -841,6 +871,7 @@ function themeAdvice(
         "Runtime proxy injection is valid, but the iframe has not reported internal theme diagnostics.",
       actions: [
         "Keep the OpenCode pane visible and rerun `bun run dev:theme` after the iframe finishes loading.",
+        "Use `obsidian command id=opencode-obsidian:open-opencode-view` when the pane state is unclear.",
         "Check `$XDG_STATE_HOME/opencode-obsidian/opencode-obsidian.log` for `theme diagnostics` entries.",
         "Use `bun run dev:theme:fixture` to isolate workspace code from Obsidian window state.",
       ],
@@ -921,6 +952,64 @@ async function fetchFixtureThemeHtml(): Promise<
   } finally {
     proxy.stop();
     await closeServer(backend);
+  }
+}
+
+async function runThemeDiagnosticsFixture(
+  html: string,
+  url: string | null
+): Promise<ThemeScriptExecution> {
+  let diagnostics: unknown | null = null;
+  const window = new Window({
+    url: url ?? "http://127.0.0.1/",
+    innerWidth: 1024,
+    innerHeight: 768,
+    settings: {
+      enableJavaScriptEvaluation: true,
+      suppressInsecureJavaScriptEnvironmentWarning: true,
+      timer: {
+        maxTimeout: 1000,
+        maxIntervalTime: 20,
+        maxIntervalIterations: 1,
+        preventTimerLoops: true,
+      },
+    },
+  });
+
+  try {
+    window.Object = Object;
+    window.Array = Array;
+    window.Math = Math;
+    window.JSON = JSON;
+    window.Error = Error;
+    window.String = String;
+    window.postMessage = ((message: unknown) => {
+      if (
+        message &&
+        typeof message === "object" &&
+        (message as any).ns === BRIDGE_NAMESPACE &&
+        (message as any).version === BRIDGE_VERSION &&
+        (message as any).type === BRIDGE_MESSAGES.themeDiagnostics
+      ) {
+        diagnostics = (message as any).payload ?? null;
+      }
+    }) as typeof window.postMessage;
+
+    window.document.write(html);
+    window.document.close();
+    await window.happyDOM.waitUntilComplete();
+
+    return {
+      diagnostics,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      diagnostics: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await window.happyDOM.close();
   }
 }
 
@@ -1725,6 +1814,92 @@ function emptyThemeTokens(): ThemeReport["tokens"] {
   };
 }
 
+function themeDiagnosticsResolvedChecks(
+  diagnostics: unknown,
+  injectedVariables: Record<string, string>
+): ThemeReport["checks"] {
+  if (!diagnostics || typeof diagnostics !== "object") {
+    return [];
+  }
+
+  const variables =
+    (diagnostics as any).variables && typeof (diagnostics as any).variables === "object"
+      ? ((diagnostics as any).variables as Record<string, unknown>)
+      : {};
+  const pageBackground = injectedVariables["--opencode-obsidian-page-background"];
+  const backgroundSecondary = injectedVariables["--opencode-obsidian-background-secondary"];
+  const textNormal = injectedVariables["--opencode-obsidian-text-normal"];
+  const border = injectedVariables["--opencode-obsidian-border"];
+  const backgroundNames = [
+    "--background-base",
+    "--background-weak",
+    "--background-strong",
+    "--background-stronger",
+    "--v2-background-bg-base",
+    "--v2-background-bg-deep",
+    "--background-bg-base",
+  ];
+  const backgroundSamples = Object.fromEntries(
+    backgroundNames.map((name) => [
+      name,
+      {
+        expected: pageBackground,
+        actual: typeof variables[name] === "string" ? variables[name] : null,
+      },
+    ])
+  );
+  const surfaceSamples = Object.fromEntries(
+    ["--background-bg-layer-01", "--surface-raised-base", "--input-base"].map((name) => [
+      name,
+      typeof variables[name] === "string" ? variables[name] : null,
+    ])
+  );
+  const textAndBorderSamples = {
+    "--text-text-base": {
+      expected: textNormal,
+      actual:
+        typeof variables["--text-text-base"] === "string" ? variables["--text-text-base"] : null,
+    },
+    "--border-border-base": {
+      expected: border,
+      actual:
+        typeof variables["--border-border-base"] === "string"
+          ? variables["--border-border-base"]
+          : null,
+    },
+  };
+
+  return [
+    {
+      name: "fixture theme diagnostics root backgrounds resolve to Obsidian background",
+      ok:
+        typeof pageBackground === "string" &&
+        Object.values(backgroundSamples).every((entry) => entry.actual === entry.expected),
+      detail: backgroundSamples,
+    },
+    {
+      name: "fixture theme diagnostics surfaces resolve to translucent Obsidian surfaces",
+      ok:
+        typeof backgroundSecondary === "string" &&
+        Object.values(surfaceSamples).every(
+          (value) =>
+            typeof value === "string" &&
+            value.includes(backgroundSecondary) &&
+            value.includes("transparent")
+        ),
+      detail: {
+        expectedBackgroundSecondary: backgroundSecondary,
+        surfaces: surfaceSamples,
+      },
+    },
+    {
+      name: "fixture theme diagnostics text and border resolve to Obsidian values",
+      ok: Object.values(textAndBorderSamples).every((entry) => entry.actual === entry.expected),
+      detail: textAndBorderSamples,
+    },
+  ];
+}
+
 function runtimeThemeChecks(
   diagnostics: unknown,
   expectedPageBackground: string | null
@@ -1750,6 +1925,8 @@ function runtimeThemeChecks(
     backgroundColor: typeof root?.backgroundColor === "string" ? root.backgroundColor : null,
     backgroundImage: typeof root?.backgroundImage === "string" ? root.backgroundImage : null,
   }));
+  const visibleRootBackgrounds = rootBackgrounds.filter((item) => item.backgroundColor);
+  const normalizedExpectedPageBackground = normalizeCssColor(expectedPageBackground);
 
   const viewport = (diagnostics as any).viewport;
   const viewportArea =
@@ -1776,10 +1953,13 @@ function runtimeThemeChecks(
     {
       name: "runtime root backgrounds use Obsidian page background",
       ok:
-        rootBackgrounds.length > 0 &&
-        rootBackgrounds.every((item) => item.backgroundColor === expectedPageBackground),
+        visibleRootBackgrounds.length > 0 &&
+        visibleRootBackgrounds.every(
+          (item) => normalizeCssColor(item.backgroundColor) === normalizedExpectedPageBackground
+        ),
       detail: {
         expectedPageBackground,
+        normalizedExpectedPageBackground,
         roots: rootBackgrounds,
       },
     },
@@ -1792,6 +1972,25 @@ function runtimeThemeChecks(
       },
     },
   ];
+}
+
+function normalizeCssColor(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const color = value.trim().toLowerCase().replace(/\s+/g, " ");
+  const shortHex = color.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/);
+  if (shortHex) {
+    return `rgb(${Number.parseInt(shortHex[1] + shortHex[1], 16)}, ${Number.parseInt(shortHex[2] + shortHex[2], 16)}, ${Number.parseInt(shortHex[3] + shortHex[3], 16)})`;
+  }
+
+  const longHex = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/);
+  if (longHex) {
+    return `rgb(${Number.parseInt(longHex[1], 16)}, ${Number.parseInt(longHex[2], 16)}, ${Number.parseInt(longHex[3], 16)})`;
+  }
+
+  return color.replace(/,\s*/g, ", ");
 }
 
 async function probeHealth(

@@ -161,6 +161,14 @@ export default class OpenCodePlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "open-opencode-view",
+      name: "Open OpenCode panel",
+      callback: () => {
+        void this.viewManager.activateView();
+      },
+    });
+
+    this.addCommand({
       id: "add-selection-to-context",
       name: "Add selection to OpenCode context",
       editorCallback: (editor, ctx) => {

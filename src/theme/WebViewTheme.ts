@@ -253,6 +253,14 @@ function resolveObsidianPageBackground(
   source: HTMLElement,
   sourceStyles: CSSStyleDeclaration
 ): string {
+  const appContainer = source.ownerDocument.querySelector(".app-container");
+  if (appContainer instanceof HTMLElement) {
+    const appBackground = getComputedStyle(appContainer).backgroundColor.trim();
+    if (isVisibleBackground(appBackground)) {
+      return appBackground;
+    }
+  }
+
   const backgroundPrimary = cssVar(
     sourceStyles,
     "--background-primary",
@@ -260,14 +268,6 @@ function resolveObsidianPageBackground(
   );
   if (isVisibleBackground(backgroundPrimary)) {
     return backgroundPrimary;
-  }
-
-  const appContainer = source.ownerDocument.querySelector(".app-container");
-  if (appContainer instanceof HTMLElement) {
-    const appBackground = getComputedStyle(appContainer).backgroundColor.trim();
-    if (isVisibleBackground(appBackground)) {
-      return appBackground;
-    }
   }
 
   return cssVar(sourceStyles, "--background-primary", OBSIDIAN_FALLBACKS.backgroundPrimary);

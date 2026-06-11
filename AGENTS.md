@@ -125,6 +125,7 @@ scripts/
   3. 侧边栏已折叠 → 展开侧边栏 + 聚焦 opencode iframe
 - `previousEditorLeaf`: 聚焦 opencode 前保存编辑器的 leaf，折叠时恢复焦点到编辑器
 - `lastSessionUrl`: 保存会话 URL 到插件设置，重启时恢复；同时通过时间戳比较查询服务器最新会话
+- `toggle-opencode-view` 保留给用户快捷键；harness 和调试脚本使用 `open-opencode-view`，它只调用 `activateView()`，不会因为当前 leaf 已经活跃而折叠右侧栏
 
 ### `ContextManager.ts` — 上下文注入
 
@@ -193,9 +194,10 @@ scripts/
 ### `harness theme` — Web UI 外观检查
 
 - 默认读取 XDG `status.json` 里的 `proxyUrl`，只访问本机 proxy HTML，验正在运行的 Obsidian 插件实例
-- `bun run dev:theme:fixture` 使用当前工作区代码启动本地 HTML fixture + `OpenCodeProxy`，不依赖 Obsidian 重载，用于确认刚修改的主题注入代码
+- `bun run dev:theme:fixture` 使用当前工作区代码启动本地 HTML fixture + `OpenCodeProxy`，再用 happy-dom 执行 proxied HTML 里的注入脚本并捕获 `theme:diagnostics`，不依赖 Obsidian 重载
 - `dev:theme` 输出里的 `summary` 和 `actions` 是第一阅读入口。失败时先看这里判断是 server stopped、proxy 502、pane collapsed，还是 iframe 内部 theme diagnostics 未回写
 - `obsidian` 模式要求 `data-opencode-obsidian-*` 注入存在、根背景 token 使用 Obsidian 页面背景变量、局部 surface token 半透明
+- fixture 模式要求脚本实际 post `theme:diagnostics`，并验证 computed variables 已解析成 Obsidian 背景、surface、text、border 值
 - `opencode` 模式要求不注入 Obsidian 外观覆盖
 - `runtimeDiagnostics.theme` 来自 proxy 注入脚本，检查 OpenCode iframe 内部 DOM；`runtimeDiagnostics.iframe` 来自 Obsidian 父窗口，检查 iframe 元素和 Obsidian 祖先链。两者必须分开，因为 iframe 加载后父窗口不能可靠读取 OpenCode 内部 DOM
 
