@@ -783,7 +783,7 @@ function extractHealthUrlUse(filePath: string): LocalApiUse[] {
 function isRequestCall(node: ts.CallExpression): boolean {
   return (
     ts.isPropertyAccessExpression(node.expression) &&
-    node.expression.name.text === "request" &&
+    (node.expression.name.text === "request" || node.expression.name.text === "requestResult") &&
     node.arguments.length >= 2
   );
 }

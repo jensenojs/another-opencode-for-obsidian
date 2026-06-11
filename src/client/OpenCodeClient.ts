@@ -1,5 +1,7 @@
 import { createLogger } from "../debug/RuntimeDiagnostics";
 
+export const CONTEXT_MESSAGE_PREFIX = "<!-- oc-ctx -->";
+
 type OpenCodePart = {
   id: string;
   messageID: string;
@@ -25,6 +27,13 @@ type OpenCodeMessageWithParts = {
   parts: OpenCodePart[];
 };
 
+export type OpenCodeContextMessageRef = {
+  messageId: string;
+  partId: string;
+};
+
+export type OpenCodeMessage = OpenCodeMessageWithParts;
+
 type OpenCodeSession = {
   id?: string;
   time?: {
@@ -39,12 +48,16 @@ type OpenCodeSession = {
 
 type OpenCodeResponse<T> = T | { data?: T } | { message?: T } | null;
 
+type OpenCodeRequestResult<T> = {
+  ok: boolean;
+  status: number;
+  value: OpenCodeResponse<T>;
+};
+
 export class OpenCodeClient {
   private apiBaseUrl: string;
   private uiBaseUrl: string;
   private projectDirectory: string;
-  private trackedSessionId: string | null = null;
-  private lastPart: OpenCodePart | null = null;
   private logger = createLogger("client");
 
   constructor(apiBaseUrl: string, uiBaseUrl: string, projectDirectory: string) {
@@ -64,13 +77,7 @@ export class OpenCodeClient {
       this.apiBaseUrl = nextApiUrl;
       this.uiBaseUrl = nextUiUrl;
       this.projectDirectory = projectDirectory;
-      this.resetTracking();
     }
-  }
-
-  resetTracking(): void {
-    this.trackedSessionId = null;
-    this.lastPart = null;
   }
 
   async initializeProject(): Promise<boolean> {
@@ -129,43 +136,21 @@ export class OpenCodeClient {
     return latestSession.id ?? null;
   }
 
-  async updateContext(params: { sessionId: string; contextText: string | null }): Promise<void> {
-    const { sessionId, contextText } = params;
-
-    if (this.trackedSessionId && this.trackedSessionId !== sessionId) {
-      this.resetTracking();
-    }
-    this.trackedSessionId = sessionId;
-
-    if (!contextText) {
-      await this.ignorePreviousPart();
-      return;
-    }
-
-    if (this.lastPart) {
-      const updated = await this.updatePart(this.lastPart, { text: contextText });
-      if (updated) {
-        return;
-      }
-      await this.ignorePreviousPart();
-    }
-
-    const message = await this.sendPrompt(sessionId, contextText);
-    if (message?.info?.id) {
-      this.lastPart = message.parts?.[0] ?? null;
-    }
-  }
-
-  private async sendPrompt(
+  async addContextMessage(
     sessionId: string,
     contextText: string
-  ): Promise<OpenCodeMessageWithParts | null> {
+  ): Promise<OpenCodeContextMessageRef | null> {
+    if (contextText.trim().length === 0) {
+      return null;
+    }
+
+    const text = `${CONTEXT_MESSAGE_PREFIX}\n${contextText}`;
     const result = await this.request<OpenCodeMessageWithParts>(
       "POST",
       `/session/${sessionId}/message`,
       {
         noReply: true,
-        parts: [{ type: "text", text: contextText }],
+        parts: [{ type: "text", text }],
       }
     );
 
@@ -175,44 +160,54 @@ export class OpenCodeClient {
     });
 
     const message = this.unwrap(result);
-    if (!message) {
+    const part = message?.parts.find((candidate) => candidate.type === "text");
+    if (!message?.info?.id || !part?.id) {
       this.logger.error("failed to inject context message", { sessionId });
+      return null;
     }
-    return message;
+
+    return {
+      messageId: message.info.id,
+      partId: part.id,
+    };
   }
 
-  private async updatePart(
-    part: OpenCodePart,
-    updates: { text?: string; ignored?: boolean }
-  ): Promise<boolean> {
-    const result = await this.request<OpenCodePart>(
-      "PATCH",
-      `/session/${part.sessionID}/message/${part.messageID}/part/${part.id}`,
-      {
-        ...part,
-        ...updates,
-      }
+  async ignorePart(sessionId: string, messageId: string, partId: string): Promise<boolean> {
+    const messageResult = await this.requestResult<OpenCodeMessageWithParts>(
+      "GET",
+      `/session/${sessionId}/message/${messageId}`
     );
-    const updated = this.unwrap(result);
-    if (updated) {
-      this.lastPart = updated;
+
+    if (!messageResult.ok) {
+      return messageResult.status === 404;
+    }
+
+    const message = this.unwrap(messageResult.value);
+    const part = message?.parts.find((candidate) => candidate.id === partId);
+    if (!part) {
       return true;
     }
-    return false;
+
+    const updateResult = await this.requestResult<OpenCodePart>(
+      "PATCH",
+      `/session/${sessionId}/message/${messageId}/part/${partId}`,
+      {
+        ...part,
+        ignored: true,
+      }
+    );
+
+    if (!updateResult.ok) {
+      return updateResult.status === 404;
+    }
+
+    return Boolean(this.unwrap(updateResult.value));
   }
 
-  private async ignorePreviousPart(): Promise<boolean> {
-    if (!this.lastPart) {
-      return false;
-    }
-
-    const ignored = await this.updatePart(this.lastPart, { ignored: true });
-    if (!ignored) {
-      return false;
-    }
-
-    this.lastPart = null;
-    return true;
+  async listSessionMessages(sessionId: string): Promise<OpenCodeMessage[] | null> {
+    const result = await this.request<OpenCodeMessage[]>("GET", `/session/${sessionId}/message`);
+    const messages = this.unwrap(result);
+    return Array.isArray(messages) ? messages : null;
   }
 
   private async request<T>(
@@ -220,6 +215,15 @@ export class OpenCodeClient {
     path: string,
     body?: unknown
   ): Promise<OpenCodeResponse<T>> {
+    const result = await this.requestResult<T>(method, path, body);
+    return result.ok ? result.value : null;
+  }
+
+  private async requestResult<T>(
+    method: string,
+    path: string,
+    body?: unknown
+  ): Promise<OpenCodeRequestResult<T>> {
     try {
       const url = `${this.apiBaseUrl}${path}`;
       const urlObj = new URL(url);
@@ -267,14 +271,26 @@ export class OpenCodeClient {
           path,
           status: response.status,
         });
-        return null;
+        return {
+          ok: false,
+          status: response.status,
+          value: null,
+        };
       }
 
       const json = await response.json();
-      return json as OpenCodeResponse<T>;
+      return {
+        ok: true,
+        status: response.status,
+        value: json as OpenCodeResponse<T>,
+      };
     } catch (error) {
       this.logger.error("api request error", error);
-      return null;
+      return {
+        ok: false,
+        status: 0,
+        value: null,
+      };
     }
   }
 

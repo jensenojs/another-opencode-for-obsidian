@@ -176,10 +176,9 @@ export class ContextManager {
       maxSelectionLength: this.settings.maxSelectionLength,
     });
 
-    await this.client.updateContext({
-      sessionId,
-      contextText,
-    });
+    if (contextText) {
+      await this.client.addContextMessage(sessionId, contextText);
+    }
   }
 
   destroy(): void {
