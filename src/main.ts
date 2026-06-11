@@ -14,6 +14,8 @@ import { OpenCodeClient } from "./client/OpenCodeClient";
 import { ContextManager } from "./context/ContextManager";
 import { ExecutableResolver } from "./server/ExecutableResolver";
 import { OpenCodeProxy } from "./proxy/OpenCodeProxy";
+import { createLogger, getRuntimePaths, writeRuntimeStatus } from "./debug/RuntimeDiagnostics";
+import { BRIDGE_MESSAGES, isBridgeMessage } from "./bridge/BridgeProtocol";
 
 export default class OpenCodePlugin extends Plugin {
   settings: OpenCodeSettings = DEFAULT_SETTINGS;
@@ -26,16 +28,16 @@ export default class OpenCodePlugin extends Plugin {
   private lastBaseUrl: string | null = null;
   private lastApiBaseUrl: string | null = null;
   private openCodeProxy: OpenCodeProxy;
+  private logger = createLogger("plugin");
 
   async onload(): Promise<void> {
-    console.log("Loading OpenCode plugin");
+    this.logger.info("loading plugin");
 
     registerOpenCodeIcons();
 
     await this.loadSettings();
     this.cachedIframeUrl = this.settings.lastSessionUrl || null;
 
-    // Attempt autodetect if opencodePath is empty and not using custom command
     await this.attemptAutodetect();
 
     const projectDirectory = this.getProjectDirectory();
@@ -43,29 +45,34 @@ export default class OpenCodePlugin extends Plugin {
     this.processManager = new ServerManager(this.settings, projectDirectory);
     this.processManager.on("stateChange", (state: ServerState) => {
       this.notifyStateChange(state);
+      this.writeStatus(`server:${state}`);
     });
 
-    // Start proxy to inject keyboard listener into opencode iframe
     const endpoint = createServerEndpoint(this.settings, projectDirectory);
 
     this.openCodeProxy = new OpenCodeProxy(endpoint.hostname, endpoint.port);
-    await this.openCodeProxy.start();
+    const proxyStarted = await this.openCodeProxy.start();
+    if (!proxyStarted) {
+      this.logger.error("proxy failed to start");
+    }
 
-    // Listen for toggle messages from iframe (injected by proxy)
-    (this as any).registerDomEvent(window, 'message', (event: MessageEvent) => {
-      if (event.data?.type === 'opencode-proxy-loaded') {
-        (window as any).__opencode_proxy_loaded = true;
+    this.registerDomEvent(window, "message", (event: MessageEvent) => {
+      if (event.origin !== this.openCodeProxy.getOrigin() || !isBridgeMessage(event.data)) {
+        return;
       }
-      if (event.data?.type === 'opencode-toggle') {
+      if (event.data.type === BRIDGE_MESSAGES.proxyLoaded) {
+        this.logger.info("bridge script loaded", { origin: event.origin });
+      }
+      if (event.data.type === BRIDGE_MESSAGES.viewToggle) {
         void this.viewManager.toggleView();
       }
     });
 
-    // Listen for project directory changes and coordinate response
     this.processManager.on("projectDirectoryChanged", async (newDirectory: string) => {
       this.settings.projectDirectory = newDirectory;
       await this.saveData(this.settings);
       this.refreshClientState();
+      this.writeStatus("project-directory-changed");
       if (this.getServerState() === "running") {
         await this.stopServer();
         await this.startServer();
@@ -100,10 +107,7 @@ export default class OpenCodePlugin extends Plugin {
       getServerState: () => this.getServerState(),
     });
 
-    console.log(
-      "[OpenCode] Configured with project directory:",
-      projectDirectory
-    );
+    this.logger.info("configured project directory", { projectDirectory });
 
     this.registerView(
       OPENCODE_VIEW_TYPE,
@@ -166,42 +170,42 @@ export default class OpenCodePlugin extends Plugin {
 
     this.registerCleanupHandlers();
 
-    console.log("OpenCode plugin loaded");
+    this.writeStatus("loaded");
+    this.logger.info("plugin loaded", {
+      logFile: getRuntimePaths().logFile,
+      statusFile: getRuntimePaths().statusFile,
+    });
   }
 
   async onunload(): Promise<void> {
+    this.writeStatus("unloading");
     this.openCodeProxy?.stop();
     this.contextManager.destroy();
     await this.stopServer();
     this.app.workspace.detachLeavesOfType(OPENCODE_VIEW_TYPE);
+    this.writeStatus("unloaded");
   }
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
   }
 
-  /**
-   * Attempt to autodetect opencode executable on startup
-   * Triggers when opencodePath is empty and useCustomCommand is false
-   */
   private async attemptAutodetect(): Promise<void> {
-    // Only autodetect if path is empty and not using custom command mode
     if (this.settings.opencodePath || this.settings.useCustomCommand) {
       return;
     }
 
-    console.log("[OpenCode] Attempting to autodetect opencode executable...");
+    this.logger.info("attempting to autodetect opencode executable");
 
     const detectedPath = ExecutableResolver.resolve("opencode");
     
-    // Check if a different path was found (not the fallback)
     if (detectedPath && detectedPath !== "opencode") {
-      console.log("[OpenCode] Autodetected opencode at:", detectedPath);
+      this.logger.info("autodetected opencode executable", { path: detectedPath });
       this.settings.opencodePath = detectedPath;
       await this.saveData(this.settings);
       new Notice(`OpenCode executable found at ${detectedPath}`);
     } else {
-      console.log("[OpenCode] Could not autodetect opencode executable");
+      this.logger.warn("could not autodetect opencode executable");
       new Notice("Could not find opencode. Please check Settings");
     }
   }
@@ -212,6 +216,7 @@ export default class OpenCodePlugin extends Plugin {
     this.refreshClientState();
     this.contextManager.updateSettings(this.settings);
     this.viewManager.updateSettings(this.settings);
+    this.writeStatus("settings-saved");
   }
 
   async startServer(): Promise<boolean> {
@@ -220,22 +225,24 @@ export default class OpenCodePlugin extends Plugin {
       new Notice("OpenCode server started");
       const initialized = await this.openCodeClient.initializeProject();
       if (!initialized) {
-        console.warn("[OpenCode] Failed to initialize project on server");
+        this.logger.warn("failed to initialize project on server");
       }
     } else {
       const error = this.processManager.getLastError();
       if (error) {
-        new Notice(`OpenCode failed to start: ${error}`, 10000); // Show for 10 seconds
+        new Notice(`OpenCode failed to start: ${error}`, 10000);
       } else {
         new Notice("OpenCode failed to start. Check Settings for details.", 5000);
       }
     }
+    this.writeStatus(success ? "start-success" : "start-failed");
     return success;
   }
 
   async stopServer(): Promise<void> {
     await this.processManager.stop();
     new Notice("OpenCode server stopped");
+    this.writeStatus("stop");
   }
 
   getServerState(): ServerState {
@@ -301,6 +308,7 @@ export default class OpenCodePlugin extends Plugin {
 
     this.lastBaseUrl = nextUiBaseUrl;
     this.lastApiBaseUrl = nextApiBaseUrl;
+    this.writeStatus("client-state-refreshed");
   }
 
   refreshContextForView(view: OpenCodeView): void {
@@ -312,25 +320,56 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   getProjectDirectory(): string {
-    if (this.settings.projectDirectory) {
-      console.log("[OpenCode] Using project directory from settings:", this.settings.projectDirectory);
-      return this.settings.projectDirectory;
-    }
-    const adapter = this.app.vault.adapter as any;
-    const vaultPath = adapter.basePath || "";
-    if (!vaultPath) {
-      console.warn("[OpenCode] Warning: Could not determine vault path");
-    }
-    console.log("[OpenCode] Using vault path as project directory:", vaultPath);
-    return vaultPath;
+    return this.resolveProjectDirectory();
   }
 
   private registerCleanupHandlers(): void {
     this.registerEvent(
       this.app.workspace.on("quit", () => {
-        console.log("[OpenCode] Obsidian quitting - performing sync cleanup");
+        this.logger.info("obsidian quitting; performing cleanup");
         this.stopServer();
       })
     );
+  }
+
+  private resolveProjectDirectory(): string {
+    if (this.settings.projectDirectory) {
+      return this.settings.projectDirectory;
+    }
+    const adapter = this.app.vault.adapter as any;
+    return adapter.basePath || "";
+  }
+
+  private writeStatus(lifecycle: string): void {
+    if (!this.processManager) {
+      return;
+    }
+
+    const projectDirectory = this.resolveProjectDirectory();
+    const endpoint = createServerEndpoint(this.settings, projectDirectory);
+    const proxyPort = this.openCodeProxy?.getPort() || null;
+    const proxyUrl =
+      proxyPort && proxyPort > 0
+        ? this.openCodeProxy.getProxyUrl(endpoint.encodedProjectDirectory)
+        : null;
+
+    writeRuntimeStatus({
+      lifecycle,
+      serverState: this.getServerState(),
+      lastError: this.getLastError(),
+      lastHealthError: this.processManager.getLastHealthError(),
+      pid: this.processManager.getPid(),
+      hostname: endpoint.hostname,
+      port: endpoint.port,
+      apiBaseUrl: endpoint.apiBaseUrl,
+      uiBaseUrl: endpoint.uiBaseUrl,
+      healthUrl: endpoint.healthUrl,
+      proxyUrl,
+      proxyPort,
+      projectDirectory,
+      useCustomCommand: this.settings.useCustomCommand,
+      autoStart: this.settings.autoStart,
+      logFile: getRuntimePaths().logFile,
+    });
   }
 }

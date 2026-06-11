@@ -3,12 +3,14 @@ import { OPENCODE_VIEW_TYPE } from "../types";
 import { OPENCODE_ICON_NAME } from "../icons";
 import type OpenCodePlugin from "../main";
 import type { ServerState } from "../server/types";
+import { createLogger } from "../debug/RuntimeDiagnostics";
 
 export class OpenCodeView extends ItemView {
   plugin: OpenCodePlugin;
   private iframeEl: HTMLIFrameElement | null = null;
   private currentState: ServerState = "stopped";
   private unsubscribeStateChange: (() => void) | null = null;
+  private logger = createLogger("view");
 
   constructor(leaf: WorkspaceLeaf, plugin: OpenCodePlugin) {
     super(leaf);
@@ -31,30 +33,25 @@ export class OpenCodeView extends ItemView {
     this.contentEl.empty();
     this.contentEl.addClass("opencode-container");
 
-    // Subscribe to state changes
     this.unsubscribeStateChange = this.plugin.onServerStateChange((state: ServerState) => {
       this.currentState = state;
       this.updateView();
     });
 
-    // Initial render
     this.currentState = this.plugin.getServerState();
     this.updateView();
 
-    // Start server if not running (lazy start) - don't await to avoid blocking view open
     if (this.currentState === "stopped") {
       this.plugin.startServer();
     }
   }
 
   async onClose(): Promise<void> {
-    // Unsubscribe from state changes to prevent memory leak
     if (this.unsubscribeStateChange) {
       this.unsubscribeStateChange();
       this.unsubscribeStateChange = null;
     }
     
-    // Clean up iframe
     if (this.iframeEl) {
       const iframeUrl = this.iframeEl.src;
       if (iframeUrl.includes("/session/")) {
@@ -157,7 +154,7 @@ export class OpenCodeView extends ItemView {
     });
 
     const iframeUrl = this.plugin.getStoredIframeUrl() ?? this.plugin.getServerUrl();
-    console.log("[OpenCode] Loading iframe with URL:", iframeUrl);
+    this.logger.info("loading iframe", { url: iframeUrl });
 
     this.iframeEl = iframeContainer.createEl("iframe", {
       cls: "opencode-iframe",

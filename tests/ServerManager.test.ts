@@ -1,7 +1,12 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import * as http from "http";
+import { mkdtempSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { ServerManager, ServerState } from "../src/server/ServerManager";
-import { OpenCodeSettings } from "../src/types";
+import { DEFAULT_CUSTOM_COMMAND, OpenCodeSettings } from "../src/types";
+
+process.env.XDG_STATE_HOME = mkdtempSync(join(tmpdir(), "opencode-obsidian-test-"));
 
 // Test configuration
 const TEST_PORT_BASE = 15000;
@@ -26,7 +31,7 @@ function createTestSettings(port: number): OpenCodeSettings {
     injectWorkspaceContext: true,
     maxNotesInContext: 20,
     maxSelectionLength: 2000,
-    customCommand: "",
+    customCommand: DEFAULT_CUSTOM_COMMAND,
     useCustomCommand: false,
     lastSessionUrl: "",
   };
@@ -326,6 +331,19 @@ describe("ServerManager", () => {
       expect(currentManager.getState()).toBe("error");
       expect(currentManager.getLastError() ?? "").toContain("{hostname}");
     });
+
+    test("uses the default command template when custom command is empty", async () => {
+      const settings = createTestSettings(getNextPort());
+      settings.useCustomCommand = true;
+      settings.customCommand = "";
+
+      currentManager = new ServerManager(settings, PROJECT_DIR);
+
+      const success = await currentManager.start();
+
+      expect(success).toBe(true);
+      expect(currentManager.getState()).toBe("running");
+    }, 30000);
 
     test("rejects custom commands without port placeholder", async () => {
       const settings = createTestSettings(getNextPort());

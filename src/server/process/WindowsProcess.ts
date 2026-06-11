@@ -1,8 +1,10 @@
 import { ChildProcess, spawn, SpawnOptions } from "child_process";
 import { OpenCodeProcess } from "./OpenCodeProcess";
+import { createLogger } from "../../debug/RuntimeDiagnostics";
+
+const logger = createLogger("windows-process");
 
 export class WindowsProcess implements OpenCodeProcess {
-  // Static state to track the current process for cleanup
   private static currentProcess: ChildProcess | null = null;
   private static cleanupHandlerRegistered = false;
 
@@ -17,7 +19,6 @@ export class WindowsProcess implements OpenCodeProcess {
       windowsHide: true,
     });
 
-    // Store process for cleanup
     WindowsProcess.currentProcess = process;
     WindowsProcess.registerCleanupHandler();
 
@@ -31,11 +32,9 @@ export class WindowsProcess implements OpenCodeProcess {
       return;
     }
 
-    console.log("[OpenCode] Stopping server process tree, PID:", pid);
+    logger.info("stopping server process tree", { pid });
 
-    // Method 1: Find and kill child processes (actual node.exe) using PowerShell
-    // This is necessary because shell: true spawns cmd.exe -> node.exe, and
-    // killing cmd.exe leaves node.exe orphaned
+    // shell:true spawns cmd.exe -> node.exe; kill the child first or OpenCode survives.
     try {
       const { execSync } = require("child_process");
       const output = execSync(
@@ -43,32 +42,26 @@ export class WindowsProcess implements OpenCodeProcess {
         { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }
       );
 
-      const lines = output.split("\n").slice(3); // Skip headers
+      const lines = output.split("\n").slice(3);
       for (const line of lines) {
         const childPid = line.trim();
         if (childPid && !isNaN(parseInt(childPid))) {
           try {
             execSync(`taskkill /F /PID ${childPid}`, { stdio: "ignore" });
           } catch {
-            // Child may already be gone
           }
         }
       }
     } catch {
-      // PowerShell lookup failed, continue to other methods
     }
 
-    // Method 2: Kill the parent process (cmd.exe)
     try {
       await this.execAsync(`taskkill /F /PID ${pid}`);
     } catch {
-      // Parent may already be gone
     }
 
-    // Clear stored process
     WindowsProcess.currentProcess = null;
 
-    // Wait for process to exit
     await this.waitForExit(process, 5000);
   }
 
@@ -77,8 +70,6 @@ export class WindowsProcess implements OpenCodeProcess {
       return;
     }
 
-    // Register beforeunload handler for window close cleanup
-    // Skip in CI/test environments to avoid interfering with test lifecycle
     if (typeof window !== "undefined" && !process.env.CI) {
       window.addEventListener("beforeunload", () => {
         if (WindowsProcess.currentProcess?.pid) {
@@ -93,7 +84,6 @@ export class WindowsProcess implements OpenCodeProcess {
     try {
       const { execSync } = require("child_process");
 
-      // Method 1: Kill child processes using PowerShell
       try {
         const output = execSync(
           `powershell -Command "Get-CimInstance Win32_Process -Filter \\"ParentProcessId=${pid}\\" | Select-Object ProcessId"`,
@@ -107,27 +97,21 @@ export class WindowsProcess implements OpenCodeProcess {
             try {
               execSync(`taskkill /F /PID ${childPid}`, { stdio: "ignore" });
             } catch {
-              // Child may already be gone
             }
           }
         }
       } catch {
-        // PowerShell lookup failed
       }
 
-      // Method 2: Kill parent process
       try {
         execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
       } catch {
-        // Parent may already be gone
       }
     } catch {
-      // Process may already be gone
     }
   }
 
   async verifyCommand(command: string): Promise<string | null> {
-    // Use 'where' command to check if executable exists in PATH
     try {
       await this.execAsync(`where "${command}"`);
       return null;
@@ -141,7 +125,7 @@ export class WindowsProcess implements OpenCodeProcess {
     timeoutMs: number
   ): Promise<void> {
     if (process.exitCode !== null || process.signalCode !== null) {
-      return; // Already exited
+      return;
     }
 
     return new Promise((resolve) => {

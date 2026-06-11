@@ -1,3 +1,5 @@
+import { createLogger } from "../debug/RuntimeDiagnostics";
+
 type OpenCodePart = {
   id: string;
   messageID: string;
@@ -43,6 +45,7 @@ export class OpenCodeClient {
   private projectDirectory: string;
   private trackedSessionId: string | null = null;
   private lastPart: OpenCodePart | null = null;
+  private logger = createLogger("client");
 
   constructor(apiBaseUrl: string, uiBaseUrl: string, projectDirectory: string) {
     this.apiBaseUrl = this.normalizeBaseUrl(apiBaseUrl);
@@ -78,14 +81,14 @@ export class OpenCodeClient {
       );
 
       if (response) {
-        console.log("[OpenCode] Project initialized:", this.projectDirectory);
+        this.logger.info("project initialized", { projectDirectory: this.projectDirectory });
         return true;
       } else {
-        console.warn("[OpenCode] Project initialization failed");
+        this.logger.warn("project initialization failed");
         return false;
       }
     } catch (error) {
-      console.error("[OpenCode] Project initialization error:", error);
+      this.logger.error("project initialization error", error);
       return false;
     }
   }
@@ -166,12 +169,14 @@ export class OpenCodeClient {
       }
     );
 
-    console.log("[OpenCode] Injected context message");
-    console.log(contextText)
+    this.logger.info("injected context message", {
+      sessionId,
+      contextLength: contextText.length,
+    });
 
     const message = this.unwrap(result);
     if (!message) {
-      console.error("[OpenCode] Failed to inject context message");
+      this.logger.error("failed to inject context message", { sessionId });
     }
     return message;
   }
@@ -246,7 +251,7 @@ export class OpenCodeClient {
       });
 
       if (!response.ok) {
-        console.error("[OpenCode] API request failed", {
+        this.logger.error("api request failed", {
           path,
           status: response.status,
         });
@@ -256,7 +261,7 @@ export class OpenCodeClient {
       const json = await response.json();
       return json as OpenCodeResponse<T>;
     } catch (error) {
-      console.error("[OpenCode] API request error", error);
+      this.logger.error("api request error", error);
       return null;
     }
   }

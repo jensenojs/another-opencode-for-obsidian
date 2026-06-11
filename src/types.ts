@@ -25,6 +25,9 @@ export interface OpenCodeSettings {
   lastSessionUrl: string;
 }
 
+export const DEFAULT_CUSTOM_COMMAND =
+  "opencode serve --hostname {hostname} --port {port} --cors {cors}";
+
 export const DEFAULT_SETTINGS: OpenCodeSettings = {
   port: 14096,
   hostname: "127.0.0.1",
@@ -36,12 +39,18 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
   injectWorkspaceContext: false,
   maxNotesInContext: 20,
   maxSelectionLength: 2000,
-  customCommand: "",
+  customCommand: DEFAULT_CUSTOM_COMMAND,
   useCustomCommand: false,
   lastSessionUrl: "",
 };
 
 export const OPENCODE_VIEW_TYPE = "opencode-view";
+
+export function getCustomCommandTemplate(
+  settings: Pick<OpenCodeSettings, "customCommand">
+): string {
+  return settings.customCommand.trim() || DEFAULT_CUSTOM_COMMAND;
+}
 
 export function createServerEndpoint(
   settings: Pick<OpenCodeSettings, "hostname" | "port">,

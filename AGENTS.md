@@ -13,6 +13,10 @@ AI 编码代理在 obsidian-opencode 插件上工作的指南。
 ```bash
 bun install          # 安装依赖
 bun run build        # 生产构建（类型检查 + esbuild 打包）
+bun run harness      # 查看 harness 命令
+bun run dev:status   # 查看 vault 插件状态 + XDG runtime 状态
+bun run dev:logs     # 查看 XDG 日志
+bun run dev:bridge   # 检查本地桥接契约
 ```
 
 输出: `main.js`（CommonJS 单一 bundle）
@@ -27,7 +31,7 @@ src/
 ├── client/
 │   └── OpenCodeClient.ts  # HTTP API 客户端（用 Node.js http.request 绕开 CORS）
 ├── server/
-│   ├── ServerManager.ts   # 进程生命周期管理、健康检查（含 no-cors 回退）
+│   ├── ServerManager.ts   # 进程生命周期管理、/global/health JSON 健康检查
 │   ├── ExecutableResolver.ts  # opencode 可执行文件路径解析
 │   ├── types.ts           # 服务端相关类型
 │   └── process/
@@ -36,6 +40,10 @@ src/
 │       └── WindowsProcess.ts    # Windows 进程实现
 ├── proxy/
 │   └── OpenCodeProxy.ts   # 本地 HTTP 代理：剥离 CSP 头、注入键盘监听
+├── bridge/
+│   └── BridgeProtocol.ts  # 本项目自己的 iframe -> Obsidian postMessage 协议
+├── debug/
+│   └── RuntimeDiagnostics.ts # XDG 日志、status.json、运行时路径
 ├── context/
 │   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，触发上下文刷新
 │   └── WorkspaceContext.ts  # 收集打开的笔记路径 + 选中文本
@@ -44,6 +52,8 @@ src/
 │   └── ViewManager.ts       # 切换逻辑、焦点管理、会话 URL
 └── settings/
     └── SettingsTab.ts       # 插件设置 UI（PluginSettingTab）
+scripts/
+└── harness.ts        # dev harness：安装、状态、日志、doctor、bridge contract checks
 ```
 
 ## 模块职责
@@ -51,29 +61,29 @@ src/
 ### `main.ts` — 插件生命周期
 - `onload()`: 注册视图、命令、设置；加载并启动 opencode 服务器；初始化 ContextManager
 - `onunload()`: 清理定时器、关闭上下文监听、终止服务器进程、移除 postMessage 监听
-- 对外暴露 `getSettings()`、`getServerManager()`、`getOpenCodeClient()` 供其他模块使用
+- 状态变更时写入 XDG `status.json`
 
 ### `OpenCodeClient.ts` — API 客户端
-- 封装对 opencode HTTP API 的调用（`/v1/sessions`、`/v1/sessions/{id}` 等）
+- 封装对 opencode HTTP API 的调用（`/session`、`/session/{id}/message` 等）
 - **关键**: 使用 Node.js `http.request` 而非 `fetch`——因为 opencode 服务器默认没有 `--cors app://obsidian.md`，浏览器 fetch 会被 CORS 阻止，但 Node.js 的 http 模块不受此限制
 - 在插件主线程中执行（非渲染进程），通过 IPC 或直接调用
 
 ### `ServerManager.ts` — 服务器生命周期
 - `start()`: 解析可执行文件路径 → 启动子进程 → 轮询健康检查
 - `stop()`: 发送 SIGTERM → 等待退出 → 超时 SIGKILL
-- 健康检查: 先尝试带 CORS 头的请求；失败则用 `no-cors` 模式回退——即使服务器不返回 CORS 头，也能通过 network error 的有无来判断进程是否存活
+- 健康检查: 请求 `http://{hostname}:{port}/global/health`，响应必须是 JSON 且 `healthy === true`
 - 状态机: `stopped | starting | running | error`
 - 通过回调通知 UI 状态变更
 
 ### `ExecutableResolver.ts`
 - 在 PATH 中查找 `opencode` 可执行文件
-- 支持用户手动指定路径（设置项 `binPath`）
+- 支持用户手动指定路径（设置项 `opencodePath`）
 
 ### `OpenCodeProxy.ts` — 本地 HTTP 代理
 - 启动本地代理服务器（端口从 4097 起自动检测）
 - 转发请求到 opencode 服务器，同时在响应中:
   1. **剥离 Content-Security-Policy 头**——否则注入的脚本会被浏览器阻止执行
-  2. **注入键盘监听脚本**——拦截 iframe 内的 `Cmd+L` / `Ctrl+L`，通过 `postMessage` 发送 `{type:'opencode-toggle'}` 到父窗口
+  2. **注入键盘监听脚本**——拦截 iframe 内的 `Cmd+L` / `Ctrl+L`，通过 `BridgeProtocol.ts` 定义的 `postMessage` 协议发送到父窗口
 - 代理在插件卸载时自动关闭
 
 ### `OpenCodeView.ts` — 侧边栏视图
@@ -83,8 +93,8 @@ src/
 - 错误状态: 错误信息 + 重试按钮
 - 运行状态: iframe 指向代理 URL
 - 监听 `window` 的 `message` 事件，处理来自 iframe 的 postMessage:
-  - `opencode-toggle`: 触发视图切换
-  - `opencode-proxy-loaded`: iframe 初始化确认
+  - `view:toggle`: 触发视图切换
+  - `proxy:loaded`: iframe 初始化确认
 
 ### `ViewManager.ts` — 视图切换逻辑
 - **三段式切换**:
@@ -105,29 +115,54 @@ src/
 - 序列化为 opencode 可接收的上下文格式
 
 ### `SettingsTab.ts` — 设置面板
-- `binPath`: opencode 可执行文件路径（留空则自动从 PATH 解析）
-- 扩展点: 未来可添加代理端口、主题等设置
+- `opencodePath`: opencode 可执行文件路径
+- `customCommand`: shell command template，必须包含 `{hostname}` 和 `{port}`
+- `getCustomCommandTemplate()` 是 custom command 的唯一解析入口；空字符串解析为 `DEFAULT_CUSTOM_COMMAND`
+
+### `RuntimeDiagnostics.ts` — 运行时观测
+- 唯一运行时文件位置由 `getRuntimePaths()` 决定
+- `$XDG_STATE_HOME/opencode-obsidian/opencode-obsidian.log`
+- `$XDG_STATE_HOME/opencode-obsidian/status.json`
+- 若 `XDG_STATE_HOME` 未设置，使用 `~/.local/state`
+- 依据: [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/)
+
+### `harness bridge` — 桥接契约检查
+- 一阶真相源只读本地依赖，不联网、不静默重试、不维护手写能力清单
+- OpenCode HTTP 以 `/path/to/opencode/packages/sdk/openapi.json` 为准
+- OpenCode hooks 以 `/path/to/opencode/packages/plugin/src/index.ts` 为准
+- Obsidian workspace events 以 `node_modules/obsidian/obsidian.d.ts` 为准
+- `BridgeProtocol.ts` 只定义本项目自己的 postMessage 协议，不替 OpenCode 或 Obsidian 定义能力
 
 ## 关键架构决策
 
 ### 1. `http.request` 替代 `fetch` —— 绕过 CORS
 opencode 服务器默认启动不带 `--cors` 参数，意味着它不会返回 `Access-Control-Allow-Origin: app://obsidian.md`。浏览器的 `fetch` 会因此拒绝请求。Node.js 的 `http` 模块运行在插件主线程，**不受浏览器 CORS 策略约束**，可以直接发 HTTP 请求。
 
-### 2. 健康检查 `no-cors` 回退
-第一轮健康检查带 CORS 头（期望完整响应）。如果失败，用 `mode: 'no-cors'` 发起 opaque 请求——即使读不到响应体，**network error 的有无**足以判断服务器是否在监听端口。这样即使服务器完全没有 CORS 支持，也能正确检测进程状态。
+### 2. 健康检查只认 `/global/health`
+健康检查请求 `ServerEndpoint.healthUrl`，只接受 HTTP 200、JSON body、`healthy === true`。HTML 200、端口可连接、opaque response 都不能证明这是可用的 opencode server。
 
 ### 3. 本地 HTTP 代理 —— CSP 剥离 + 脚本注入
 opencode 的 HTML 响应携带严格的 Content-Security-Policy，禁止内联脚本执行。代理在转发前剥离 CSP 头，从而可以注入自定义脚本：
 - **键盘监听**: 拦截 `Cmd+L`（macOS）/ `Ctrl+L`（Windows/Linux），发送 `postMessage` 到 Obsidian 父窗口
 - **自动端口检测**: 从 4097 开始递增尝试，找到第一个可用端口
+- **协议来源**: `BridgeProtocol.ts` 是 message namespace、version、type 的唯一来源；父窗口只接受来自当前 proxy origin 的协议消息
 
 ### 4. `postMessage` 桥接
 iframe 与 Obsidian 插件之间通过 `window.postMessage` 通信：
-- `{type: 'opencode-toggle'}`: iframe 通知父窗口切换视图
-- `{type: 'opencode-proxy-loaded'}`: 代理注入的脚本初始化完成，通知父窗口可以开始通信
+- `{ns:'opencode-obsidian', version:1, type:'view:toggle'}`: iframe 通知父窗口切换视图
+- `{ns:'opencode-obsidian', version:1, type:'proxy:loaded'}`: 代理注入的脚本初始化完成，通知父窗口可以开始通信
 - 父窗口通过 `window.addEventListener('message', ...)` 监听
 
-### 5. 三段式切换逻辑
+### 5. Bridge 开发纪律
+新增 OpenCode API、hook、event、permission、question、tui 或 Obsidian workspace 消费时，先写实际消费代码，再跑：
+
+```bash
+bun run dev:bridge --opencode /Users/oujinsai/Projects/ai-cli/opencode
+```
+
+harness 会从消费代码中抽取 path、method、body key、workspace event，再对本地金标准。不要新增手写能力清单。以后可以加表驱动策略，但表只能表达“本项目如何组合两边能力”，不能复制上游协议事实。
+
+### 6. 三段式切换逻辑
 ```
 当前状态                         →  操作
 ─────────────────────────────────────────────────
@@ -137,13 +172,25 @@ iframe 与 Obsidian 插件之间通过 `window.postMessage` 通信：
 ```
 这确保了快捷键的直觉行为：按一次展开，再按一次折叠，不会出现「展开了但需要再多按一下才能切到 opencode」的情况。
 
-### 6. 焦点恢复
+### 7. 焦点恢复
 在聚焦 opencode iframe 前保存 `previousEditorLeaf`（当前活跃的编辑器 leaf）。用户通过 toggle 折叠侧边栏时，自动恢复到该 leaf，让用户可以无缝回到编辑状态。
 
-### 7. 会话持久化
+### 8. 会话持久化
 - 创建新会话时将 URL 保存到 `lastSessionUrl`（持久化在插件 data.json 中）
 - 插件启动时先尝试恢复 `lastSessionUrl`
-- 同时查询服务器 `/v1/sessions`，比较时间戳，如果有更新的会话则优先使用
+- 同时查询服务器 `/session`，比较时间戳，如果有更新的会话则优先使用
+
+### 9. Harness 与运行时真相源
+- 插件写 XDG log 和 `status.json`
+- harness 只读这些文件和 vault 插件目录，不通过 `obsidian eval` 获取常规状态
+- `obsidian eval` 只能作为最后取证手段，不能写进默认调试流程
+- 本机默认 vault 是 `/Users/oujinsai/obsidian`，也可用 `OPENCODE_OBSIDIAN_VAULT` 或 `--vault` 覆盖
+
+### 10. Custom Command 契约
+- `DEFAULT_CUSTOM_COMMAND` 是默认模板唯一来源
+- 空 `customCommand` 表示使用默认模板
+- 非空模板必须包含 `{hostname}` 和 `{port}`
+- `{cors}` 和 `{projectDirectory}` 是可选变量
 
 ## 编码规范
 
@@ -193,8 +240,8 @@ container.createEl("button", { text: "Click", cls: "mod-cta" });
 # 1. 构建
 bun run build
 
-# 2. 复制到 vault 的插件目录
-cp main.js manifest.json styles.css /path/to/vault/.obsidian/plugins/opencode-obsidian/
+# 2. 以 symlink 方式安装到 vault
+bun run harness install --vault /Users/oujinsai/obsidian
 
 # 3. 在 Obsidian 中启用插件
 ```
@@ -210,39 +257,24 @@ gh release create v1.x.x main.js manifest.json styles.css \
 ## 测试与调试
 
 ```bash
-# 重新加载插件（Obsidian CLI）
-obsidian plugin:reload id=opencode-obsidian
+# 查看 harness 命令
+bun run harness
 
-# 查看插件错误
-obsidian dev:errors
+# 查看插件安装、配置、XDG status、最近日志
+bun run harness status --vault /Users/oujinsai/obsidian
 
-# 检查插件状态
-obsidian eval code="app.plugins.plugins['opencode-obsidian']"
+# 查看 XDG 日志
+bun run harness logs --lines 120
 
-# 验证快捷键绑定
-obsidian hotkeys
-
-# 手动触发切换命令
-obsidian command id=opencode-obsidian:toggle-opencode-view
+# 构建 + opencode 可执行文件 + runtime health 检查
+bun run harness doctor --vault /Users/oujinsai/obsidian
 ```
+
+`obsidian eval` 会读 Obsidian 内部对象，只在 XDG 日志和 status 文件不足以定位问题时使用。默认先看 `$XDG_STATE_HOME/opencode-obsidian/status.json` 和 `$XDG_STATE_HOME/opencode-obsidian/opencode-obsidian.log`。
 
 ## 分支策略
 
-所有功能分支基于 `upstream/main` 创建，保持干净的 PR 历史。
-
-### 当前功能分支（已合并到本地 main）
-- `fix/cors-api` — API 调用和健康检查的 CORS 绕过
-- `feature/remember-session` — 跨重启会话持久化
-- `feature/proxy` — 本地代理、CSP 剥离、postMessage 桥接
-- `feature/focus-management` — 三段式切换逻辑和焦点恢复
-
-### 开发流程
-```bash
-git fetch upstream
-git checkout -b feature/xxx upstream/main
-# 开发...
-git checkout main && git merge feature/xxx
-```
+本仓库按自维护项目处理。先保证本地架构正确、可观测、可维护，再考虑上游兼容。不要为了兼容旧数据或旧上游行为引入补偿分支。
 
 ## 已知限制与后续工作
 
@@ -269,3 +301,98 @@ git checkout main && git merge feature/xxx
 - `obsidian` 和 `electron` 标记为 external——由 Obsidian 运行时提供
 - Node.js 内置模块（`http`、`child_process` 等）标记为 external——插件运行在 Node.js 环境
 - 代码中使用 `require("http")` 而非 `import http from "http"`，因为 esbuild 不会转换 external 模块的 import 语句
+
+<!-- bv-agent-instructions-v2 -->
+
+---
+
+## Beads Workflow Integration
+
+This project uses [beads_rust](https://github.com/Dicklesworthstone/beads_rust) (`br`) for issue tracking and [beads_viewer](https://github.com/Dicklesworthstone/beads_viewer) (`bv`) for graph-aware triage. Issues are stored in `.beads/` and tracked in git.
+
+### Using bv as an AI sidecar
+
+bv is a graph-aware triage engine for Beads projects (.beads/beads.jsonl). Instead of parsing JSONL or hallucinating graph traversal, use robot flags for deterministic, dependency-aware outputs with precomputed metrics (PageRank, betweenness, critical path, cycles, HITS, eigenvector, k-core).
+
+**Scope boundary:** bv handles *what to work on* (triage, priority, planning). `br` handles creating, modifying, and closing beads.
+
+**CRITICAL: Use ONLY --robot-* flags. Bare bv launches an interactive TUI that blocks your session.**
+
+#### The Workflow: Start With Triage
+
+**`bv --robot-triage` is your single entry point.** It returns everything you need in one call:
+- `quick_ref`: at-a-glance counts + top 3 picks
+- `recommendations`: ranked actionable items with scores, reasons, unblock info
+- `quick_wins`: low-effort high-impact items
+- `blockers_to_clear`: items that unblock the most downstream work
+- `project_health`: status/type/priority distributions, graph metrics
+- `commands`: copy-paste shell commands for next steps
+
+```bash
+bv --robot-triage        # THE MEGA-COMMAND: start here
+bv --robot-next          # Minimal: just the single top pick + claim command
+
+# Token-optimized output (TOON) for lower LLM context usage:
+bv --robot-triage --format toon
+```
+
+#### Other bv Commands
+
+| Command | Returns |
+|---------|---------|
+| `--robot-plan` | Parallel execution tracks with unblocks lists |
+| `--robot-priority` | Priority misalignment detection with confidence |
+| `--robot-insights` | Full metrics: PageRank, betweenness, HITS, eigenvector, critical path, cycles, k-core |
+| `--robot-alerts` | Stale issues, blocking cascades, priority mismatches |
+| `--robot-suggest` | Hygiene: duplicates, missing deps, label suggestions, cycle breaks |
+| `--robot-diff --diff-since <ref>` | Changes since ref: new/closed/modified issues |
+| `--robot-graph [--graph-format=json\|dot\|mermaid]` | Dependency graph export |
+
+#### Scoping & Filtering
+
+```bash
+bv --robot-plan --label backend              # Scope to label's subgraph
+bv --robot-insights --as-of HEAD~30          # Historical point-in-time
+bv --recipe actionable --robot-plan          # Pre-filter: ready to work (no blockers)
+bv --recipe high-impact --robot-triage       # Pre-filter: top PageRank scores
+```
+
+### br Commands for Issue Management
+
+```bash
+br ready              # Show issues ready to work (no blockers)
+br list --status=open # All open issues
+br show <id>          # Full issue details with dependencies
+br create --title="..." --type=task --priority=2
+br update <id> --status=in_progress
+br close <id> --reason="Completed"
+br close <id1> <id2>  # Close multiple issues at once
+br sync --flush-only  # Export DB to JSONL
+```
+
+### Workflow Pattern
+
+1. **Triage**: Run `bv --robot-triage` to find the highest-impact actionable work
+2. **Claim**: Use `br update <id> --status=in_progress`
+3. **Work**: Implement the task
+4. **Complete**: Use `br close <id>`
+5. **Sync**: Always run `br sync --flush-only` at session end
+
+### Key Concepts
+
+- **Dependencies**: Issues can block other issues. `br ready` shows only unblocked work.
+- **Priority**: P0=critical, P1=high, P2=medium, P3=low, P4=backlog (use numbers 0-4, not words)
+- **Types**: task, bug, feature, epic, chore, docs, question
+- **Blocking**: `br dep add <issue> <depends-on>` to add dependencies
+
+### Session Protocol
+
+```bash
+git status              # Check what changed
+git add <files>         # Stage code changes
+br sync --flush-only    # Export beads changes to JSONL
+git commit -m "..."     # Commit everything
+git push                # Push to remote
+```
+
+<!-- end-bv-agent-instructions -->

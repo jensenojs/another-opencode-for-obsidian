@@ -1,12 +1,18 @@
 import { ChildProcess, SpawnOptions } from "child_process";
 import { EventEmitter } from "events";
 import * as http from "http";
-import { OpenCodeSettings, ServerEndpoint, createServerEndpoint } from "../types";
+import {
+  OpenCodeSettings,
+  ServerEndpoint,
+  createServerEndpoint,
+  getCustomCommandTemplate,
+} from "../types";
 import { ServerState } from "./types";
 import { OpenCodeProcess } from "./process/OpenCodeProcess";
 import { WindowsProcess } from "./process/WindowsProcess";
 import { PosixProcess } from "./process/PosixProcess";
 import { ExecutableResolver } from "./ExecutableResolver";
+import { createLogger } from "../debug/RuntimeDiagnostics";
 
 export type { ServerState } from "./types";
 
@@ -19,6 +25,7 @@ export class ServerManager extends EventEmitter {
   private settings: OpenCodeSettings;
   private projectDirectory: string;
   private processImpl: OpenCodeProcess;
+  private logger = createLogger("server");
 
   constructor(settings: OpenCodeSettings, projectDirectory: string) {
     super();
@@ -43,6 +50,14 @@ export class ServerManager extends EventEmitter {
 
   getLastError(): string | null {
     return this.lastError;
+  }
+
+  getLastHealthError(): string | null {
+    return this.lastHealthError;
+  }
+
+  getPid(): number | null {
+    return this.process?.pid ?? null;
   }
 
   getUrl(): string {
@@ -84,10 +99,8 @@ export class ServerManager extends EventEmitter {
         shell: true,
       };
     } else {
-      // Path mode: resolve executable and verify
       executablePath = ExecutableResolver.resolve(this.settings.opencodePath);
       
-      // Pre-flight check: verify executable exists (only for path mode)
       const commandError = await this.processImpl.verifyCommand(executablePath);
       if (commandError) {
         return this.setError(commandError);
@@ -101,15 +114,15 @@ export class ServerManager extends EventEmitter {
     }
 
     if (await this.checkServerHealth()) {
-      console.log(
-        "[OpenCode] Server already running on port",
-        this.settings.port
-      );
+      this.logger.info("server already running", {
+        port: this.settings.port,
+        hostname: endpoint.hostname,
+      });
       this.setState("running");
       return true;
     }
 
-    console.log("[OpenCode] Starting server:", {
+    this.logger.info("starting server", {
       mode: this.settings.useCustomCommand ? "custom" : "path",
       command: executablePath,
       port: endpoint.port,
@@ -119,14 +132,12 @@ export class ServerManager extends EventEmitter {
     });
 
     if (this.settings.useCustomCommand) {
-      // Custom command mode: spawn with shell, no args appended
       this.process = this.processImpl.start(
         executablePath,
-        [], // User controls all arguments in custom command
+        [],
         spawnOptions
       );
     } else {
-      // Path mode: spawn with default arguments
       this.process = this.processImpl.start(
         executablePath,
         [
@@ -142,20 +153,18 @@ export class ServerManager extends EventEmitter {
       );
     }
 
-    console.log("[OpenCode] Process spawned with PID:", this.process.pid);
+    this.logger.info("process spawned", { pid: this.process.pid });
 
     this.process.stdout?.on("data", (data) => {
-      console.log("[OpenCode]", data.toString().trim());
+      this.logger.info("process stdout", { text: data.toString().trim() });
     });
 
     this.process.stderr?.on("data", (data) => {
-      console.error("[OpenCode Error]", data.toString().trim());
+      this.logger.error("process stderr", { text: data.toString().trim() });
     });
 
     this.process.on("exit", (code, signal) => {
-      console.log(
-        `[OpenCode] Process exited with code ${code}, signal ${signal}`
-      );
+      this.logger.info("process exited", { code, signal });
       this.process = null;
 
       if (this.state === "starting" && code !== null && code !== 0) {
@@ -168,7 +177,7 @@ export class ServerManager extends EventEmitter {
     });
 
     this.process.on("error", (err: NodeJS.ErrnoException) => {
-      console.error("[OpenCode] Failed to start process:", err);
+      this.logger.error("failed to start process", err);
       this.process = null;
 
       if (err.code === "ENOENT") {
@@ -234,7 +243,7 @@ export class ServerManager extends EventEmitter {
 
   private setError(message: string): false {
     this.lastError = message;
-    console.error("[OpenCode Error]", message);
+    this.logger.error("server error", { message });
     this.setState("error");
     return false;
   }
@@ -246,10 +255,7 @@ export class ServerManager extends EventEmitter {
   private resolveCustomCommand(
     endpoint: ServerEndpoint
   ): string | { message: string } {
-    const command = this.settings.customCommand.trim();
-    if (!command) {
-      return { message: "Custom command is empty" };
-    }
+    const command = getCustomCommandTemplate(this.settings);
 
     if (!command.includes("{hostname}")) {
       return {
@@ -323,7 +329,7 @@ export class ServerManager extends EventEmitter {
 
     while (Date.now() - startTime < timeoutMs) {
       if (!this.process) {
-        console.log("Process exited before server became ready");
+        this.logger.warn("process exited before server became ready");
         return false;
       }
 

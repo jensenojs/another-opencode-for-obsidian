@@ -39,16 +39,24 @@ BRAT will automatically check for updates and notify you when new versions are a
 
 If you want to contribute or develop the plugin:
 
-1. Clone to `.obsidian/plugins/obsidian-opencode` subdirectory under your vault's root:
+1. Clone the repository and install dependencies:
    ```bash
-   git clone https://github.com/mtymek/opencode-obsidian.git .obsidian/plugins/obsidian-opencode
+   git clone https://github.com/mtymek/opencode-obsidian.git
+   cd opencode-obsidian
+   bun install
    ```
-2. Install dependencies and build:
+2. Build and link it into a vault:
    ```bash
-   bun install && bun run build
+   bun run build
+   bun run harness install --vault /path/to/vault
    ```
 3. Enable in Obsidian Settings > Community Plugins
-4. Add AGENTS.md to your workspace root to guide the AI assistant
+4. Use the harness while developing:
+   ```bash
+   bun run harness status --vault /path/to/vault
+   bun run harness logs --lines 120
+   bun run dev:bridge --opencode /path/to/opencode
+   ```
 
 ## Usage
 
@@ -65,12 +73,14 @@ Enable "Use custom command" when you need more control over how OpenCode startsâ
 
 When using custom command:
 
-- **Hostname and port must match** the values set in the Port and Hostname fields above
-- You **must include `--cors app://obsidian.md`** to allow Obsidian to embed the OpenCode interface
+- The command is a template. Empty value means the default template.
+- The template must include `{hostname}` and `{port}` so the plugin and server share one endpoint.
+- `{cors}` expands to `app://obsidian.md`.
+- `{projectDirectory}` expands to the active project directory.
 
 Example:
 ```bash
-opencode serve --port 14096 --hostname 127.0.0.1 --cors app://obsidian.md
+opencode serve --hostname {hostname} --port {port} --cors {cors}
 ```
 
 Other settings (port, hostname, auto-start, view location, context injection) are available through the settings UI and are self-explanatory.
@@ -80,6 +90,39 @@ Other settings (port, hostname, auto-start, view location, context injection) ar
 This plugin can automatically inject context to the running OC instance: list of open notes and currently selected text.
 
 Currently, this is work-in-progress feature with some limitations - it won't work when creating new session from OC interface.
+
+## Development diagnostics
+
+Runtime logs and status are written under the XDG state directory:
+
+```bash
+$XDG_STATE_HOME/opencode-obsidian/opencode-obsidian.log
+$XDG_STATE_HOME/opencode-obsidian/status.json
+```
+
+If `XDG_STATE_HOME` is unset, the plugin uses `~/.local/state`.
+
+The harness reads these files directly:
+
+```bash
+bun run harness paths
+bun run harness status --vault /path/to/vault
+bun run harness logs --lines 120
+bun run harness doctor --vault /path/to/vault
+bun run dev:bridge --opencode /path/to/opencode
+```
+
+See the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/) for the state directory convention.
+
+### Bridge contract checks
+
+`bun run dev:bridge` checks this plugin against local contract files:
+
+- OpenCode HTTP: `/path/to/opencode/packages/sdk/openapi.json`
+- OpenCode hooks: `/path/to/opencode/packages/plugin/src/index.ts`
+- Obsidian workspace events: `node_modules/obsidian/obsidian.d.ts`
+
+The command does not fetch remote URLs. To test a newer upstream, update the local OpenCode checkout or npm dependency, then rerun the harness.
 
 ## Windows Troubleshooting
 
@@ -96,4 +139,3 @@ If you see "Executable not found at 'opencode'" despite opencode being installed
    ```
 
 This is due to Electron/Obsidian not fully inheriting PATH on Windows.
-

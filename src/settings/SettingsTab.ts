@@ -1,12 +1,14 @@
 import { App, Plugin, PluginSettingTab, Setting, Notice } from "obsidian";
 import { existsSync, statSync } from "fs";
 import { homedir } from "os";
-import { OpenCodeSettings, ViewLocation } from "../types";
+import {
+  DEFAULT_CUSTOM_COMMAND,
+  OpenCodeSettings,
+  ViewLocation,
+  getCustomCommandTemplate,
+} from "../types";
 import { ServerManager } from "../server/ServerManager";
 import { ExecutableResolver } from "../server/ExecutableResolver";
-
-const DEFAULT_CUSTOM_COMMAND =
-  "opencode serve --hostname {hostname} --port {port} --cors {cors}";
 
 function expandTilde(path: string): string {
   if (path === "~") {
@@ -74,11 +76,10 @@ export class OpenCodeSettingTab extends PluginSettingTab {
           .setValue(this.settings.useCustomCommand)
           .onChange(async (value) => {
             this.settings.useCustomCommand = value;
-            if (value && !this.settings.customCommand.trim()) {
-              this.settings.customCommand = DEFAULT_CUSTOM_COMMAND;
+            if (value) {
+              this.settings.customCommand = getCustomCommandTemplate(this.settings);
             }
             await this.onSettingsChange();
-            // Re-render to show/hide appropriate fields
             this.display();
           })
       );
@@ -101,7 +102,7 @@ export class OpenCodeSettingTab extends PluginSettingTab {
         .addTextArea((text) => {
           text
             .setPlaceholder(DEFAULT_CUSTOM_COMMAND)
-            .setValue(this.settings.customCommand)
+            .setValue(getCustomCommandTemplate(this.settings))
             .onChange(async (value) => {
               this.settings.customCommand = value;
               await this.onSettingsChange();
@@ -131,7 +132,6 @@ export class OpenCodeSettingTab extends PluginSettingTab {
             if (detectedPath && detectedPath !== "opencode") {
               this.settings.opencodePath = detectedPath;
               await this.onSettingsChange();
-              // Refresh the text input
               this.display();
               new Notice(`OpenCode executable found at ${detectedPath}`);
             } else {
@@ -151,7 +151,6 @@ export class OpenCodeSettingTab extends PluginSettingTab {
           .setPlaceholder("/path/to/project or ~/project")
           .setValue(this.settings.projectDirectory)
           .onChange((value) => {
-            // Debounce validation to avoid spamming notices on every keypress
             if (this.validateTimeout) {
               clearTimeout(this.validateTimeout);
             }
@@ -246,14 +245,12 @@ export class OpenCodeSettingTab extends PluginSettingTab {
   private async validateAndSetProjectDirectory(value: string): Promise<void> {
     const trimmed = value.trim();
 
-    // Empty value is valid - means use vault root
     if (!trimmed) {
       this.serverManager.updateProjectDirectory("");
       await this.onSettingsChange();
       return;
     }
 
-    // Validate absolute path (supports ~, /, and Windows drive letters)
     if (!trimmed.startsWith("/") && !trimmed.startsWith("~") && !trimmed.match(/^[A-Za-z]:\\/)) {
       new Notice("Project directory must be an absolute path (or start with ~)");
       return;

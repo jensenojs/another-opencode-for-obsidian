@@ -63,9 +63,6 @@ export class ContextManager {
     const fileOpenRef = this.app.workspace.on("file-open", () => {
       this.scheduleRefresh();
     });
-    const fileCloseRef = (this.app.workspace as any).on("file-close", () => {
-      this.scheduleRefresh();
-    });
     const layoutChangeRef = this.app.workspace.on("layout-change", () => {
       this.scheduleRefresh();
     });
@@ -78,23 +75,12 @@ export class ContextManager {
         this.scheduleRefresh(500);
       }
     );
-    const selectionChangeRef = (this.app.workspace as any).on(
-      "editor-selection-change",
-      (_editor: unknown, view: unknown) => {
-        if (view instanceof MarkdownView) {
-          this.workspaceContext.trackViewSelection(view);
-        }
-        this.scheduleRefresh(200);
-      }
-    );
 
     this.contextEventRefs = [
       activeLeafRef,
       fileOpenRef,
-      fileCloseRef,
       layoutChangeRef,
       editorChangeRef,
-      selectionChangeRef,
     ];
     this.contextEventRefs.forEach((ref) => this.registerEvent(ref));
   }

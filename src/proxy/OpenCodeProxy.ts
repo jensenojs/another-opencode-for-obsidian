@@ -1,25 +1,28 @@
 import * as http from "http";
 import { EventEmitter } from "events";
+import { createLogger } from "../debug/RuntimeDiagnostics";
+import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../bridge/BridgeProtocol";
 
 const INJECTED_SCRIPT = `
 <script>
 (function() {
-  window.parent.postMessage({ type: 'opencode-proxy-loaded' }, '*');
+  var ns = ${JSON.stringify(BRIDGE_NAMESPACE)};
+  var version = ${JSON.stringify(BRIDGE_VERSION)};
+  var messages = ${JSON.stringify(BRIDGE_MESSAGES)};
+  function post(type) {
+    window.parent.postMessage({ ns: ns, version: version, type: type }, '*');
+  }
+  post(messages.proxyLoaded);
   function toggleHandler(e) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      window.parent.postMessage({ type: 'opencode-toggle' }, '*');
+      post(messages.viewToggle);
     }
   }
   window.addEventListener('keydown', toggleHandler, true);
   document.addEventListener('keydown', toggleHandler, true);
-  // Re-register after a short delay in case the SPA clobbers listeners
-  setTimeout(function() {
-    window.addEventListener('keydown', toggleHandler, true);
-    document.addEventListener('keydown', toggleHandler, true);
-  }, 2000);
 })();
 </script>
 `;
@@ -29,6 +32,7 @@ export class OpenCodeProxy extends EventEmitter {
   private targetHost: string;
   private targetPort: number;
   private effectivePort: number = 0;
+  private logger = createLogger("proxy");
   private static readonly START_PORT = 4097;
   private static readonly MAX_ATTEMPTS = 10;
 
@@ -40,6 +44,10 @@ export class OpenCodeProxy extends EventEmitter {
 
   getPort(): number {
     return this.effectivePort;
+  }
+
+  getOrigin(): string {
+    return `http://127.0.0.1:${this.effectivePort}`;
   }
 
   updateTarget(targetHost: string, targetPort: number): void {
@@ -54,12 +62,12 @@ export class OpenCodeProxy extends EventEmitter {
       const ok = await this.tryListen(port);
       if (ok) {
         this.effectivePort = port;
-        console.log(`[OpenCode Proxy] Listening on port ${port}`);
+        this.logger.info("proxy listening", { port });
         return true;
       }
     }
 
-    console.error("[OpenCode Proxy] Failed to find available port");
+    this.logger.error("failed to find available proxy port");
     return false;
   }
 
@@ -77,7 +85,7 @@ export class OpenCodeProxy extends EventEmitter {
         if (err.code === "EADDRINUSE") {
           resolve(false);
         } else {
-          console.error("[OpenCode Proxy] Unexpected error:", err.message);
+          this.logger.error("unexpected proxy server error", err);
           resolve(false);
         }
       });
@@ -130,7 +138,13 @@ export class OpenCodeProxy extends EventEmitter {
       }
     });
 
-    proxyReq.on("error", () => {
+    proxyReq.on("error", (error: Error) => {
+      this.logger.error("proxy request failed", {
+        error: error.message,
+        targetHost: this.targetHost,
+        targetPort: this.targetPort,
+        path: clientReq.url,
+      });
       clientRes.writeHead(502);
       clientRes.end();
     });
@@ -160,7 +174,13 @@ export class OpenCodeProxy extends EventEmitter {
       clientSocket.pipe(proxySocket);
     });
 
-    proxyReq.on("error", () => {
+    proxyReq.on("error", (error: Error) => {
+      this.logger.error("proxy upgrade failed", {
+        error: error.message,
+        targetHost: this.targetHost,
+        targetPort: this.targetPort,
+        path: clientReq.url,
+      });
       clientSocket.end();
     });
   }
