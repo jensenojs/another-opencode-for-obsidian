@@ -52,8 +52,11 @@ this plugin.
 - New context message text starts with the `<!-- oc-ctx -->` marker.
 - New context message text contains an `oc-ctx-provenance` JSON comment with
   source path, range, type, label, text length, and creation time.
-- Ignoring/removing active context patches the remote part as ignored. It is
+- Removing active context deletes the plugin-owned remote context message. It is
   scoped to the current session and does not delete vault content.
+- Restore deletes old ignored plugin-owned `<!-- oc-ctx -->` messages when the
+  whole OpenCode message contains only plugin context parts. Mixed user messages
+  are not deleted.
 - `ContextManager` owns context item lifecycle and active item snapshots.
 - `ContextStatusBar` receives snapshots and renders them; it does not write
   remote context itself.
@@ -134,8 +137,8 @@ An active context capsule is already present in the OpenCode session.
 
 - Single click navigates to the evidence source.
 - Double click toggles local inclusion/dim state when that state is available.
-- The right-side remove icon ignores/removes the remote context part from the
-  current session.
+- The right-side remove icon deletes the plugin-owned remote context message
+  from the current session.
 - Removal never deletes a vault file and never claims to undo historical model
   output.
 

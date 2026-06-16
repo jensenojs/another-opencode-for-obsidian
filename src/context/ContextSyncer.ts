@@ -56,7 +56,7 @@ export class ContextSyncer {
       return true;
     }
 
-    return this.client.ignorePart(sessionId, item.messageId, item.partId);
+    return this.client.deleteMessage(sessionId, item.messageId);
   }
 
   async restore(sessionId: string): Promise<ContextItem[] | null> {
@@ -65,14 +65,23 @@ export class ContextSyncer {
       return null;
     }
 
-    return messages.flatMap((message) => restoreItemsFromMessage(message));
+    const restoredItems = messages.flatMap((message) => restoreItemsFromMessage(message));
+    const ignoredContextMessages = messages.filter(isIgnoredPluginContextMessage);
+
+    for (const message of ignoredContextMessages) {
+      await this.client.deleteMessage(sessionId, message.info.id);
+    }
+
+    return restoredItems;
   }
 }
 
 function restoreItemsFromMessage(message: OpenCodeMessage): ContextItem[] {
+  if (!isPluginContextMessage(message)) {
+    return [];
+  }
+
   return message.parts
-    .filter((part) => part.type === "text")
-    .filter((part) => typeof part.text === "string")
     .filter((part) => !part.ignored)
     .flatMap((part) => {
       const parsed = parseContextMessageText(part.text!);
@@ -98,6 +107,22 @@ function restoreItemsFromMessage(message: OpenCodeMessage): ContextItem[] {
         createdAt: provenance?.createdAt ?? part.time?.start ?? Date.now(),
       };
     });
+}
+
+function isIgnoredPluginContextMessage(message: OpenCodeMessage): boolean {
+  return isPluginContextMessage(message) && message.parts.every((part) => part.ignored);
+}
+
+function isPluginContextMessage(message: OpenCodeMessage): boolean {
+  return message.parts.length > 0 && message.parts.every(isPluginContextPart);
+}
+
+function isPluginContextPart(part: OpenCodeMessage["parts"][number]): boolean {
+  return (
+    part.type === "text" &&
+    typeof part.text === "string" &&
+    parseContextMessageText(part.text) !== null
+  );
 }
 
 function createItemId(messageId: string, partId: string): string {

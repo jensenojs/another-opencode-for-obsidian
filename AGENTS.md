@@ -9,7 +9,7 @@ AI 编码代理在 obsidian-opencode 插件上工作的指南。
 当前第一阶段的产品顺序：
 
 1. Safe context navigation：context source 只能跳到已有 vault 内容，不能通过 Obsidian link 语义创建文件。
-2. Context provenance/control：当前 OpenCode session 的 context 必须可见、可诊断、可显式 ignore。
+2. Context provenance/control：当前 OpenCode session 的 context 必须可见、可诊断、可显式移除或排除候选。
 3. GraphIndex：消费 Obsidian Vault + MetadataCache，提供 vault link graph 的事实 read model。
 4. GraphRAG derived layer：在 GraphIndex 之上做派生证据和候选关系，不把推荐策略塞进 GraphIndex。
 5. OpenCode event bridge：上游稳定 event surface 是 OpenCode dev 的 `GET /api/event` / `v2.event.subscribe`。第一阶段只接 read-only session diagnostics，不复制 Web UI 已有的 permission/question 弹窗。
@@ -62,7 +62,7 @@ src/
 │   └── RuntimeDiagnostics.ts # XDG 日志、status.json、运行时路径
 ├── context/
 │   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，触发上下文刷新
-│   ├── ContextSyncer.ts     # 写入、ignore、恢复 OpenCode context message
+│   ├── ContextSyncer.ts     # 写入、删除、恢复 OpenCode context message
 │   ├── ContextProvenance.ts # context marker + provenance 载荷格式
 │   ├── ContextItemNavigator.ts # context source 安全打开入口
 │   ├── ContextSessionResolver.ts # 当前 OpenCode session id 的唯一解析入口
@@ -196,18 +196,21 @@ scripts/
 - `ContextAutoSources` 是自动源刷新编排入口，拥有当前 active markdown path，并把 selection/backlink/cursor 事件路由到对应 source
 - `autoAddBacklinksContext` 控制 active note 的反向链接是否作为 auto item 维护；`ContextManager` 只把 workspace/metadataCache 事件和普通对象交给 `ContextAutoSources`，不在这里解析 backlink 图
 - `autoAddCursorContext` 控制 active note 光标位置是否作为 auto item 维护；`ContextManager` 只消费 Obsidian `MarkdownView.editor.getCursor()`，并把 0-based `EditorPosition` 转成给模型看的 1-based 行列
-- workspace auto item 由固定 label 和 source file 表示；同一 session、label、source file 的 auto item 必须串行替换。同内容刷新不能再次 POST 到 OpenCode；内容变化时旧 part 必须先 ignore 成功，再写入新 part
+- workspace auto item 由固定 label 和 source file 表示；同一 session、label、source file 的 auto item 必须串行替换。同内容刷新不能再次 POST 到 OpenCode；内容变化时旧 context message 必须先删除成功，再写入新 message
 - backlink auto item 只表示当前 active note，切换 active note 时先删除既有 backlink auto item
 - cursor auto item 只表示当前 active editor 的一个光标位置，切换文件或移动光标时先删除既有 cursor auto item
 
 ### `ContextSyncer.ts` / `ContextProvenance.ts` — context message 协议
 
-- `ContextSyncer` 是 Obsidian → OpenCode context message 的写入、ignore、恢复入口
+- `ContextSyncer` 是 Obsidian → OpenCode context message 的写入、删除、恢复入口
 - `ContextProvenance` 是 `<!-- oc-ctx -->` marker 和 `oc-ctx-provenance` JSON 注释的唯一格式化/解析模块
 - 新写入的 context message 必须持久化 source path、range、type、label、textLength、createdAt
 - `sourceFile` 是用户可见来源标签；`navigationSourceFile` 是可选 vault path 跳转目标。Workspace context 这类聚合来源必须保留 `sourceFile: "Obsidian workspace"`，有单一明确目标时才写 `navigationSourceFile`，禁止从 formatted context text 里解析 `- note.md` 来推导跳转
 - 新写入的 context message 必须使用 OpenCode `TextPartInput.synthetic = true`。`noReply` 只表示不触发模型回复，不表示隐藏；OpenCode Web UI 以 `synthetic` 跳过用户可见 text part
+- 插件移除自己创建的 context message 时必须删除整条 OpenCode message，不能只把 part 标成 `ignored`。OpenCode Web UI 会隐藏 ignored synthetic text，但仍会保留空的 timeline row，造成 session 中间大块空白和滚动到底异常。
+- restore 时必须清理已经遗留的 ignored plugin context message。只有整条 message 的所有 part 都能解析为 `<!-- oc-ctx -->` context part 时才允许删除；混入普通用户 part 的 message 不能删。
 - restore 时有有效 provenance 才输出 `provenanceStatus: "known"`；缺失或无效 provenance 必须输出 `provenanceStatus: "uncertain"`
+- server start 成功后，如果 `CurrentContextSession` 已经能解析出当前 session id，插件必须调用 `ContextManager.restoreFromServer()`。这保证重启后可恢复 context provenance，也会清理旧版本遗留的 ignored plugin context message；不要把 cleanup 只绑在 OpenCode view 的 `ensureSessionUrl()` 上。
 - diagnostics 可以显示 `textLength` 和 `provenanceStatus`，不能复制完整 context text
 
 ### Obsidian resolution contract
@@ -237,15 +240,15 @@ scripts/
 
 ### `ContextStatusBar.ts` — 轻量状态面
 
-- StatusBar 第一阶段做 context count、当前 session context 胶囊、复制 diagnostics、安全导航和显式 session remove/ignore
+- StatusBar 第一阶段做 context count、当前 session context 胶囊、复制 diagnostics、安全导航和显式 session remove
 - OpenCode session URL 确定后先 restore 当前 session 里已有的 plugin context message，再渲染 status bar。StatusBar 不能只反映本次插件窗口内存里刚创建的条目
 - 默认 context 胶囊只显示 title 和 source；source、type、range、textLength、createdAt、provenanceStatus、navigation resolution 等审计字段进入详情或 diagnostics
 - context 胶囊是紧凑可点击 cell：单击通过 `ContextItemNavigator` 或 GraphIndex-backed navigator 做 evidence navigation，双击切换 candidate included/excluded 或本地 dim/selected 状态。第一阶段不要恢复独立 `Open source` 按钮
-- remove/ignore 必须是明确的 session-scoped 动作，可以用右侧小图标加 tooltip，但不能用含义不明的角落小叉，也不能暗示删除 vault 文件或撤回历史回答
-- 后续 context panel 可以提供显式删除动作，但语义必须仍然是 remote part ignore，不是 vault 内容删除
+- remove 必须是明确的 session-scoped 动作，可以用右侧小图标加 tooltip，但不能用含义不明的角落小叉，也不能暗示删除 vault 文件或撤回历史回答
+- 后续 context panel 可以提供显式删除动作，但语义必须仍然是删除插件创建的 remote context message，不是 vault 内容删除
 - ContextStatusBar 只负责把 context、candidate、broken-link evidence 和后续 permission/question/event/hook signals 渲染成 Obsidian-native 胶囊和交互。它不解析 wikilink、不消费 MetadataCache、不维护 GraphIndex、不直接调用 OpenCode API、不调用 `workspace.openLinkText()`。
 - 默认胶囊只显示 title 和 source。`known`、`resolved`、字符数、createdAt、message id、part id 等审计字段进入详情或 diagnostics，不在默认行里堆 chip。异常状态用小的 warning accent 表达，点击后再看详情。
-- 单击胶囊是 evidence navigation：合法引用跳目标，非法引用跳 source occurrence，普通 context 跳来源。双击和右侧状态图标用于 candidate included/excluded 切换；active session context 的 remove/ignore 仍是单独的显式动作。
+- 单击胶囊是 evidence navigation：合法引用跳目标，非法引用跳 source occurrence，普通 context 跳来源。双击和右侧状态图标用于 candidate included/excluded 切换；active session context 的 remove 仍是单独的显式动作。
 - 参考设计文档：[docs/plans/context-control-surface.md](docs/plans/context-control-surface.md)
 
 ### `GraphIndex.ts` — Obsidian link graph 机制层
@@ -346,6 +349,24 @@ scripts/
 - 如果用户确认视觉现象已经复现，但事件边界 trace 只看到 iframe 内部 `wheel/scroll`，父窗口没有 focus、workspace、CodeMirror class/style、computed style 或 background layer 变化，下一步应转向 paint/compositor 边界或单一 CSS 合成特性实验。不要继续堆 DOM 字段。2026-06-15 的有效实验是禁用 iframe 内 `backdrop-filter`，它把 iframe 内部的背景采样从透明 iframe 合成路径中拿掉，并消除了主编辑区亮暗弹闪。这个一次性 probe 已经完成；不要长期保留专用 wheel/click trace harness。
 - 新增 probe 前必须写清它要验证的单一假设、命中条件、未命中时的解释、会污染哪些运行路径。若 probe 会挂到普通点击、输入、滚动、focus 或 iframe message 路径上，它本身就是产品行为的一部分，必须证明负载足够小且默认不会持续运行。诊断代码不能制造新的闪动、重绘、日志洪水或 status 写入风暴。
 - 视觉诊断输出必须区分三种状态：`observed` 表示本次命中用户现象并采到对应变化；`not-observed` 表示本次没有命中用户现象；`inconclusive` 表示采样点、时间窗或前提不够。禁止把 `not-observed` 或 `inconclusive` 写成“问题改善”“问题已排除”“方向有价值”。
+
+### Chrome/CDP 视觉取证 SOP
+
+- Chrome/CDP 只能用于只读取证：读取 DOM、layout rect、scroll metrics、computed style、DOMSnapshot、LayerTree/compositing reasons，或截取当前页面证据。它不能作为修改 OpenCode class、强制 scroll、强制 padding、隐藏按钮、增加延迟队列或改 compositor CSS 的理由。
+- 隔离 Chrome profile 适合回答“同一个 proxied OpenCode URL 在普通浏览器里是否复现”。启动时必须使用独立 `--user-data-dir`，避免污染用户主 Chrome profile；取证后关闭进程并确认 remote-debugging 端口释放。若隔离 Chrome 未复现，只能记录为 `not-observed in standalone Chrome`，不能据此声称 Obsidian iframe 问题不存在。
+- macOS 隔离 Chrome profile 的常用启动方式：
+  `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9224 --user-data-dir=/tmp/opencode-obsidian-chrome-profile "http://127.0.0.1:4097/"`
+- Obsidian/Electron 特有的视觉问题必须抓 Obsidian renderer。做法是让 Obsidian 以 `--remote-debugging-port=<port>` 启动，再通过 Chrome DevTools Protocol 连接对应 `app://obsidian.md` page/frame。采样目标必须是当前真实 OpenCode iframe，而不是单独打开的 proxy URL。
+- macOS Obsidian renderer CDP 的常用启动方式：先完全退出 Obsidian，再执行
+  `open -na "Obsidian" --args --remote-debugging-port=9223`
+  然后连接 `http://127.0.0.1:9223/json`，选择当前 vault 对应的 `app://obsidian.md` target。
+- 取证顺序固定为：先记录 session URL、session id、OpenCode session version、message/part/diff 摘要；再抓 scroll root 的 `scrollHeight/clientHeight/scrollTop`、timeline row rect、composer rect、jump button state；需要解释合成问题时再抓 `DOMSnapshot.captureSnapshot` 和 `LayerTree.compositingReasons`。
+- 每次取证都要标记状态：`observed`、`not-observed` 或 `inconclusive`。如果只在隔离 Chrome 里采到正常状态，结论必须写“没有命中 Obsidian 错误状态”，下一步才是 Obsidian renderer CDP。不要把“普通浏览器正常”改写成“问题已排除”。
+- 相关官方文档：
+  - Chrome DevTools Protocol: https://chromedevtools.github.io/devtools-protocol/
+  - `Runtime.evaluate`: https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-evaluate
+  - `DOMSnapshot.captureSnapshot`: https://chromedevtools.github.io/devtools-protocol/tot/DOMSnapshot/#method-captureSnapshot
+  - `LayerTree.compositingReasons`: https://chromedevtools.github.io/devtools-protocol/tot/LayerTree/#method-compositingReasons
 
 ### `harness bridge` — 桥接契约检查
 
@@ -543,7 +564,7 @@ Obsidian 命令面板中的 `Copy OpenCode diagnostics` 会复制同一份 serve
 
 ## 已知限制与后续工作
 
-- **上下文面板仍需增强**: StatusBar 浮层只承担显示、复制 diagnostics 和安全导航。后续要补的是更强的手动选择入口、显式 ignore/remove 控制，以及把 note/folder/search result 等候选来源统一接入现有 `ContextItem` 生命周期。
+- **上下文面板仍需增强**: StatusBar 浮层只承担显示、复制 diagnostics 和安全导航。后续要补的是更强的手动选择入口、显式 remove / candidate exclude 控制，以及把 note/folder/search result 等候选来源统一接入现有 `ContextItem` 生命周期。
 - **未使用的 opencode API**: `file.read`、`find.*`、`tui.*`、`event.subscribe`、`session.fork/diff/todo` 等 API 尚未集成，这些都是可增强双向交互的接口。
 - **代理端口不可见**: 设置面板不显示代理端口（自动检测，目前工作正常但不够透明）。
 - **代理扩展潜力**: 当前代理基础设施可以支持 Obsidian 与 opencode 之间的双向文件同步，但尚未实现。

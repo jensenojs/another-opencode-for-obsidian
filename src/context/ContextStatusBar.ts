@@ -210,7 +210,7 @@ export class ContextStatusBar {
         const removed = await this.deps.removeItem(item.id);
         if (!removed) {
           removeButton.disabled = false;
-          new Notice("OpenCode context was not removed. The remote part was not ignored.");
+          new Notice("OpenCode context was not removed. The remote message was not deleted.");
         }
       });
     }

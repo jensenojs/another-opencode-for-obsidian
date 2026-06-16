@@ -129,7 +129,10 @@ function createManager(client: Partial<OpenCodeClient>): ContextManagerClass {
   return new ContextManager({
     app: createApp(),
     settings: createSettings(),
-    client: client as OpenCodeClient,
+    client: {
+      deleteMessage: async () => true,
+      ...client,
+    } as OpenCodeClient,
     getServerState: () => "running",
     currentSession: createCurrentSession(null),
     registerEvent: () => {},
@@ -382,7 +385,7 @@ describe("ContextManager", () => {
           calls.push({ sessionId, text });
           return { messageId: `msg_${calls.length}`, partId: `prt_${calls.length}` };
         },
-        ignorePart: async () => true,
+        deleteMessage: async () => true,
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
       currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
@@ -417,7 +420,7 @@ describe("ContextManager", () => {
     settings.autoAddBacklinksContext = true;
     const { app, handlers, resolvedLinks } = createAppWithEvents();
     resolvedLinks["source.md"] = { "first.md": 1, "second.md": 1 };
-    const ignored: string[] = [];
+    const deleted: string[] = [];
     let messageIndex = 0;
     const manager = new ContextManager({
       app,
@@ -427,8 +430,8 @@ describe("ContextManager", () => {
           messageIndex += 1;
           return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
         },
-        ignorePart: async (_sessionId: string, messageId: string, partId: string) => {
-          ignored.push(`${messageId}:${partId}`);
+        deleteMessage: async (_sessionId: string, messageId: string) => {
+          deleted.push(messageId);
           return true;
         },
       } as unknown as OpenCodeClient,
@@ -443,7 +446,7 @@ describe("ContextManager", () => {
     handlers["file-open"]?.({ path: "second.md" });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(ignored).toEqual(["msg_1:prt_1"]);
+    expect(deleted).toEqual(["msg_1"]);
     expect(manager.getItems()).toMatchObject([
       {
         type: "auto",
@@ -466,7 +469,7 @@ describe("ContextManager", () => {
           calls.push({ sessionId, text });
           return { messageId: `msg_${calls.length}`, partId: `prt_${calls.length}` };
         },
-        ignorePart: async () => true,
+        deleteMessage: async () => true,
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
       currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
@@ -506,7 +509,7 @@ describe("ContextManager", () => {
     const settings = createSettings();
     settings.autoAddCursorContext = true;
     const { app, handlers } = createAppWithEvents();
-    const ignored: string[] = [];
+    const deleted: string[] = [];
     let messageIndex = 0;
     const manager = new ContextManager({
       app,
@@ -516,8 +519,8 @@ describe("ContextManager", () => {
           messageIndex += 1;
           return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
         },
-        ignorePart: async (_sessionId: string, messageId: string, partId: string) => {
-          ignored.push(`${messageId}:${partId}`);
+        deleteMessage: async (_sessionId: string, messageId: string) => {
+          deleted.push(messageId);
           return true;
         },
       } as unknown as OpenCodeClient,
@@ -532,7 +535,7 @@ describe("ContextManager", () => {
     handlers["editor-change"]?.({}, createMarkdownView("second.md", "", 8, 8, 8, 3));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(ignored).toEqual(["msg_1:prt_1"]);
+    expect(deleted).toEqual(["msg_1"]);
     expect(manager.getItems()).toMatchObject([
       {
         type: "auto",
@@ -544,12 +547,12 @@ describe("ContextManager", () => {
     ]);
   });
 
-  test("removes context only after the remote part is ignored", async () => {
-    const ignored: string[] = [];
+  test("removes context only after the remote message is deleted", async () => {
+    const deleted: string[] = [];
     const manager = createManager({
       addContextMessage: async () => ({ messageId: "msg_1", partId: "prt_1" }),
-      ignorePart: async (sessionId, messageId, partId) => {
-        ignored.push(`${sessionId}:${messageId}:${partId}`);
+      deleteMessage: async (sessionId, messageId) => {
+        deleted.push(`${sessionId}:${messageId}`);
         return true;
       },
     });
@@ -558,14 +561,14 @@ describe("ContextManager", () => {
     const removed = await manager.removeItem("ses_1", item.id);
 
     expect(removed).toBe(true);
-    expect(ignored).toEqual(["ses_1:msg_1:prt_1"]);
+    expect(deleted).toEqual(["ses_1:msg_1"]);
     expect(manager.getItems()).toEqual([]);
   });
 
-  test("keeps local context when remote ignore fails", async () => {
+  test("keeps local context when remote delete fails", async () => {
     const manager = createManager({
       addContextMessage: async () => ({ messageId: "msg_1", partId: "prt_1" }),
-      ignorePart: async () => false,
+      deleteMessage: async () => false,
     });
 
     const item = expectItem(await manager.addManual("ses_1", "selected text", "note.md"));
@@ -576,15 +579,15 @@ describe("ContextManager", () => {
   });
 
   test("replaces workspace auto context through its public identity", async () => {
-    const ignored: string[] = [];
+    const deleted: string[] = [];
     let messageIndex = 0;
     const manager = createManager({
       addContextMessage: async () => {
         messageIndex += 1;
         return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
       },
-      ignorePart: async (_sessionId: string, messageId: string, partId: string) => {
-        ignored.push(`${messageId}:${partId}`);
+      deleteMessage: async (_sessionId: string, messageId: string) => {
+        deleted.push(messageId);
         return true;
       },
     });
@@ -604,7 +607,7 @@ describe("ContextManager", () => {
       sourceFile: "Obsidian workspace",
     });
 
-    expect(ignored).toEqual(["msg_1:prt_1"]);
+    expect(deleted).toEqual(["msg_1"]);
     expect(manager.getItems()).toMatchObject([
       {
         id: "msg_2:prt_2",
@@ -667,7 +670,7 @@ describe("ContextManager", () => {
         messageIndex += 1;
         return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
       },
-      ignorePart: async () => true,
+      deleteMessage: async () => true,
     });
 
     const first = manager["addItem"]({
@@ -693,8 +696,8 @@ describe("ContextManager", () => {
     expect(manager.getItems()).toHaveLength(1);
   });
 
-  test("restores one active auto context per public identity and ignores stale parts", async () => {
-    const ignored: string[] = [];
+  test("restores one active auto context per public identity and deletes stale messages", async () => {
+    const deleted: string[] = [];
     const messages: OpenCodeMessage[] = [
       {
         info: { id: "msg_1", sessionID: "ses_1" },
@@ -737,15 +740,15 @@ describe("ContextManager", () => {
     ];
     const manager = createManager({
       listSessionMessages: async () => messages,
-      ignorePart: async (_sessionId: string, messageId: string, partId: string) => {
-        ignored.push(`${messageId}:${partId}`);
+      deleteMessage: async (_sessionId: string, messageId: string) => {
+        deleted.push(messageId);
         return true;
       },
     });
 
     await manager.restoreFromServer("ses_1");
 
-    expect(ignored).toEqual(["msg_1:prt_1"]);
+    expect(deleted).toEqual(["msg_1"]);
     expect(manager.getItems()).toMatchObject([
       {
         id: "msg_2:prt_2",
@@ -770,18 +773,28 @@ describe("ContextManager", () => {
             text: "<!-- oc-ctx -->\nrestored",
             time: { start: 123 },
           },
+        ],
+      },
+      {
+        info: { id: "msg_2", sessionID: "ses_1" },
+        parts: [
           {
             id: "prt_2",
             sessionID: "ses_1",
-            messageID: "msg_1",
+            messageID: "msg_2",
             type: "text",
             text: "<!-- oc-ctx -->\nignored",
             ignored: true,
           },
+        ],
+      },
+      {
+        info: { id: "msg_3", sessionID: "ses_1" },
+        parts: [
           {
             id: "prt_3",
             sessionID: "ses_1",
-            messageID: "msg_1",
+            messageID: "msg_3",
             type: "text",
             text: "normal user message",
           },

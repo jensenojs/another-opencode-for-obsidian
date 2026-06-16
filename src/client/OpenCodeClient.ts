@@ -178,36 +178,17 @@ export class OpenCodeClient {
     };
   }
 
-  async ignorePart(sessionId: string, messageId: string, partId: string): Promise<boolean> {
-    const messageResult = await this.requestResult<OpenCodeMessageWithParts>(
-      "GET",
+  async deleteMessage(sessionId: string, messageId: string): Promise<boolean> {
+    const result = await this.requestResult<boolean>(
+      "DELETE",
       `/session/${sessionId}/message/${messageId}`
     );
 
-    if (!messageResult.ok) {
-      return messageResult.status === 404;
+    if (!result.ok) {
+      return result.status === 404;
     }
 
-    const message = this.unwrap(messageResult.value);
-    const part = message?.parts.find((candidate) => candidate.id === partId);
-    if (!part) {
-      return true;
-    }
-
-    const updateResult = await this.requestResult<OpenCodePart>(
-      "PATCH",
-      `/session/${sessionId}/message/${messageId}/part/${partId}`,
-      {
-        ...part,
-        ignored: true,
-      }
-    );
-
-    if (!updateResult.ok) {
-      return updateResult.status === 404;
-    }
-
-    return Boolean(this.unwrap(updateResult.value));
+    return result.status === 204 || Boolean(this.unwrap(result.value));
   }
 
   async listSessionMessages(sessionId: string): Promise<OpenCodeMessage[] | null> {

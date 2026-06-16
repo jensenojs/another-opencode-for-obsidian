@@ -358,6 +358,7 @@ export default class OpenCodePlugin extends Plugin {
       if (!initialized) {
         this.logger.warn("failed to initialize project on server");
       }
+      await this.restoreKnownSessionContext();
     } else {
       new Notice(formatStartFailureNotice(this.getServerDiagnostics()), 15000);
     }
@@ -562,6 +563,15 @@ export default class OpenCodePlugin extends Plugin {
 
   async ensureSessionUrl(view: OpenCodeView): Promise<void> {
     await this.viewManager.ensureSessionUrl(view);
+  }
+
+  private async restoreKnownSessionContext(): Promise<void> {
+    const sessionId = this.currentContextSession.getCurrentSessionId();
+    if (!sessionId) {
+      return;
+    }
+
+    await this.contextManager.restoreFromServer(sessionId);
   }
 
   getProjectDirectory(): string {

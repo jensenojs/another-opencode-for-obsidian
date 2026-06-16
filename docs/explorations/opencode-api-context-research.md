@@ -4,6 +4,14 @@
 
 本报告调研 opencode server 的 HTTP API、Web UI / TUI 界面中上下文（context）的呈现方式，以及消息（message）和 part 的渲染机制。调研基于 opencode v0.0.55 源码（anomalyco/opencode）、官方文档（opencode.ai/docs）以及 obsidian-opencode 插件中的实际 API 调用模式。
 
+2026-06-16 更新：本文记录的 `ignorePreviousPart()` / `ignored: true`
+策略已经被当前 context lifecycle 合同取代。当前插件写入带 `<!-- oc-ctx
+-->` marker 的 synthetic context message；移除插件 context 时删除整条
+OpenCode message。真实 Obsidian + OpenCode Web UI 运行态已经证明：只把
+synthetic context part 标成 `ignored` 会隐藏文本，但仍会留下空的
+`UserMessage` timeline row，造成 session 中间大块空白和滚动到底异常。
+旧段落保留为历史调研，不作为当前实现计划。
+
 opencode 采用 client/server 架构：JS Hono HTTP 服务器暴露 OpenAPI 3.1 接口，Go TUI 和 Web UI 作为客户端通过 HTTP/SDK 与服务器通信。
 
 ## 关键文件
@@ -249,4 +257,4 @@ AssistantMessage 组件:
 
 3. **Part 更新策略的局限性**：当前「更新而非堆积」的策略依赖 `updatePart()`（PATCH API），要求服务器维护同一个 part 的引用。如果会话切换或服务器重启，`lastPart` 引用可能失效。
 
-4. **ignored 机制的隐患**：被 ignore 的 parts 虽不可见但占用数据库空间。长会话中反复更新上下文可能积累大量 ignored parts。
+4. **ignored 机制的实证故障**：被 ignore 的 synthetic parts 虽不可见，但它们所属的 user message 仍会保留在 Web UI timeline 中。插件 context 移除必须删除插件拥有的 message，不能只 patch part。

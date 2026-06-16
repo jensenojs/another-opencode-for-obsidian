@@ -54,11 +54,11 @@ describe("ContextSyncer", () => {
     });
   });
 
-  test("ignores remote parts before local removal", async () => {
-    const ignored: string[] = [];
+  test("deletes remote context messages before local removal", async () => {
+    const deleted: string[] = [];
     const syncer = new ContextSyncer({
-      ignorePart: async (sessionId: string, messageId: string, partId: string) => {
-        ignored.push(`${sessionId}:${messageId}:${partId}`);
+      deleteMessage: async (sessionId: string, messageId: string) => {
+        deleted.push(`${sessionId}:${messageId}`);
         return true;
       },
     } as unknown as OpenCodeClient);
@@ -74,10 +74,10 @@ describe("ContextSyncer", () => {
     };
 
     expect(await syncer.remove("ses_1", item)).toBe(true);
-    expect(ignored).toEqual(["ses_1:msg_1:prt_1"]);
+    expect(deleted).toEqual(["ses_1:msg_1"]);
   });
 
-  test("restores active plugin context messages with known provenance", async () => {
+  test("restores active plugin context messages and deletes ignored plugin rows", async () => {
     const messages: OpenCodeMessage[] = [
       {
         info: { id: "msg_1", sessionID: "ses_1" },
@@ -100,26 +100,41 @@ describe("ContextSyncer", () => {
             }),
             time: { start: 123 },
           },
+        ],
+      },
+      {
+        info: { id: "msg_2", sessionID: "ses_1" },
+        parts: [
           {
             id: "prt_2",
             sessionID: "ses_1",
-            messageID: "msg_1",
+            messageID: "msg_2",
             type: "text",
             text: "<!-- oc-ctx -->\nignored",
             ignored: true,
           },
+        ],
+      },
+      {
+        info: { id: "msg_3", sessionID: "ses_1" },
+        parts: [
           {
             id: "prt_3",
             sessionID: "ses_1",
-            messageID: "msg_1",
+            messageID: "msg_3",
             type: "text",
             text: "normal user message",
           },
         ],
       },
     ];
+    const deleted: string[] = [];
     const syncer = new ContextSyncer({
       listSessionMessages: async () => messages,
+      deleteMessage: async (sessionId: string, messageId: string) => {
+        deleted.push(`${sessionId}:${messageId}`);
+        return true;
+      },
     } as unknown as OpenCodeClient);
 
     expect(await syncer.restore("ses_1")).toEqual([
@@ -139,9 +154,10 @@ describe("ContextSyncer", () => {
         createdAt: 456,
       },
     ]);
+    expect(deleted).toEqual(["ses_1:msg_2"]);
   });
 
-  test("restores old context messages as uncertain provenance and skips ignored parts", async () => {
+  test("restores old context messages as uncertain provenance and deletes ignored rows", async () => {
     const messages: OpenCodeMessage[] = [
       {
         info: { id: "msg_1", sessionID: "ses_1" },
@@ -154,10 +170,15 @@ describe("ContextSyncer", () => {
             text: "<!-- oc-ctx -->\nrestored",
             time: { start: 123 },
           },
+        ],
+      },
+      {
+        info: { id: "msg_2", sessionID: "ses_1" },
+        parts: [
           {
             id: "prt_2",
             sessionID: "ses_1",
-            messageID: "msg_1",
+            messageID: "msg_2",
             type: "text",
             text: "<!-- oc-ctx -->\nignored",
             ignored: true,
@@ -165,8 +186,13 @@ describe("ContextSyncer", () => {
         ],
       },
     ];
+    const deleted: string[] = [];
     const syncer = new ContextSyncer({
       listSessionMessages: async () => messages,
+      deleteMessage: async (sessionId: string, messageId: string) => {
+        deleted.push(`${sessionId}:${messageId}`);
+        return true;
+      },
     } as unknown as OpenCodeClient);
 
     expect(await syncer.restore("ses_1")).toEqual([
@@ -183,6 +209,43 @@ describe("ContextSyncer", () => {
         createdAt: 123,
       },
     ]);
+    expect(deleted).toEqual(["ses_1:msg_2"]);
+  });
+
+  test("does not restore or delete mixed user messages that contain a context marker", async () => {
+    const messages: OpenCodeMessage[] = [
+      {
+        info: { id: "msg_1", sessionID: "ses_1" },
+        parts: [
+          {
+            id: "prt_1",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: "text",
+            text: "<!-- oc-ctx -->\nignored",
+            ignored: true,
+          },
+          {
+            id: "prt_2",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: "text",
+            text: "normal user message",
+          },
+        ],
+      },
+    ];
+    const deleted: string[] = [];
+    const syncer = new ContextSyncer({
+      listSessionMessages: async () => messages,
+      deleteMessage: async (sessionId: string, messageId: string) => {
+        deleted.push(`${sessionId}:${messageId}`);
+        return true;
+      },
+    } as unknown as OpenCodeClient);
+
+    expect(await syncer.restore("ses_1")).toEqual([]);
+    expect(deleted).toEqual([]);
   });
 
   test("restores invalid provenance as uncertain without trusting the encoded source", async () => {
