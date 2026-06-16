@@ -47,6 +47,46 @@ function extractBridgeScript(injected: string): string {
   return match[1];
 }
 
+function extractThemeScript(injected: string): string {
+  const match = injected.match(
+    /<script data-another-opencode-for-obsidian-theme>\s*([\s\S]*?)\s*<\/script>/
+  );
+  if (!match) {
+    throw new Error("Theme script was not injected");
+  }
+  return match[1];
+}
+
+function runInjectedTheme(body: string): Window {
+  const script = extractThemeScript(body);
+  const window = new Window({ url: "http://127.0.0.1:4097" });
+  const parent = window.parent as unknown as {
+    postMessage: (message: PostedBridgeMessage, targetOrigin: string) => void;
+  };
+  parent.postMessage = () => {};
+  Function(
+    "window",
+    "document",
+    "Element",
+    "HTMLElement",
+    "MutationObserver",
+    "setTimeout",
+    "getComputedStyle",
+    "location",
+    script
+  )(
+    window,
+    window.document,
+    window.Element,
+    window.HTMLElement,
+    window.MutationObserver,
+    window.setTimeout.bind(window),
+    window.getComputedStyle.bind(window),
+    window.location
+  );
+  return window;
+}
+
 function click(window: Window, element: any): void {
   element.dispatchEvent(
     new window.MouseEvent("click", {
@@ -623,5 +663,26 @@ describe("ProxyInjection", () => {
     expect(body).not.toContain("opaqueBackgrounds");
     expect(body).not.toContain('background-base":"invalid');
     expect(body).not.toContain('"--empty"');
+  });
+
+  test("applies renamed Obsidian appearance data attributes at runtime", () => {
+    const body = injectOpenCodeWebUiProxyHtml(html, "obsidian", {
+      colorScheme: "dark",
+      variables: {
+        "--another-opencode-for-obsidian-workspace-background-state": "enabled",
+        "--another-opencode-for-obsidian-workspace-background-image":
+          'url("https://example.test/bg.jpg")',
+      },
+    });
+
+    const window = runInjectedTheme(body);
+    const root = window.document.documentElement;
+
+    expect(root.getAttribute("data-another-opencode-for-obsidian-appearance")).toBe("obsidian");
+    expect(root.getAttribute("data-another-opencode-for-obsidian-workspace-background")).toBe(
+      "enabled"
+    );
+    expect(root.hasAttribute("data-opencode-obsidian-appearance")).toBe(false);
+    expect(root.hasAttribute("data-opencode-obsidian-workspace-background")).toBe(false);
   });
 });

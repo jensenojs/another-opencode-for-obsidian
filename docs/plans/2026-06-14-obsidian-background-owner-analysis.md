@@ -3277,7 +3277,7 @@ scheduleThemeDiagnostics()
 `applyTheme()`：
 
 ```text
-documentElement.dataset.opencodeObsidianAppearance = 'obsidian'
+documentElement.setAttribute('data-another-opencode-for-obsidian-appearance', 'obsidian')
 documentElement.dataset.colorScheme = theme.colorScheme
 root.style.colorScheme = theme.colorScheme
 replaceRootVariables(root, theme.variables)

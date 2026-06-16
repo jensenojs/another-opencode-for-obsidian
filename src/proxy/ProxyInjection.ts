@@ -143,10 +143,14 @@ function createThemeInjection(theme: WebViewTheme | null): string {
         function applyTheme() {
           themeApplyCount += 1;
           var root = document.documentElement;
-          root.dataset.opencodeObsidianAppearance = 'obsidian';
+          root.removeAttribute('data-opencode-obsidian-appearance');
+          root.removeAttribute('data-opencode-obsidian-workspace-background');
+          root.setAttribute('data-another-opencode-for-obsidian-appearance', 'obsidian');
           root.dataset.colorScheme = theme.colorScheme;
-          root.dataset.opencodeObsidianWorkspaceBackground =
-            theme.variables['--another-opencode-for-obsidian-workspace-background-state'] || 'disabled';
+          root.setAttribute(
+            'data-another-opencode-for-obsidian-workspace-background',
+            theme.variables['--another-opencode-for-obsidian-workspace-background-state'] || 'disabled'
+          );
         root.style.colorScheme = theme.colorScheme;
         replaceRootVariables(root, theme.variables, appliedThemeVariableNames);
           appliedThemeVariableNames = Object.keys(theme.variables);
