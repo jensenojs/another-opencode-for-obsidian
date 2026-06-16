@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test";
+import { Window } from "happy-dom";
 import type {
   ContextStatusBar as ContextStatusBarClass,
   formatContextDiagnostics as formatContextDiagnosticsFn,
@@ -10,7 +11,8 @@ mock.module("obsidian", () => ({
   ItemView: class ItemView {},
   MarkdownView: class MarkdownView {},
   Notice: class Notice {},
-  setIcon: () => {},
+  TFile: class TFile {},
+  TFolder: class TFolder {},
 }));
 
 let ContextStatusBar: typeof ContextStatusBarClass;
@@ -65,6 +67,43 @@ const manualItem: ContextItem = {
   createdAt: 123,
 };
 
+const uncertainItem: ContextItem = {
+  id: "msg_2:prt_2",
+  type: "auto",
+  label: "Workspace context",
+  text: "workspace text",
+  sourceFile: "Obsidian workspace",
+  messageId: "msg_2",
+  partId: "prt_2",
+  textLength: "workspace text".length,
+  provenanceStatus: "uncertain",
+  createdAt: 456,
+};
+
+const missingItem: ContextItem = {
+  id: "msg_3:prt_3",
+  type: "manual",
+  label: "Missing note",
+  text: "missing text",
+  sourceFile: "missing.md",
+  messageId: "msg_3",
+  partId: "prt_3",
+  textLength: "missing text".length,
+  createdAt: 789,
+};
+
+const folderItem: ContextItem = {
+  id: "msg_4:prt_4",
+  type: "manual",
+  label: "Folder",
+  text: "folder text",
+  sourceFile: "folder",
+  messageId: "msg_4",
+  partId: "prt_4",
+  textLength: "folder text".length,
+  createdAt: 890,
+};
+
 describe("ContextStatusBar", () => {
   test("renders the active context count from ContextManager updates", () => {
     const statusEl = new FakeStatusElement();
@@ -81,7 +120,8 @@ describe("ContextStatusBar", () => {
           unsubscribed = true;
         };
       },
-      openItem: async () => {},
+      resolveItem: () => ({ status: "resolved", path: "note.md", line: null }),
+      openItem: async () => ({ status: "opened", path: "note.md", line: null }),
       removeItem: async () => true,
     });
 
@@ -109,14 +149,407 @@ describe("ContextStatusBar", () => {
       type: "manual",
       label: "Selection",
       sourceFile: "note.md",
+      navigationSourceFile: null,
       startLine: null,
       endLine: null,
       messageId: "msg_1",
       partId: "prt_1",
       textLength: "selected text".length,
+      provenanceStatus: "known",
+      navigation: null,
       createdAt: "1970-01-01T00:00:00.123Z",
     });
     expect(JSON.stringify(payload)).not.toContain("selected text");
     expect(JSON.stringify(payload)).not.toContain("sourceKey");
   });
+
+  test("uses navigationSourceFile for workspace rows with a concrete vault target", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const workspaceItem: ContextItem = {
+        ...uncertainItem,
+        provenanceStatus: "known",
+        navigationSourceFile: "0-理论/current.md",
+      };
+      const opened: string[] = [];
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [workspaceItem],
+        onItemsChanged: (callback) => {
+          callback([workspaceItem]);
+          return () => {};
+        },
+        resolveItem: (item) => ({
+          status: "resolved",
+          path: item.navigationSourceFile ?? item.sourceFile,
+          line: null,
+        }),
+        openItem: async (item) => {
+          opened.push(item.navigationSourceFile ?? item.sourceFile);
+          return {
+            status: "opened",
+            path: item.navigationSourceFile ?? item.sourceFile,
+            line: null,
+          };
+        },
+        removeItem: async () => true,
+      });
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(window.document.body.textContent).toContain("Obsidian workspace -> 0-理论/current.md");
+      const row = window.document.querySelector(".opencode-ctx-item");
+      row?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 220));
+
+      expect(opened).toEqual(["0-理论/current.md"]);
+
+      statusBar.destroy();
+    });
+  });
+
+  test("does not call openItem for unresolved aggregate rows", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const opened: string[] = [];
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [uncertainItem],
+        onItemsChanged: (callback) => {
+          callback([uncertainItem]);
+          return () => {};
+        },
+        resolveItem: (item) => ({
+          status: "unresolved",
+          reason: "synthetic-source",
+          sourceFile: item.sourceFile,
+        }),
+        openItem: async (item) => {
+          opened.push(item.id);
+          return { status: "unresolved", reason: "synthetic-source", sourceFile: item.sourceFile };
+        },
+        removeItem: async () => true,
+      });
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const row = window.document.querySelector(".opencode-ctx-item");
+      row?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 220));
+
+      expect(opened).toEqual([]);
+
+      statusBar.destroy();
+    });
+  });
+
+  test("formats navigation resolution in diagnostics without copying full context text", () => {
+    const payload = JSON.parse(
+      formatContextDiagnostics([manualItem], () => ({
+        status: "unresolved",
+        reason: "missing-file",
+        sourceFile: "note.md",
+      }))
+    );
+
+    expect(payload.items[0].navigation).toEqual({
+      status: "unresolved",
+      reason: "missing-file",
+      sourceFile: "note.md",
+      subpath: null,
+    });
+    expect(JSON.stringify(payload)).not.toContain("selected text");
+  });
+
+  test("renders an Obsidian-native context control surface with explicit actions", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const removed: string[] = [];
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [manualItem, uncertainItem],
+        onItemsChanged: (callback) => {
+          callback([manualItem, uncertainItem]);
+          return () => {};
+        },
+        resolveItem: (item) =>
+          item.sourceFile === "Obsidian workspace"
+            ? {
+                status: "unresolved",
+                reason: "synthetic-source",
+                sourceFile: item.sourceFile,
+              }
+            : { status: "resolved", path: item.sourceFile, line: null },
+        openItem: async () => ({ status: "opened", path: "note.md", line: null }),
+        removeItem: async (itemId) => {
+          removed.push(itemId);
+          return false;
+        },
+      });
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(window.document.body.textContent).toContain("Current session context");
+      expect(window.document.body.textContent).not.toContain("Candidate content");
+      expect(window.document.body.textContent).not.toContain(
+        "GraphIndex candidates are not connected in this surface yet."
+      );
+      expect(window.document.body.textContent).not.toContain("provenance uncertain");
+      expect(window.document.body.textContent).not.toContain("synthetic source");
+      expect(window.document.body.textContent).not.toContain("chars");
+      expect(window.document.querySelector(".opencode-ctx-remove")).toBeNull();
+      expect(window.document.body.textContent).not.toContain("Open source");
+      expect(window.document.querySelectorAll(".opencode-ctx-warning")).toHaveLength(1);
+
+      const removeButton = [...window.document.querySelectorAll("button")].find(
+        (button) => button.textContent === "Remove"
+      );
+      expect(removeButton).toBeTruthy();
+      expect(removeButton?.getAttribute("title")).toBe(
+        "Remove from current OpenCode session context"
+      );
+      removeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(removed).toEqual(["msg_1:prt_1"]);
+      expect(window.document.body.textContent).toContain("Workspace context");
+
+      statusBar.destroy();
+    });
+  });
+
+  test("renders unresolved navigation reasons for missing files, folders, and synthetic sources", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const items = [missingItem, folderItem, uncertainItem];
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => items,
+        onItemsChanged: (callback) => {
+          callback(items);
+          return () => {};
+        },
+        resolveItem: (item) => {
+          if (item.id === missingItem.id) {
+            return { status: "unresolved", reason: "missing-file", sourceFile: item.sourceFile };
+          }
+          if (item.id === folderItem.id) {
+            return { status: "unresolved", reason: "folder", sourceFile: item.sourceFile };
+          }
+          return { status: "unresolved", reason: "synthetic-source", sourceFile: item.sourceFile };
+        },
+        openItem: async (item) => ({
+          status: "unresolved",
+          reason: item.id === folderItem.id ? "folder" : "missing-file",
+          sourceFile: item.sourceFile,
+        }),
+        removeItem: async () => true,
+      });
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(window.document.body.textContent).not.toContain(
+        "missing.md does not exist in this vault"
+      );
+      expect(window.document.body.textContent).not.toContain("folder is a folder");
+      expect(window.document.body.textContent).not.toContain("synthetic source");
+      expect(window.document.querySelectorAll(".opencode-ctx-item.is-unresolved")).toHaveLength(3);
+      expect(window.document.querySelectorAll(".opencode-ctx-warning")).toHaveLength(3);
+
+      const payload = JSON.parse(
+        formatContextDiagnostics(items, (item) => {
+          if (item.id === missingItem.id) {
+            return { status: "unresolved", reason: "missing-file", sourceFile: item.sourceFile };
+          }
+          if (item.id === folderItem.id) {
+            return { status: "unresolved", reason: "folder", sourceFile: item.sourceFile };
+          }
+          return { status: "unresolved", reason: "synthetic-source", sourceFile: item.sourceFile };
+        })
+      );
+
+      expect(payload.items.map((item: any) => item.navigation.reason)).toEqual([
+        "missing-file",
+        "folder",
+        "synthetic-source",
+      ]);
+      expect(JSON.stringify(payload)).not.toContain("missing text");
+      expect(JSON.stringify(payload)).not.toContain("folder text");
+      expect(JSON.stringify(payload)).not.toContain("workspace text");
+
+      statusBar.destroy();
+    });
+  });
+
+  test("opens a source by single-clicking the compact row", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const opened: string[] = [];
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [manualItem],
+        onItemsChanged: (callback) => {
+          callback([manualItem]);
+          return () => {};
+        },
+        resolveItem: () => ({ status: "resolved", path: "note.md", line: null }),
+        openItem: async (item) => {
+          opened.push(item.id);
+          return { status: "unresolved", reason: "missing-file", sourceFile: item.sourceFile };
+        },
+        removeItem: async () => true,
+      });
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const row = window.document.querySelector(".opencode-ctx-item");
+      expect(row).toBeTruthy();
+      expect(row?.getAttribute("role")).toBe("button");
+      expect(row?.getAttribute("tabindex")).toBe("0");
+      expect(row?.getAttribute("aria-pressed")).toBe("false");
+      expect(window.document.body.textContent).not.toContain("Open source");
+
+      row?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 220));
+
+      expect(opened).toEqual(["msg_1:prt_1"]);
+
+      statusBar.destroy();
+    });
+  });
+
+  test("double-clicking a row toggles local dim state without opening the source", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const opened: string[] = [];
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [manualItem],
+        onItemsChanged: (callback) => {
+          callback([manualItem]);
+          return () => {};
+        },
+        resolveItem: () => ({ status: "resolved", path: "note.md", line: null }),
+        openItem: async (item) => {
+          opened.push(item.id);
+          return { status: "opened", path: item.sourceFile, line: null };
+        },
+        removeItem: async () => true,
+      });
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const row = window.document.querySelector(".opencode-ctx-item");
+      expect(row).toBeTruthy();
+
+      row?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      row?.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 220));
+
+      expect(opened).toEqual([]);
+      expect(row?.classList.contains("is-selected")).toBe(true);
+      expect(row?.getAttribute("aria-pressed")).toBe("true");
+      expect(window.document.body.textContent).toContain("provenance known");
+      expect(window.document.body.textContent).toContain("13 chars");
+
+      row?.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+
+      expect(row?.classList.contains("is-selected")).toBe(false);
+      expect(row?.getAttribute("aria-pressed")).toBe("false");
+      expect(window.document.body.textContent).not.toContain("provenance known");
+      expect(window.document.body.textContent).not.toContain("13 chars");
+
+      statusBar.destroy();
+    });
+  });
 });
+
+async function withContextStatusBarDom(run: (window: Window) => Promise<void>): Promise<void> {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const window = new Window();
+  installObsidianElementHelpers(window);
+  globalThis.window = window as any;
+  globalThis.document = window.document as unknown as Document;
+  globalThis.navigator = {
+    clipboard: { writeText: async () => {} },
+  } as unknown as Navigator;
+
+  try {
+    await run(window);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+    globalThis.navigator = previousNavigator;
+  }
+}
+
+function installObsidianElementHelpers(window: Window): void {
+  const proto = window.HTMLElement.prototype as unknown as {
+    addClass: (cls: string) => void;
+    toggleClass: (cls: string, enabled: boolean) => void;
+    empty: () => void;
+    setText: (text: string) => void;
+    createDiv: (options?: { cls?: string; text?: string }) => HTMLElement;
+    createSpan: (options?: { cls?: string; text?: string }) => HTMLElement;
+    createEl: (
+      tag: string,
+      options?: { cls?: string; text?: string; attr?: Record<string, string> }
+    ) => HTMLElement;
+  };
+  proto.addClass = function addClass(this: any, cls: string): void {
+    this.classList.add(cls);
+  };
+  proto.toggleClass = function toggleClass(this: any, cls: string, enabled: boolean): void {
+    this.classList.toggle(cls, enabled);
+  };
+  proto.empty = function empty(this: any): void {
+    this.replaceChildren();
+  };
+  proto.setText = function setText(this: any, text: string): void {
+    this.textContent = text;
+  };
+  proto.createDiv = function createDiv(
+    this: any,
+    options: { cls?: string; text?: string } = {}
+  ): HTMLElement {
+    return this.createEl("div", options);
+  };
+  proto.createSpan = function createSpan(
+    this: any,
+    options: { cls?: string; text?: string } = {}
+  ): HTMLElement {
+    return this.createEl("span", options);
+  };
+  proto.createEl = function createEl(
+    this: any,
+    tag: string,
+    options: { cls?: string; text?: string; attr?: Record<string, string> } = {}
+  ): HTMLElement {
+    const el = window.document.createElement(tag);
+    if (options.cls) {
+      el.className = options.cls;
+    }
+    if (options.text) {
+      el.textContent = options.text;
+    }
+    for (const [key, value] of Object.entries(options.attr ?? {})) {
+      el.setAttribute(key, value);
+    }
+    this.append(el as any);
+    return el as unknown as HTMLElement;
+  };
+}

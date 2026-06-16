@@ -1,19 +1,23 @@
 import { MarkdownView, Notice, Plugin } from "obsidian";
 import {
-  OpenCodeSettings,
   DEFAULT_SETTINGS,
   OPENCODE_VIEW_TYPE,
   createServerEndpoint,
+  type OpenCodeSettings,
 } from "./types";
 import { OpenCodeView } from "./ui/OpenCodeView";
 import { ViewManager } from "./ui/ViewManager";
 import { OpenCodeSettingTab } from "./settings/SettingsTab";
-import { ServerDiagnostics, ServerManager, ServerState } from "./server/ServerManager";
+import { ServerManager, type ServerDiagnostics, type ServerState } from "./server/ServerManager";
 import { registerOpenCodeIcons, OPENCODE_ICON_NAME } from "./icons";
 import { OpenCodeClient } from "./client/OpenCodeClient";
 import { ContextManager } from "./context/ContextManager";
+import { ContextItemNavigator } from "./context/ContextItemNavigator";
+import { CurrentContextSession } from "./context/ContextSessionResolver";
 import { ContextStatusBar } from "./context/ContextStatusBar";
 import { getSelectionLineRange } from "./context/SelectionLineRange";
+import type { GraphIndex } from "./graph/GraphIndex";
+import { createObsidianGraphIndex, isMarkdownTFile, toGraphFile } from "./graph/ObsidianGraphIndex";
 import { ExecutableResolver } from "./server/ExecutableResolver";
 import { OpenCodeProxy } from "./proxy/OpenCodeProxy";
 import {
@@ -34,8 +38,11 @@ export default class OpenCodePlugin extends Plugin {
   private processManager: ServerManager;
   private stateChangeCallbacks: Array<(state: ServerState) => void> = [];
   private openCodeClient: OpenCodeClient;
+  private currentContextSession: CurrentContextSession;
   private contextManager: ContextManager;
+  private contextItemNavigator: ContextItemNavigator;
   private contextStatusBar: ContextStatusBar;
+  private graphIndex: GraphIndex;
   private viewManager: ViewManager;
   private cachedIframeUrl: string | null = null;
   private lastBaseUrl: string | null = null;
@@ -109,21 +116,30 @@ export default class OpenCodePlugin extends Plugin {
     );
     this.lastBaseUrl = this.getServerUrl();
     this.lastApiBaseUrl = this.getApiBaseUrl();
+    this.currentContextSession = new CurrentContextSession({
+      getCachedIframeUrl: () => this.cachedIframeUrl,
+      setCachedIframeUrl: (url) => this.setCachedIframeUrl(url),
+      resolveSessionId: (url) => this.openCodeClient.resolveSessionId(url),
+    });
+    this.graphIndex = createObsidianGraphIndex(this.app);
+    this.graphIndex.bootstrap();
+    this.registerGraphIndexEvents();
 
     this.contextManager = new ContextManager({
       app: this.app,
       settings: this.settings,
       client: this.openCodeClient,
       getServerState: () => this.getServerState(),
-      getCachedIframeUrl: () => this.cachedIframeUrl,
-      setCachedIframeUrl: (url) => this.setCachedIframeUrl(url),
+      currentSession: this.currentContextSession,
       registerEvent: (ref) => this.registerEvent(ref),
     });
+    this.contextItemNavigator = new ContextItemNavigator(this.app, this.graphIndex);
     this.contextStatusBar = new ContextStatusBar({
       addStatusBarItem: () => this.addStatusBarItem(),
       getItems: () => this.contextManager.getItems(),
       onItemsChanged: (callback) => this.contextManager.onItemsChanged(callback),
-      openItem: (item) => this.app.workspace.openLinkText(item.sourceFile, "", false),
+      resolveItem: (item) => this.contextItemNavigator.resolve(item),
+      openItem: (item) => this.contextItemNavigator.open(item),
       removeItem: (itemId) => this.contextManager.removeItemForCurrentSession(itemId),
     });
 
@@ -132,8 +148,7 @@ export default class OpenCodePlugin extends Plugin {
       settings: this.settings,
       client: this.openCodeClient,
       contextManager: this.contextManager,
-      getCachedIframeUrl: () => this.cachedIframeUrl,
-      setCachedIframeUrl: (url) => this.setCachedIframeUrl(url),
+      currentSession: this.currentContextSession,
       getServerState: () => this.getServerState(),
     });
 
@@ -470,10 +485,6 @@ export default class OpenCodePlugin extends Plugin {
     }
   }
 
-  refreshContextForView(view: OpenCodeView): void {
-    void this.contextManager.refreshContextForView(view);
-  }
-
   recordIframeDiagnostics(payload: unknown): void {
     this.runtimeDiagnostics.iframe = payload;
     this.logger.info("iframe diagnostics", payload);
@@ -493,6 +504,45 @@ export default class OpenCodePlugin extends Plugin {
       this.app.workspace.on("quit", () => {
         this.logger.info("obsidian quitting; performing cleanup");
         this.stopServer();
+      })
+    );
+  }
+
+  private registerGraphIndexEvents(): void {
+    this.registerEvent(
+      this.app.metadataCache.on("changed", (file, _data, cache) => {
+        this.graphIndex.changed(toGraphFile(file), cache);
+      })
+    );
+    this.registerEvent(
+      this.app.metadataCache.on("resolve", () => {
+        this.graphIndex.resolve();
+      })
+    );
+    this.registerEvent(
+      this.app.metadataCache.on("deleted", (file) => {
+        this.graphIndex.deleted(toGraphFile(file));
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("create", (file) => {
+        if (isMarkdownTFile(file)) {
+          this.graphIndex.created(toGraphFile(file));
+        }
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (isMarkdownTFile(file)) {
+          this.graphIndex.renamed(toGraphFile(file), oldPath);
+        }
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("delete", (file) => {
+        if (isMarkdownTFile(file)) {
+          this.graphIndex.deleted(toGraphFile(file));
+        }
       })
     );
   }

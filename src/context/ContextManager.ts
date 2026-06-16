@@ -1,19 +1,15 @@
 import { App, EventRef, MarkdownView, WorkspaceLeaf } from "obsidian";
-import { ContextItem, OpenCodeSettings, OPENCODE_VIEW_TYPE } from "../types";
-import { CONTEXT_MESSAGE_PREFIX, OpenCodeClient, OpenCodeMessage } from "../client/OpenCodeClient";
+import { OPENCODE_VIEW_TYPE, type ContextItem, type OpenCodeSettings } from "../types";
+import { OpenCodeClient } from "../client/OpenCodeClient";
 import { WorkspaceContext } from "./WorkspaceContext";
-import { formatWorkspaceContext } from "./ContextFormatter";
-import { AutoSelectionContextSource } from "./AutoSelectionContextSource";
-import { BacklinkContextSource } from "./BacklinkContextSource";
-import {
-  CursorContextSnapshot,
-  CursorContextSource,
-  formatCursorContext,
-} from "./CursorContextSource";
-import { OpenCodeView } from "../ui/OpenCodeView";
-import { ServerState } from "../server/types";
+import { formatWorkspaceContext, type WorkspaceContextSnapshot } from "./ContextFormatter";
+import { ContextAutoSources } from "./ContextAutoSources";
+import { formatCursorContext, type CursorContextSnapshot } from "./CursorContextSource";
+import { ContextRegistry } from "./ContextRegistry";
+import { ContextSyncer } from "./ContextSyncer";
+import { CurrentContextSession } from "./ContextSessionResolver";
+import type { ServerState } from "../server/types";
 
-const MAX_ACTIVE_CONTEXT_ITEMS = 50;
 const WORKSPACE_CONTEXT_LABEL = "Workspace context";
 const WORKSPACE_CONTEXT_SOURCE = "Obsidian workspace";
 const BACKLINK_CONTEXT_LABEL_PREFIX = "Backlinks:";
@@ -24,8 +20,7 @@ type ContextManagerDeps = {
   settings: OpenCodeSettings;
   client: OpenCodeClient;
   getServerState: () => ServerState;
-  getCachedIframeUrl: () => string | null;
-  setCachedIframeUrl: (url: string | null) => void;
+  currentSession: CurrentContextSession;
   registerEvent: (ref: EventRef) => void;
 };
 
@@ -33,32 +28,31 @@ export class ContextManager {
   private app: App;
   private settings: OpenCodeSettings;
   private client: OpenCodeClient;
+  private syncer: ContextSyncer;
   private workspaceContext: WorkspaceContext;
   private getServerState: () => ServerState;
-  private getCachedIframeUrl: () => string | null;
-  private setCachedIframeUrl: (url: string | null) => void;
+  private currentSession: CurrentContextSession;
   private registerEvent: (ref: EventRef) => void;
 
   private contextEventRefs: EventRef[] = [];
   private contextRefreshTimer: number | null = null;
-  private items: ContextItem[] = [];
-  private itemChangeCallbacks: Array<(items: ContextItem[]) => void> = [];
-  private autoSelectionSource: AutoSelectionContextSource;
-  private backlinkSource: BacklinkContextSource;
-  private cursorSource: CursorContextSource;
-  private activeMarkdownPath: string | null = null;
+  private registry = new ContextRegistry();
+  private autoSources: ContextAutoSources;
+  private autoItemOperations = new Map<string, Promise<unknown>>();
 
   constructor(deps: ContextManagerDeps) {
     this.app = deps.app;
     this.settings = deps.settings;
     this.client = deps.client;
+    this.syncer = new ContextSyncer(this.client);
     this.workspaceContext = new WorkspaceContext(this.app);
     this.getServerState = deps.getServerState;
-    this.getCachedIframeUrl = deps.getCachedIframeUrl;
-    this.setCachedIframeUrl = deps.setCachedIframeUrl;
+    this.currentSession = deps.currentSession;
     this.registerEvent = deps.registerEvent;
-    this.autoSelectionSource = new AutoSelectionContextSource({
-      isEnabled: () => this.settings.autoAddSelectionContext,
+    this.autoSources = new ContextAutoSources({
+      isSelectionEnabled: () => this.settings.autoAddSelectionContext,
+      isBacklinksEnabled: () => this.settings.autoAddBacklinksContext,
+      isCursorEnabled: () => this.settings.autoAddCursorContext,
       addSelection: (selection) =>
         this.addSelectionForCurrentSession(
           selection.text,
@@ -66,16 +60,11 @@ export class ContextManager {
           selection.selectionStartLine,
           selection.selectionEndLine
         ),
-    });
-    this.backlinkSource = new BacklinkContextSource({
-      isEnabled: () => this.settings.autoAddBacklinksContext,
-      addBacklinks: (params) => this.addBacklinksForCurrentSession(params.filePath, params.text),
+      addBacklinks: (filePath, text) => this.addBacklinksForCurrentSession(filePath, text),
       removeBacklinks: () => this.removeBacklinksForCurrentSession(),
-    });
-    this.cursorSource = new CursorContextSource({
-      isEnabled: () => this.settings.autoAddCursorContext,
       addCursor: (cursor) => this.addCursorForCurrentSession(cursor),
       removeCursor: () => this.removeCursorForCurrentSession(),
+      getResolvedLinks: () => this.app.metadataCache.resolvedLinks,
     });
   }
 
@@ -101,17 +90,20 @@ export class ContextManager {
 
     const activeLeafRef = this.app.workspace.on("active-leaf-change", (leaf) => {
       if (leaf?.view instanceof MarkdownView) {
-        this.activeMarkdownPath = leaf.view.file?.path ?? null;
         this.workspaceContext.trackViewSelection(leaf.view);
-        void this.refreshBacklinks();
-        void this.refreshCursor(leaf.view);
+        void this.autoSources.handleActiveMarkdownChanged({
+          filePath: leaf.view.file?.path ?? null,
+          cursor: this.getCursorSnapshot(leaf.view),
+        });
       }
       this.scheduleRefresh(0);
     });
     const fileOpenRef = this.app.workspace.on("file-open", (file) => {
-      this.activeMarkdownPath = file?.path ?? null;
-      void this.refreshBacklinks();
-      void this.refreshCursor();
+      const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+      void this.autoSources.handleActiveMarkdownChanged({
+        filePath: file?.path ?? null,
+        cursor: this.getCursorSnapshot(markdownView),
+      });
       this.scheduleRefresh();
     });
     const layoutChangeRef = this.app.workspace.on("layout-change", () => {
@@ -119,19 +111,20 @@ export class ContextManager {
     });
     const editorChangeRef = this.app.workspace.on("editor-change", (_editor, view) => {
       if (view instanceof MarkdownView) {
-        this.activeMarkdownPath = view.file?.path ?? null;
         const selection = this.workspaceContext.trackViewSelection(view);
-        void this.autoSelectionSource.handleSelection(selection);
-        void this.refreshBacklinks();
-        void this.refreshCursor(view);
+        void this.autoSources.handleEditorChanged({
+          filePath: view.file?.path ?? null,
+          selection,
+          cursor: this.getCursorSnapshot(view),
+        });
       }
       this.scheduleRefresh(500);
     });
     const metadataChangeRef = this.app.metadataCache.on("changed", () => {
-      void this.refreshBacklinks();
+      void this.autoSources.handleMetadataChanged();
     });
     const metadataResolveRef = this.app.metadataCache.on("resolve", () => {
-      void this.refreshBacklinks();
+      void this.autoSources.handleMetadataChanged();
     });
 
     this.contextEventRefs = [
@@ -154,10 +147,7 @@ export class ContextManager {
       window.clearTimeout(this.contextRefreshTimer);
       this.contextRefreshTimer = null;
     }
-    this.autoSelectionSource.reset();
-    this.backlinkSource.reset();
-    this.cursorSource.reset();
-    this.activeMarkdownPath = null;
+    this.autoSources.reset();
   }
 
   private scheduleRefresh(delayMs: number = 300): void {
@@ -202,16 +192,14 @@ export class ContextManager {
 
   async handleServerRunning(): Promise<void> {
     const activeLeaf = this.app.workspace.activeLeaf;
-    if (activeLeaf?.view.getViewType() === OPENCODE_VIEW_TYPE) {
-      await this.refreshContext(activeLeaf);
-    }
-  }
-
-  async refreshContextForView(_view: OpenCodeView): Promise<void> {
-    if (!this.settings.injectWorkspaceContext) {
+    if (!activeLeaf || activeLeaf.view.getViewType() !== OPENCODE_VIEW_TYPE) {
       return;
     }
 
+    await this.refreshContext(activeLeaf);
+  }
+
+  async refreshVisibleOpenCodeContext(): Promise<void> {
     const leaf = this.getLeafForRefresh();
     if (!leaf) {
       return;
@@ -221,18 +209,11 @@ export class ContextManager {
   }
 
   getItems(): ContextItem[] {
-    return [...this.items];
+    return this.registry.getItems();
   }
 
   onItemsChanged(callback: (items: ContextItem[]) => void): () => void {
-    this.itemChangeCallbacks.push(callback);
-    callback(this.getItems());
-    return () => {
-      const index = this.itemChangeCallbacks.indexOf(callback);
-      if (index >= 0) {
-        this.itemChangeCallbacks.splice(index, 1);
-      }
-    };
+    return this.registry.onItemsChanged(callback);
   }
 
   async addManual(
@@ -259,12 +240,7 @@ export class ContextManager {
     startLine?: number,
     endLine?: number
   ): Promise<ContextItem | null> {
-    const iframeUrl = this.getCachedIframeUrl();
-    if (!iframeUrl) {
-      return null;
-    }
-
-    const sessionId = this.client.resolveSessionId(iframeUrl);
+    const sessionId = this.currentSession.getCurrentSessionId();
     if (!sessionId) {
       return null;
     }
@@ -284,13 +260,9 @@ export class ContextManager {
     label: string;
     text: string;
     sourceFile: string;
+    navigationSourceFile?: string;
   }): Promise<ContextItem | null> {
-    const iframeUrl = this.getCachedIframeUrl();
-    if (!iframeUrl) {
-      return null;
-    }
-
-    const sessionId = this.client.resolveSessionId(iframeUrl);
+    const sessionId = this.currentSession.getCurrentSessionId();
     if (!sessionId) {
       return null;
     }
@@ -301,6 +273,7 @@ export class ContextManager {
       label: params.label,
       text: params.text,
       sourceFile: params.sourceFile,
+      navigationSourceFile: params.navigationSourceFile,
     });
   }
 
@@ -308,12 +281,7 @@ export class ContextManager {
     filePath: string,
     text: string
   ): Promise<ContextItem | null> {
-    const iframeUrl = this.getCachedIframeUrl();
-    if (!iframeUrl) {
-      return null;
-    }
-
-    const sessionId = this.client.resolveSessionId(iframeUrl);
+    const sessionId = this.currentSession.getCurrentSessionId();
     if (!sessionId) {
       return null;
     }
@@ -329,12 +297,7 @@ export class ContextManager {
   }
 
   private async removeBacklinksForCurrentSession(): Promise<boolean> {
-    const iframeUrl = this.getCachedIframeUrl();
-    if (!iframeUrl) {
-      return false;
-    }
-
-    const sessionId = this.client.resolveSessionId(iframeUrl);
+    const sessionId = this.currentSession.getCurrentSessionId();
     if (!sessionId) {
       return false;
     }
@@ -346,12 +309,7 @@ export class ContextManager {
   private async addCursorForCurrentSession(
     cursor: CursorContextSnapshot
   ): Promise<ContextItem | null> {
-    const iframeUrl = this.getCachedIframeUrl();
-    if (!iframeUrl) {
-      return null;
-    }
-
-    const sessionId = this.client.resolveSessionId(iframeUrl);
+    const sessionId = this.currentSession.getCurrentSessionId();
     if (!sessionId) {
       return null;
     }
@@ -369,12 +327,7 @@ export class ContextManager {
   }
 
   private async removeCursorForCurrentSession(): Promise<boolean> {
-    const iframeUrl = this.getCachedIframeUrl();
-    if (!iframeUrl) {
-      return false;
-    }
-
-    const sessionId = this.client.resolveSessionId(iframeUrl);
+    const sessionId = this.currentSession.getCurrentSessionId();
     if (!sessionId) {
       return false;
     }
@@ -384,30 +337,22 @@ export class ContextManager {
   }
 
   async removeItem(sessionId: string, itemId: string): Promise<boolean> {
-    const item = this.items.find((candidate) => candidate.id === itemId);
+    const item = this.registry.find(itemId);
     if (!item) {
       return false;
     }
 
-    if (item.messageId && item.partId) {
-      const ignored = await this.client.ignorePart(sessionId, item.messageId, item.partId);
-      if (!ignored) {
-        return false;
-      }
+    const removed = await this.syncer.remove(sessionId, item);
+    if (!removed) {
+      return false;
     }
 
-    this.items = this.items.filter((candidate) => candidate.id !== itemId);
-    this.emitItemsChanged();
+    this.registry.remove(itemId);
     return true;
   }
 
   async removeItemForCurrentSession(itemId: string): Promise<boolean> {
-    const iframeUrl = this.getCachedIframeUrl();
-    if (!iframeUrl) {
-      return false;
-    }
-
-    const sessionId = this.client.resolveSessionId(iframeUrl);
+    const sessionId = this.currentSession.getCurrentSessionId();
     if (!sessionId) {
       return false;
     }
@@ -416,19 +361,13 @@ export class ContextManager {
   }
 
   async restoreFromServer(sessionId: string): Promise<ContextItem[]> {
-    const messages = await this.client.listSessionMessages(sessionId);
-    if (!messages) {
-      this.items = [];
-      this.emitItemsChanged();
+    const items = await this.syncer.restore(sessionId);
+    if (!items) {
+      this.registry.clear();
       return this.getItems();
     }
 
-    this.items = messages
-      .flatMap((message) => this.restoreItemsFromMessage(message))
-      .slice(0, MAX_ACTIVE_CONTEXT_ITEMS);
-
-    this.emitItemsChanged();
-    return this.getItems();
+    return this.registry.replaceAll(await this.normalizeRestoredItems(sessionId, items));
   }
 
   private async refreshContext(leaf: WorkspaceLeaf): Promise<void> {
@@ -440,20 +379,13 @@ export class ContextManager {
       return;
     }
 
-    const view = leaf.view instanceof OpenCodeView ? leaf.view : null;
-    const iframeUrl = this.getCachedIframeUrl() ?? view?.getIframeUrl();
-    if (!iframeUrl) {
-      return;
-    }
-
-    const sessionId = this.client.resolveSessionId(iframeUrl);
+    const sessionId = this.currentSession.getSessionIdForLeaf(leaf);
     if (!sessionId) {
       return;
     }
 
-    this.setCachedIframeUrl(iframeUrl);
-
-    const contextText = formatWorkspaceContext(this.workspaceContext.gatherContext(), {
+    const snapshot = this.workspaceContext.gatherContext();
+    const contextText = formatWorkspaceContext(snapshot, {
       maxNotes: this.settings.maxNotesInContext,
       maxSelectionLength: this.settings.maxSelectionLength,
     });
@@ -469,6 +401,7 @@ export class ContextManager {
       label: WORKSPACE_CONTEXT_LABEL,
       text: contextText,
       sourceFile: WORKSPACE_CONTEXT_SOURCE,
+      ...this.getWorkspaceNavigationTarget(snapshot),
     });
   }
 
@@ -478,6 +411,7 @@ export class ContextManager {
     label: string;
     text: string;
     sourceFile: string;
+    navigationSourceFile?: string;
     startLine?: number;
     endLine?: number;
   }): Promise<ContextItem | null> {
@@ -487,55 +421,56 @@ export class ContextManager {
     }
 
     if (params.type === "auto") {
-      await this.removeAutoItem(params.sessionId, params.label, params.sourceFile);
+      return this.replaceAutoItem({ ...params, type: "auto", text });
     }
 
-    if (this.items.length >= MAX_ACTIVE_CONTEXT_ITEMS) {
+    if (!this.registry.canAdd()) {
       return null;
     }
 
-    const ref = await this.client.addContextMessage(params.sessionId, text);
-    if (!ref) {
-      return null;
-    }
+    const item = await this.syncer.add({ ...params, text });
 
-    const item: ContextItem = {
-      id: this.createItemId(ref.messageId, ref.partId),
-      type: params.type,
-      label: params.label,
-      text,
-      sourceFile: params.sourceFile,
-      startLine: params.startLine,
-      endLine: params.endLine,
-      messageId: ref.messageId,
-      partId: ref.partId,
-      createdAt: Date.now(),
-    };
-
-    this.items = [...this.items, item];
-    this.emitItemsChanged();
-    return item;
+    return item ? this.registry.add(item) : null;
   }
 
-  private restoreItemsFromMessage(message: OpenCodeMessage): ContextItem[] {
-    return message.parts
-      .filter((part) => part.type === "text")
-      .filter((part) => typeof part.text === "string")
-      .filter((part) => part.text!.startsWith(CONTEXT_MESSAGE_PREFIX))
-      .filter((part) => !part.ignored)
-      .map((part) => {
-        const text = this.stripContextMarker(part.text!);
-        return {
-          id: this.createItemId(message.info.id, part.id),
-          type: "manual",
-          label: "Restored context",
-          text,
-          sourceFile: "OpenCode session",
-          messageId: message.info.id,
-          partId: part.id,
-          createdAt: part.time?.start ?? Date.now(),
-        };
-      });
+  private async replaceAutoItem(params: {
+    sessionId: string;
+    type: "auto";
+    label: string;
+    text: string;
+    sourceFile: string;
+    navigationSourceFile?: string;
+    startLine?: number;
+    endLine?: number;
+  }): Promise<ContextItem | null> {
+    const key = this.autoItemKey(params.sessionId, params.label, params.sourceFile);
+    return this.runAutoItemOperation(key, async () => {
+      const items = this.findAutoItems(params.label, params.sourceFile);
+      const current = this.latestItem(items);
+
+      if (current?.text === params.text) {
+        for (const stale of items) {
+          if (stale.id !== current.id) {
+            await this.removeItem(params.sessionId, stale.id);
+          }
+        }
+        return current;
+      }
+
+      for (const item of items) {
+        const removed = await this.removeItem(params.sessionId, item.id);
+        if (!removed) {
+          return null;
+        }
+      }
+
+      if (!this.registry.canAdd()) {
+        return null;
+      }
+
+      const item = await this.syncer.add(params);
+      return item ? this.registry.add(item) : null;
+    });
   }
 
   private async removeAutoItem(
@@ -543,16 +478,18 @@ export class ContextManager {
     label: string,
     sourceFile: string
   ): Promise<void> {
-    const items = this.items.filter(
-      (item) => item.type === "auto" && item.label === label && item.sourceFile === sourceFile
-    );
-    for (const item of items) {
-      await this.removeItem(sessionId, item.id);
-    }
+    const key = this.autoItemKey(sessionId, label, sourceFile);
+    await this.runAutoItemOperation(key, async () => {
+      const items = this.findAutoItems(label, sourceFile);
+      for (const item of items) {
+        await this.removeItem(sessionId, item.id);
+      }
+      return null;
+    });
   }
 
   private async removeBacklinkAutoItems(sessionId: string): Promise<void> {
-    const items = this.items.filter(
+    const items = this.registry.findAll(
       (item) => item.type === "auto" && item.label.startsWith(BACKLINK_CONTEXT_LABEL_PREFIX)
     );
     for (const item of items) {
@@ -561,26 +498,11 @@ export class ContextManager {
   }
 
   private async removeCursorAutoItems(sessionId: string): Promise<void> {
-    const items = this.items.filter(
+    const items = this.registry.findAll(
       (item) => item.type === "auto" && item.label.startsWith(CURSOR_CONTEXT_LABEL_PREFIX)
     );
     for (const item of items) {
       await this.removeItem(sessionId, item.id);
-    }
-  }
-
-  private stripContextMarker(text: string): string {
-    return text.slice(CONTEXT_MESSAGE_PREFIX.length).replace(/^\n/, "");
-  }
-
-  private createItemId(messageId: string, partId: string): string {
-    return `${messageId}:${partId}`;
-  }
-
-  private emitItemsChanged(): void {
-    const items = this.getItems();
-    for (const callback of this.itemChangeCallbacks) {
-      callback(items);
     }
   }
 
@@ -594,16 +516,100 @@ export class ContextManager {
     return `${sourceFile}:${startLine}-${endLine}`;
   }
 
-  private async refreshBacklinks(): Promise<void> {
-    await this.backlinkSource.refresh(
-      this.activeMarkdownPath,
-      this.app.metadataCache.resolvedLinks
+  private async normalizeRestoredItems(
+    sessionId: string,
+    items: ContextItem[]
+  ): Promise<ContextItem[]> {
+    const result: ContextItem[] = [];
+    const autoGroups = new Map<string, ContextItem[]>();
+
+    for (const item of items) {
+      if (item.type !== "auto") {
+        result.push(item);
+        continue;
+      }
+
+      const key = this.autoItemKey(sessionId, item.label, item.sourceFile);
+      const group = autoGroups.get(key) ?? [];
+      group.push(item);
+      autoGroups.set(key, group);
+    }
+
+    for (const group of autoGroups.values()) {
+      const latest = this.latestItem(group);
+      if (!latest) {
+        continue;
+      }
+
+      result.push(latest);
+      for (const stale of group) {
+        if (stale.id === latest.id) {
+          continue;
+        }
+
+        const removed = await this.syncer.remove(sessionId, stale);
+        if (!removed) {
+          result.push(stale);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  private runAutoItemOperation<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.autoItemOperations.get(key) ?? Promise.resolve();
+    const current = previous
+      .catch(() => undefined)
+      .then(operation)
+      .finally(() => {
+        if (this.autoItemOperations.get(key) === current) {
+          this.autoItemOperations.delete(key);
+        }
+      });
+    this.autoItemOperations.set(key, current);
+    return current;
+  }
+
+  private findAutoItems(label: string, sourceFile: string): ContextItem[] {
+    return this.registry.findAll(
+      (item) => item.type === "auto" && item.label === label && item.sourceFile === sourceFile
     );
   }
 
-  private async refreshCursor(view?: MarkdownView | null): Promise<void> {
-    const markdownView = view ?? this.app.workspace.getActiveViewOfType(MarkdownView);
-    await this.cursorSource.refresh(this.getCursorSnapshot(markdownView));
+  private latestItem(items: ContextItem[]): ContextItem | null {
+    return items.reduce<ContextItem | null>((latest, item) => {
+      if (!latest || item.createdAt >= latest.createdAt) {
+        return item;
+      }
+      return latest;
+    }, null);
+  }
+
+  private autoItemKey(sessionId: string, label: string, sourceFile: string): string {
+    return JSON.stringify([sessionId, label, sourceFile]);
+  }
+
+  private getWorkspaceNavigationTarget(snapshot: WorkspaceContextSnapshot): {
+    navigationSourceFile?: string;
+    startLine?: number;
+    endLine?: number;
+  } {
+    if (snapshot.selection) {
+      return {
+        navigationSourceFile: snapshot.selection.sourcePath,
+        startLine: snapshot.selection.selectionStartLine,
+        endLine: snapshot.selection.selectionEndLine,
+      };
+    }
+
+    if (snapshot.openNotePaths.length === 1) {
+      return {
+        navigationSourceFile: snapshot.openNotePaths[0],
+      };
+    }
+
+    return {};
   }
 
   private getCursorSnapshot(view: MarkdownView | null): CursorContextSnapshot | null {

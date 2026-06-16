@@ -1,6 +1,11 @@
 import { createLogger } from "../debug/RuntimeDiagnostics";
+import {
+  CONTEXT_MESSAGE_PREFIX,
+  formatContextMessageText,
+  type ContextMessageProvenance,
+} from "../context/ContextProvenance";
 
-export const CONTEXT_MESSAGE_PREFIX = "<!-- oc-ctx -->";
+export { CONTEXT_MESSAGE_PREFIX, type ContextMessageProvenance };
 
 type OpenCodePart = {
   id: string;
@@ -138,19 +143,20 @@ export class OpenCodeClient {
 
   async addContextMessage(
     sessionId: string,
-    contextText: string
+    contextText: string,
+    provenance?: ContextMessageProvenance
   ): Promise<OpenCodeContextMessageRef | null> {
     if (contextText.trim().length === 0) {
       return null;
     }
 
-    const text = `${CONTEXT_MESSAGE_PREFIX}\n${contextText}`;
+    const text = formatContextMessageText(contextText, provenance);
     const result = await this.request<OpenCodeMessageWithParts>(
       "POST",
       `/session/${sessionId}/message`,
       {
         noReply: true,
-        parts: [{ type: "text", text }],
+        parts: [{ type: "text", text, synthetic: true }],
       }
     );
 

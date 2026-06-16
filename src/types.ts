@@ -16,6 +16,7 @@ export interface ServerEndpoint {
 }
 
 export type ContextItemType = "manual" | "auto" | "inbound";
+export type ContextProvenanceStatus = "known" | "uncertain";
 
 export interface ContextItem {
   id: string;
@@ -23,10 +24,13 @@ export interface ContextItem {
   label: string;
   text: string;
   sourceFile: string;
+  navigationSourceFile?: string;
   startLine?: number;
   endLine?: number;
   messageId?: string;
   partId?: string;
+  textLength?: number;
+  provenanceStatus?: ContextProvenanceStatus;
   createdAt: number;
 }
 
@@ -35,6 +39,7 @@ export interface ContextSuggestion {
   label: string;
   text: string;
   sourceFile: string;
+  navigationSourceFile?: string;
   startLine?: number;
   endLine?: number;
   priority: number;

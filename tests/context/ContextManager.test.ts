@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, mock, test } from "bun:test";
 import type { App } from "obsidian";
 import type { OpenCodeClient, OpenCodeMessage } from "../../src/client/OpenCodeClient";
 import type { ContextManager as ContextManagerClass } from "../../src/context/ContextManager";
+import { CurrentContextSession } from "../../src/context/ContextSessionResolver";
+import { formatContextMessageText } from "../../src/context/ContextProvenance";
 import type { OpenCodeSettings } from "../../src/types";
 
 mock.module("obsidian", () => ({
@@ -118,9 +120,28 @@ function createManager(client: Partial<OpenCodeClient>): ContextManagerClass {
     settings: createSettings(),
     client: client as OpenCodeClient,
     getServerState: () => "running",
-    getCachedIframeUrl: () => null,
-    setCachedIframeUrl: () => {},
+    currentSession: createCurrentSession(null),
     registerEvent: () => {},
+  });
+}
+
+function createCurrentSession(cachedUrl: string | null): CurrentContextSession {
+  return createDynamicCurrentSession(
+    () => cachedUrl,
+    (url) => {
+      cachedUrl = url;
+    }
+  );
+}
+
+function createDynamicCurrentSession(
+  getCachedIframeUrl: () => string | null,
+  setCachedIframeUrl: (url: string | null) => void = () => {}
+): CurrentContextSession {
+  return new CurrentContextSession({
+    getCachedIframeUrl,
+    setCachedIframeUrl,
+    resolveSessionId: (url) => url.match(/\/session\/([^/?#]+)/)?.[1] ?? null,
   });
 }
 
@@ -164,15 +185,13 @@ describe("ContextManager", () => {
       app: createApp(),
       settings: createSettings(),
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async (sessionId: string, text: string) => {
           calls.push({ sessionId, text });
           return { messageId: "msg_1", partId: "prt_1" };
         },
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
-      setCachedIframeUrl: () => {},
+      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
       registerEvent: () => {},
     });
 
@@ -193,15 +212,13 @@ describe("ContextManager", () => {
       app: createApp(),
       settings: createSettings(),
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async (sessionId: string, text: string) => {
           calls.push({ sessionId, text });
           return { messageId: "msg_1", partId: "prt_1" };
         },
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
-      setCachedIframeUrl: () => {},
+      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
       registerEvent: () => {},
     });
 
@@ -227,15 +244,13 @@ describe("ContextManager", () => {
       app: createApp(),
       settings: createSettings(),
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async (_sessionId: string, text: string) => {
           calls.push(text);
           return { messageId: "msg_1", partId: "prt_1" };
         },
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
-      setCachedIframeUrl: () => {},
+      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
       registerEvent: () => {},
     });
 
@@ -255,15 +270,13 @@ describe("ContextManager", () => {
       app,
       settings,
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async (sessionId: string, text: string) => {
           calls.push({ sessionId, text });
           return { messageId: `msg_${calls.length}`, partId: `prt_${calls.length}` };
         },
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
-      setCachedIframeUrl: () => {},
+      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
       registerEvent: () => {},
     });
 
@@ -295,15 +308,13 @@ describe("ContextManager", () => {
       app,
       settings,
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async (_sessionId: string, text: string) => {
           calls.push(text);
           return { messageId: "msg_1", partId: "prt_1" };
         },
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => iframeUrl,
-      setCachedIframeUrl: () => {},
+      currentSession: createDynamicCurrentSession(() => iframeUrl),
       registerEvent: () => {},
     });
 
@@ -328,15 +339,13 @@ describe("ContextManager", () => {
       app,
       settings,
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async (_sessionId: string, text: string) => {
           calls.push(text);
           return { messageId: "msg_1", partId: "prt_1" };
         },
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
-      setCachedIframeUrl: () => {},
+      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
       registerEvent: () => {},
     });
 
@@ -358,7 +367,6 @@ describe("ContextManager", () => {
       app,
       settings,
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async (sessionId: string, text: string) => {
           calls.push({ sessionId, text });
           return { messageId: `msg_${calls.length}`, partId: `prt_${calls.length}` };
@@ -366,8 +374,7 @@ describe("ContextManager", () => {
         ignorePart: async () => true,
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
-      setCachedIframeUrl: () => {},
+      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
       registerEvent: () => {},
     });
 
@@ -405,7 +412,6 @@ describe("ContextManager", () => {
       app,
       settings,
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async () => {
           messageIndex += 1;
           return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
@@ -416,8 +422,7 @@ describe("ContextManager", () => {
         },
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
-      setCachedIframeUrl: () => {},
+      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
       registerEvent: () => {},
     });
 
@@ -446,7 +451,6 @@ describe("ContextManager", () => {
       app,
       settings,
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async (sessionId: string, text: string) => {
           calls.push({ sessionId, text });
           return { messageId: `msg_${calls.length}`, partId: `prt_${calls.length}` };
@@ -454,8 +458,7 @@ describe("ContextManager", () => {
         ignorePart: async () => true,
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
-      setCachedIframeUrl: () => {},
+      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
       registerEvent: () => {},
     });
 
@@ -498,7 +501,6 @@ describe("ContextManager", () => {
       app,
       settings,
       client: {
-        resolveSessionId: () => "ses_1",
         addContextMessage: async () => {
           messageIndex += 1;
           return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
@@ -509,8 +511,7 @@ describe("ContextManager", () => {
         },
       } as unknown as OpenCodeClient,
       getServerState: () => "running",
-      getCachedIframeUrl: () => "http://127.0.0.1:4097/project/session/ses_1",
-      setCachedIframeUrl: () => {},
+      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
       registerEvent: () => {},
     });
 
@@ -567,7 +568,6 @@ describe("ContextManager", () => {
     const ignored: string[] = [];
     let messageIndex = 0;
     const manager = createManager({
-      resolveSessionId: () => "ses_1",
       addContextMessage: async () => {
         messageIndex += 1;
         return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
@@ -599,6 +599,148 @@ describe("ContextManager", () => {
         id: "msg_2:prt_2",
         type: "auto",
         text: "second",
+        sourceFile: "Obsidian workspace",
+      },
+    ]);
+  });
+
+  test("derives workspace navigation target from selection or a single open note", () => {
+    const manager = createManager({});
+
+    expect(
+      manager["getWorkspaceNavigationTarget"]({
+        openNotePaths: ["a.md", "b.md"],
+        selection: {
+          text: "selected",
+          sourcePath: "b.md",
+          selectionStartLine: 3,
+          selectionEndLine: 4,
+        },
+      })
+    ).toEqual({
+      navigationSourceFile: "b.md",
+      startLine: 3,
+      endLine: 4,
+    });
+
+    expect(
+      manager["getWorkspaceNavigationTarget"]({
+        openNotePaths: ["only.md"],
+        selection: null,
+      })
+    ).toEqual({
+      navigationSourceFile: "only.md",
+    });
+
+    expect(
+      manager["getWorkspaceNavigationTarget"]({
+        openNotePaths: ["a.md", "b.md"],
+        selection: null,
+      })
+    ).toEqual({});
+  });
+
+  test("serializes identical workspace auto context refreshes without duplicate posts", async () => {
+    const calls: string[] = [];
+    let messageIndex = 0;
+    let releaseFirstAdd!: () => void;
+    const firstAddGate = new Promise<void>((resolve) => {
+      releaseFirstAdd = resolve;
+    });
+    const manager = createManager({
+      addContextMessage: async (_sessionId: string, text: string) => {
+        calls.push(text);
+        if (calls.length === 1) {
+          await firstAddGate;
+        }
+        messageIndex += 1;
+        return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
+      },
+      ignorePart: async () => true,
+    });
+
+    const first = manager["addItem"]({
+      sessionId: "ses_1",
+      type: "auto",
+      label: "Workspace context",
+      text: "same",
+      sourceFile: "Obsidian workspace",
+    });
+    const second = manager["addItem"]({
+      sessionId: "ses_1",
+      type: "auto",
+      label: "Workspace context",
+      text: "same",
+      sourceFile: "Obsidian workspace",
+    });
+
+    releaseFirstAdd();
+    const [firstItem, secondItem] = await Promise.all([first, second]);
+
+    expect(calls).toEqual(["same"]);
+    expect(secondItem).toEqual(firstItem);
+    expect(manager.getItems()).toHaveLength(1);
+  });
+
+  test("restores one active auto context per public identity and ignores stale parts", async () => {
+    const ignored: string[] = [];
+    const messages: OpenCodeMessage[] = [
+      {
+        info: { id: "msg_1", sessionID: "ses_1" },
+        parts: [
+          {
+            id: "prt_1",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: "text",
+            text: formatContextMessageText("old", {
+              version: 1,
+              type: "auto",
+              label: "Workspace context",
+              sourceFile: "Obsidian workspace",
+              textLength: "old".length,
+              createdAt: 100,
+            }),
+          },
+        ],
+      },
+      {
+        info: { id: "msg_2", sessionID: "ses_1" },
+        parts: [
+          {
+            id: "prt_2",
+            sessionID: "ses_1",
+            messageID: "msg_2",
+            type: "text",
+            text: formatContextMessageText("new", {
+              version: 1,
+              type: "auto",
+              label: "Workspace context",
+              sourceFile: "Obsidian workspace",
+              textLength: "new".length,
+              createdAt: 200,
+            }),
+          },
+        ],
+      },
+    ];
+    const manager = createManager({
+      listSessionMessages: async () => messages,
+      ignorePart: async (_sessionId: string, messageId: string, partId: string) => {
+        ignored.push(`${messageId}:${partId}`);
+        return true;
+      },
+    });
+
+    await manager.restoreFromServer("ses_1");
+
+    expect(ignored).toEqual(["msg_1:prt_1"]);
+    expect(manager.getItems()).toMatchObject([
+      {
+        id: "msg_2:prt_2",
+        type: "auto",
+        label: "Workspace context",
+        text: "new",
         sourceFile: "Obsidian workspace",
       },
     ]);
@@ -650,6 +792,8 @@ describe("ContextManager", () => {
         sourceFile: "OpenCode session",
         messageId: "msg_1",
         partId: "prt_1",
+        textLength: "restored".length,
+        provenanceStatus: "uncertain",
         createdAt: 123,
       },
     ]);
