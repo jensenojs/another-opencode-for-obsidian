@@ -12,12 +12,13 @@ AI 编码代理在 obsidian-opencode 插件上工作的指南。
 2. Context provenance/control：当前 OpenCode session 的 context 必须可见、可诊断、可显式 ignore。
 3. GraphIndex：消费 Obsidian Vault + MetadataCache，提供 vault link graph 的事实 read model。
 4. GraphRAG derived layer：在 GraphIndex 之上做派生证据和候选关系，不把推荐策略塞进 GraphIndex。
-5. OpenCode event bridge：只在找到上游稳定 event surface 后接入 read-only session state。
+5. OpenCode event bridge：上游稳定 event surface 是 OpenCode dev 的 `GET /api/event` / `v2.event.subscribe`。第一阶段只接 read-only session diagnostics，不复制 Web UI 已有的 permission/question 弹窗。
 
 产品定位文档：
 
 - [docs/explorations/obsidian-opencode-product-positioning.md](docs/explorations/obsidian-opencode-product-positioning.md)
 - [docs/explorations/graphrag-known-to-unknown.md](docs/explorations/graphrag-known-to-unknown.md)
+- [docs/plans/opencode-event-source-contract.md](docs/plans/opencode-event-source-contract.md)
 
 **技术栈:** TypeScript · Obsidian Plugin API · esbuild · Node.js child_process / http
 
@@ -53,8 +54,9 @@ src/
 │       ├── PosixProcess.ts      # Unix/macOS 进程实现
 │       └── WindowsProcess.ts    # Windows 进程实现
 ├── proxy/
-│   └── OpenCodeProxy.ts   # 本地 HTTP 代理：剥离 CSP 头、注入键盘监听
+│   └── OpenCodeWebUiProxy.ts # 本地 Web UI HTTP 代理：剥离 CSP 头、注入键盘监听
 ├── bridge/
+│   ├── OpenCodeBridge.ts   # 广义 Obsidian/OpenCode bridge 入口：当前承接 read-only event diagnostics
 │   └── BridgeProtocol.ts  # 本项目自己的 iframe -> Obsidian postMessage 协议
 ├── debug/
 │   └── RuntimeDiagnostics.ts # XDG 日志、status.json、运行时路径
@@ -111,7 +113,15 @@ scripts/
 - 在 PATH 中查找 `opencode` 可执行文件
 - 支持用户手动指定路径（设置项 `opencodePath`）
 
-### `OpenCodeProxy.ts` — 本地 HTTP 代理
+### `OpenCodeBridge.ts` — Obsidian/OpenCode bridge 入口
+
+- 这是产品层 Obsidian/OpenCode 互联互通的入口模块，不能和 iframe Web UI 代理混名
+- 当前第一阶段只承接 read-only OpenCode event diagnostics：根据 server lifecycle 启停 `OpenCodeEventSource`
+- 未来 OpenCode event、hooks、TUI coexistence、以及 Obsidian 事实进入 OpenCode 的桥接入口优先放在这里讨论
+- 它不维护 ContextItem 生命周期，不解析 iframe URL，不转发 iframe HTTP 流量，不注入 HTML
+- 新增能力前必须先确认两边金标准：OpenCode OpenAPI/source contract，以及 Obsidian API/runtime facts
+
+### `OpenCodeWebUiProxy.ts` — 本地 Web UI HTTP 代理
 
 - 启动本地代理服务器（端口从 4097 起自动检测）
 - 转发请求到 opencode 服务器，同时在响应中:
@@ -254,6 +264,16 @@ scripts/
 - 它不知道 `ContextItem`、registry、syncer、auto source、workspace event、permission/question/event/tui 策略
 - 新增 context panel、permission、question、event、tui 或 hooks 相关代码时，先消费这个入口，不要在策略层重新解析 iframe URL
 
+### OpenCode event source contract
+
+- 事件源合同见 [docs/plans/opencode-event-source-contract.md](docs/plans/opencode-event-source-contract.md)
+- 新的 Obsidian-side event code 首选 OpenCode dev 的 `GET /api/event` / `v2.event.subscribe`，因为它携带 location 语义；`GET /event` 只作为 legacy compatibility 参考
+- 产品层的 bridge/proxy 是 Obsidian 与 OpenCode 的互联互通总称，必须基于两边的金标准：OpenCode OpenAPI/source contract 和 Obsidian API/runtime facts
+- `OpenCodeBridge.ts` 是广义 bridge 层的代码入口。当前通过 Node 侧 `src/client/OpenCodeEventSource.ts` 接 OpenCode event，状态写入 runtime diagnostics
+- 具体实现类 `OpenCodeWebUiProxy.ts` 只负责 Web UI transport 和 HTML 注入。它可以透传 SSE 字节，但不能解析 OpenCode event 并维护插件状态
+- `BridgeProtocol.ts` 只定义本项目 iframe 本地消息，不加入 `session.*`、`permission.*`、`question.*` 或 `tui.*` 这类上游 event name
+- 第一阶段只做 connected/disconnected/failed/unsupported、last event、current-session read-only state diagnostics。不要复制 OpenCode Web UI 已有的 permission/question 交互弹窗
+
 ### `AutoSelectionContextSource.ts` — 自动选区策略
 
 - 只处理自动选区策略：开关判断、fingerprint 去重、空选区重置、失败后允许同一选区重试
@@ -316,11 +336,12 @@ scripts/
 - OpenCode hooks 以 `/path/to/opencode/packages/plugin/src/index.ts` 为准
 - Obsidian workspace events、`Editor.getCursor()`、`MetadataCache.resolvedLinks` 以 `node_modules/obsidian/obsidian.d.ts` 为准
 - `BridgeProtocol.ts` 只定义本项目自己的 postMessage 协议，不替 OpenCode 或 Obsidian 定义能力
+- Event bridge 后续验收必须从本地 OpenCode OpenAPI 确认 `/api/event` / `v2.event.subscribe`，不能在插件里维护手写 event type 清单
 
 ### `harness theme` — Web UI 外观检查
 
 - 默认读取 XDG `status.json` 里的 `proxyUrl`，只访问本机 proxy HTML，验正在运行的 Obsidian 插件实例
-- `bun run dev:theme:fixture` 使用当前工作区代码启动本地 HTML fixture + `OpenCodeProxy`，再用 happy-dom 执行 proxied HTML 里的注入脚本并捕获 `theme:diagnostics`，不依赖 Obsidian 重载
+- `bun run dev:theme:fixture` 使用当前工作区代码启动本地 HTML fixture + `OpenCodeWebUiProxy`，再用 happy-dom 执行 proxied HTML 里的注入脚本并捕获 `theme:diagnostics`，不依赖 Obsidian 重载
 - `dev:theme` 输出里的 `summary` 和 `actions` 是第一阅读入口。失败时先看这里判断是 server stopped、proxy 502、pane collapsed，还是 iframe 内部 theme diagnostics 未回写
 - `obsidian` 模式要求 `data-opencode-obsidian-*` 注入存在、根背景 token 保持透明、iframe document 的 `html` 和 `body` 使用 Obsidian base color、`#root` 透明、iframe document 的 `body::before` 使用 `--opencode-obsidian-workspace-background-*` paint variables 画唯一 workspace background 层、宿主 `.opencode-appearance-obsidian::before` / `::after` inactive 或不存在、局部 surface token 半透明、dialog scrim 是 OpenCode alpha overlay、父窗口 diagnostics 能观测 Obsidian editor/workspace background 变量且证明它们没有被改写成旧 `--opencode-obsidian-editor-background-*` payload。Background 图片启用时，harness 还必须确认 iframe 内部没有 active `backdrop-filter` samples。
 - `obsidian` 模式还要求 OpenCode v2 appearance token 覆盖来自本地 OpenCode 源码，旧 token 只作为 `--v2-*` alias。`--v2-elevation-*` 属于这个覆盖面，因为 OpenCode v2 输入框、菜单、弹窗、按钮会消费这些 shadow token

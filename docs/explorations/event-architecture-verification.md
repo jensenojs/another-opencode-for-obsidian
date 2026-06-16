@@ -155,7 +155,7 @@ ContextManager.updateListeners() 监听:
 
 ### 3.1 当前 postMessage 协议
 
-来源：`src/proxy/OpenCodeProxy.ts`（注入脚本）和 `src/main.ts`（消息监听）。
+来源：`src/proxy/OpenCodeWebUiProxy.ts`（注入脚本）和 `src/main.ts`（消息监听）。
 
 当前只定义了两种消息类型：
 
@@ -326,7 +326,7 @@ type ObsidianPostMessage =
 - `opencode-obsidian:event` 作为通用转发通道，避免为每种 opencode SSE 事件类型都定义一个 postMessage type
 - 不影响 Phase 1 功能，只是重命名现有字符串
 
-**改动量**：`OpenCodeProxy.ts` 注入脚本中的两处字符串 + `main.ts` 中的两处字符串比较。
+**改动量**：`OpenCodeWebUiProxy.ts` 注入脚本中的两处字符串 + `main.ts` 中的两处字符串比较。
 
 ### 决策 2：ContextRegistry 预留 `sourceKey` 且冻结事件名
 

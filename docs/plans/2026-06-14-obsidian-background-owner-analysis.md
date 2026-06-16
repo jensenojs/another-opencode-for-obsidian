@@ -3156,7 +3156,7 @@ iframe loads OpenCode Web UI
 
 ### 30.2 proxy 注入
 
-`OpenCodeProxy` 会把 OpenCode HTML 转给 `ProxyInjection.ts`。
+`OpenCodeWebUiProxy` 会把 OpenCode HTML 转给 `ProxyInjection.ts`。
 
 `ProxyInjection.ts` 注入三类内容：
 

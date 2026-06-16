@@ -20,7 +20,8 @@ import { getSelectionLineRange } from "./context/SelectionLineRange";
 import type { GraphIndex } from "./graph/GraphIndex";
 import { createObsidianGraphIndex, isMarkdownTFile, toGraphFile } from "./graph/ObsidianGraphIndex";
 import { ExecutableResolver } from "./server/ExecutableResolver";
-import { OpenCodeProxy } from "./proxy/OpenCodeProxy";
+import { OpenCodeWebUiProxy } from "./proxy/OpenCodeWebUiProxy";
+import { OpenCodeBridge } from "./bridge/OpenCodeBridge";
 import {
   createLogger,
   getRuntimePaths,
@@ -39,6 +40,7 @@ export default class OpenCodePlugin extends Plugin {
   private processManager: ServerManager;
   private stateChangeCallbacks: Array<(state: ServerState) => void> = [];
   private openCodeClient: OpenCodeClient;
+  private openCodeBridge: OpenCodeBridge;
   private currentContextSession: CurrentContextSession;
   private contextManager: ContextManager;
   private contextItemNavigator: ContextItemNavigator;
@@ -51,8 +53,10 @@ export default class OpenCodePlugin extends Plugin {
   private runtimeDiagnostics: RuntimeDiagnosticsSnapshot = {
     theme: null,
     iframe: null,
+    opencodeEvents: null,
   };
-  private openCodeProxy: OpenCodeProxy;
+  private openCodeWebUiProxy: OpenCodeWebUiProxy;
+  private eventStatusWriteTimer: ReturnType<typeof setTimeout> | null = null;
   private logger = createLogger("plugin");
 
   async onload(): Promise<void> {
@@ -75,15 +79,15 @@ export default class OpenCodePlugin extends Plugin {
 
     const endpoint = createServerEndpoint(this.settings, projectDirectory);
 
-    this.openCodeProxy = new OpenCodeProxy(endpoint.hostname, endpoint.port);
+    this.openCodeWebUiProxy = new OpenCodeWebUiProxy(endpoint.hostname, endpoint.port);
     this.refreshProxyAppearance();
-    const proxyStarted = await this.openCodeProxy.start();
+    const proxyStarted = await this.openCodeWebUiProxy.start();
     if (!proxyStarted) {
       this.logger.error("proxy failed to start");
     }
 
     this.registerDomEvent(window, "message", (event: MessageEvent) => {
-      if (event.origin !== this.openCodeProxy.getOrigin() || !isBridgeMessage(event.data)) {
+      if (event.origin !== this.openCodeWebUiProxy.getOrigin() || !isBridgeMessage(event.data)) {
         return;
       }
       if (event.data.type === BRIDGE_MESSAGES.proxyLoaded) {
@@ -125,6 +129,15 @@ export default class OpenCodePlugin extends Plugin {
       getCachedIframeUrl: () => this.cachedIframeUrl,
       setCachedIframeUrl: (url) => this.setCachedIframeUrl(url),
       resolveSessionId: (url) => this.openCodeClient.resolveSessionId(url),
+    });
+    this.openCodeBridge = new OpenCodeBridge({
+      apiBaseUrl: this.getApiBaseUrl(),
+      projectDirectory,
+      getCurrentSessionId: () => this.currentContextSession.getCurrentSessionId(),
+      onEventSnapshot: (snapshot) => {
+        this.runtimeDiagnostics.opencodeEvents = snapshot;
+        this.scheduleEventStatusWrite();
+      },
     });
     this.graphIndex = createObsidianGraphIndex(this.app);
     this.graphIndex.bootstrap();
@@ -268,6 +281,7 @@ export default class OpenCodePlugin extends Plugin {
       if (state === "running") {
         void this.contextManager.handleServerRunning();
       }
+      this.openCodeBridge.syncServerState(state);
     });
 
     this.registerCleanupHandlers();
@@ -287,7 +301,12 @@ export default class OpenCodePlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.writeStatus("unloading");
-    this.openCodeProxy?.stop();
+    this.openCodeBridge?.stop();
+    if (this.eventStatusWriteTimer) {
+      clearTimeout(this.eventStatusWriteTimer);
+      this.eventStatusWriteTimer = null;
+    }
+    this.openCodeWebUiProxy?.stop();
     this.contextStatusBar?.destroy();
     this.contextManager.destroy();
     await this.stopServer();
@@ -419,7 +438,7 @@ export default class OpenCodePlugin extends Plugin {
 
   getServerUrl(): string {
     const endpoint = createServerEndpoint(this.settings, this.getProjectDirectory());
-    return this.openCodeProxy.getProxyUrl(endpoint.encodedProjectDirectory);
+    return this.openCodeWebUiProxy.getProxyUrl(endpoint.encodedProjectDirectory);
   }
 
   getApiBaseUrl(): string {
@@ -456,13 +475,14 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   private refreshClientState(): void {
-    this.openCodeProxy.updateTarget(this.settings.hostname, this.settings.port);
+    this.openCodeWebUiProxy.updateTarget(this.settings.hostname, this.settings.port);
     this.refreshProxyAppearance();
 
     const nextUiBaseUrl = this.getServerUrl();
     const nextApiBaseUrl = this.getApiBaseUrl();
     const projectDirectory = this.getProjectDirectory();
     this.openCodeClient.updateBaseUrl(nextApiBaseUrl, nextUiBaseUrl, projectDirectory);
+    this.openCodeBridge?.updateOpenCodeLocation(nextApiBaseUrl, projectDirectory);
 
     if (
       (this.lastBaseUrl && this.lastBaseUrl !== nextUiBaseUrl) ||
@@ -479,7 +499,7 @@ export default class OpenCodePlugin extends Plugin {
   private refreshProxyAppearance(): void {
     const theme =
       this.settings.webViewAppearance === "obsidian" ? () => this.getWebViewTheme() : null;
-    this.openCodeProxy.updateAppearance(this.settings.webViewAppearance, theme);
+    this.openCodeWebUiProxy.updateAppearance(this.settings.webViewAppearance, theme);
   }
 
   getWebViewTheme(paneSource?: HTMLElement): WebViewTheme {
@@ -503,13 +523,23 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   getProxyOrigin(): string | null {
-    return this.openCodeProxy.getPort() > 0 ? this.openCodeProxy.getOrigin() : null;
+    return this.openCodeWebUiProxy.getPort() > 0 ? this.openCodeWebUiProxy.getOrigin() : null;
   }
 
   recordIframeDiagnostics(payload: unknown): void {
     this.runtimeDiagnostics.iframe = payload;
     this.logger.info("iframe diagnostics", summarizeDiagnosticPayload(payload));
     this.writeStatus("iframe-diagnostics");
+  }
+
+  private scheduleEventStatusWrite(): void {
+    if (this.eventStatusWriteTimer) {
+      return;
+    }
+    this.eventStatusWriteTimer = setTimeout(() => {
+      this.eventStatusWriteTimer = null;
+      this.writeStatus("opencode-event");
+    }, 1000);
   }
 
   async ensureSessionUrl(view: OpenCodeView): Promise<void> {
@@ -583,11 +613,11 @@ export default class OpenCodePlugin extends Plugin {
 
     const projectDirectory = this.resolveProjectDirectory();
     const endpoint = createServerEndpoint(this.settings, projectDirectory);
-    const proxyPort = this.openCodeProxy?.getPort() || null;
+    const proxyPort = this.openCodeWebUiProxy?.getPort() || null;
     const diagnostics = this.processManager.getDiagnostics();
     const proxyUrl =
       proxyPort && proxyPort > 0
-        ? this.openCodeProxy.getProxyUrl(endpoint.encodedProjectDirectory)
+        ? this.openCodeWebUiProxy.getProxyUrl(endpoint.encodedProjectDirectory)
         : null;
 
     writeRuntimeStatus({

@@ -112,7 +112,7 @@ function createObsidianAppearanceStyle(): string {
   `;
 }
 
-export function injectOpenCodeProxyHtml(
+export function injectOpenCodeWebUiProxyHtml(
   html: string,
   appearance: WebViewAppearance,
   theme: WebViewTheme | null

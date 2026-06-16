@@ -16,7 +16,7 @@
 - `packages/app/src/components/session/session-context-breakdown.ts` — 上下文 token 分布估算
 - `packages/app/src/components/prompt-input.tsx` — 输入框组件
 - `packages/app/index.html` — HTML 入口，`<div id="root">` + Vite 模块脚本
-- `src/proxy/OpenCodeProxy.ts` — obsidian 插件本地代理（剥离 CSP、注入脚本）
+- `src/proxy/OpenCodeWebUiProxy.ts` — obsidian 插件本地 Web UI 代理（剥离 CSP、注入脚本）
 
 ## 调研发现
 
@@ -112,7 +112,7 @@ opencode Web UI **已经有上下文相关的 UI**，但功能与我们需要的
 **技术上可行，但脆弱。**
 
 **可行点**：
-- 代理已经成功剥离了 CSP 头（`OpenCodeProxy.injectScript()`），可以注入任意 JS
+- 代理已经成功剥离了 CSP 头（`OpenCodeWebUiProxy.injectScript()`），可以注入任意 JS
 - 注入脚本可以通过 `document.querySelector` 找到 `#root` 或其他 DOM 节点
 - 可以在 `#root` 外部（`<body>` 下）追加额外的绝对定位面板
 - 可以使用 Shadow DOM 隔离样式，避免与 opencode 的 CSS 冲突
@@ -198,7 +198,7 @@ async function getContextMessages(sessionId) {
 ```
 Obsidian 侧                       iframe 内（opencode Web UI）
 ┌──────────────────┐              ┌─────────────────────────────┐
-│ OpenCodeProxy    │  剥离CSP     │ injected-script.js           │
+│ OpenCodeWebUiProxy │ 剥离CSP    │ injected-script.js           │
 │ (CSP剥离+注入)   │ ═══════════> │                              │
 │                  │              │ 1. 监听 URL 变化检测 session │
 │                  │              │ 2. fetch(/api/session/:id/   │

@@ -5,7 +5,7 @@ import { join } from "path";
 import { Script, createContext } from "vm";
 import { Window } from "happy-dom";
 import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../../src/bridge/BridgeProtocol";
-import { OpenCodeProxy } from "../../src/proxy/OpenCodeProxy";
+import { OpenCodeWebUiProxy } from "../../src/proxy/OpenCodeWebUiProxy";
 import { createOpenCodeWebViewTheme } from "../../src/theme/WebViewTheme";
 import { fetchText, type FetchTextResult } from "./httpText";
 
@@ -30,7 +30,7 @@ export async function fetchFixtureThemeHtml(): Promise<
     res.end('<!doctype html><html><head></head><body><div id="root"></div></body></html>');
   });
 
-  let proxy: OpenCodeProxy | null = null;
+  let proxy: OpenCodeWebUiProxy | null = null;
 
   try {
     const backendPort = await listenOnRandomPort(backend);
@@ -56,7 +56,7 @@ export async function fetchFixtureThemeHtml(): Promise<
       editorBackgroundBluriness: "blur(5px)",
       editorBackgroundPosition: "center",
     });
-    proxy = new OpenCodeProxy("127.0.0.1", backendPort, "obsidian", theme);
+    proxy = new OpenCodeWebUiProxy("127.0.0.1", backendPort, "obsidian", theme);
     const started = await proxy.start();
     if (!started) {
       return {

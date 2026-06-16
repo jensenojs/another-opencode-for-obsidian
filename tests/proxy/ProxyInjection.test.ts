@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE } from "../../src/bridge/BridgeProtocol";
-import { injectOpenCodeProxyHtml } from "../../src/proxy/ProxyInjection";
+import { injectOpenCodeWebUiProxyHtml } from "../../src/proxy/ProxyInjection";
 
 const html = "<html><head></head><body>OpenCode</body></html>";
 
 describe("ProxyInjection", () => {
   test("injects the bridge script without appearance overrides by default", () => {
-    const body = injectOpenCodeProxyHtml(html, "opencode", null);
+    const body = injectOpenCodeWebUiProxyHtml(html, "opencode", null);
 
     expect(body).toContain(BRIDGE_NAMESPACE);
     expect(body).toContain(BRIDGE_MESSAGES.proxyLoaded);
@@ -16,7 +16,7 @@ describe("ProxyInjection", () => {
   });
 
   test("injects into an HTML head tag with attributes", () => {
-    const body = injectOpenCodeProxyHtml(
+    const body = injectOpenCodeWebUiProxyHtml(
       '<html><head data-vite-dev-id="app"></head><body>OpenCode</body></html>',
       "opencode",
       null
@@ -28,7 +28,7 @@ describe("ProxyInjection", () => {
   });
 
   test("injects Obsidian appearance tokens with one iframe workspace backdrop", () => {
-    const body = injectOpenCodeProxyHtml(html, "obsidian", {
+    const body = injectOpenCodeWebUiProxyHtml(html, "obsidian", {
       colorScheme: "dark",
       variables: {
         "--background-base": "transparent",

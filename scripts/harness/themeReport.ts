@@ -1300,49 +1300,6 @@ function summarizeThemeDiagnostics(diagnostics: unknown): unknown {
   };
 }
 
-function summarizeIframeDiagnostics(diagnostics: unknown): unknown {
-  if (!diagnostics || typeof diagnostics !== "object") {
-    return null;
-  }
-
-  const payload = diagnostics as any;
-  const ancestors = Array.isArray(payload.ancestors) ? payload.ancestors : [];
-  const interestingAncestors = ancestors.filter((ancestor: any) => {
-    const className = typeof ancestor?.className === "string" ? ancestor.className : "";
-    return (
-      className.includes("opencode") ||
-      className.includes("workspace-leaf") ||
-      className.includes("app-container")
-    );
-  });
-
-  return {
-    reason: typeof payload.reason === "string" ? payload.reason : null,
-    appearance: typeof payload.appearance === "string" ? payload.appearance : null,
-    iframe: summarizeBackgroundSample(payload.iframe),
-    appearanceBackground:
-      payload.appearanceBackground && typeof payload.appearanceBackground === "object"
-        ? payload.appearanceBackground
-        : null,
-    appearanceImageBackground:
-      payload.appearanceImageBackground && typeof payload.appearanceImageBackground === "object"
-        ? payload.appearanceImageBackground
-        : null,
-    workspaceFocus:
-      payload.workspaceFocus && typeof payload.workspaceFocus === "object"
-        ? summarizeWorkspaceFocus(payload.workspaceFocus)
-        : null,
-    themeSync: summarizeThemeSyncHistory(payload),
-    externalEditorBackground: summarizeExternalEditorBackground(payload),
-    editorBackgroundVariables:
-      payload.editorBackgroundVariables && typeof payload.editorBackgroundVariables === "object"
-        ? payload.editorBackgroundVariables
-        : null,
-    ancestorCount: ancestors.length,
-    ancestors: interestingAncestors.map(summarizeBackgroundSample),
-  };
-}
-
 function obsidianAppearanceBackgroundCheck(diagnostics: unknown): {
   name: string;
   ok: boolean;
@@ -1780,15 +1737,6 @@ function sourceBoundaryContractCheck(diagnostics: unknown): {
   };
 }
 
-function cssPixelValue(value: string | null): number | null {
-  if (!value) {
-    return null;
-  }
-
-  const match = value.trim().match(/^(-?[0-9.]+)px$/);
-  return match ? Number.parseFloat(match[1]) : null;
-}
-
 function backgroundPositionEquivalent(actual: string | undefined, expected: string): boolean {
   if (!actual) {
     return false;
@@ -1865,104 +1813,11 @@ function verticalPositionValue(value: string): string | null {
   }
 }
 
-function isIframeViewportLayer(
-  left: number | null,
-  top: number | null,
-  width: number | null,
-  height: number | null,
-  viewportWidth: number | null,
-  viewportHeight: number | null
-): boolean {
-  if (
-    left === null ||
-    top === null ||
-    width === null ||
-    height === null ||
-    viewportWidth === null ||
-    viewportHeight === null
-  ) {
-    return false;
-  }
-
-  return (
-    Math.abs(left) < 1 &&
-    Math.abs(top) < 1 &&
-    Math.abs(width - viewportWidth) < 1 &&
-    Math.abs(height - viewportHeight) < 1
-  );
-}
-
-function backgroundImageRectFromCss(
-  backgroundPosition: string | null,
-  backgroundSize: string | null
-): BackdropImageRect | null {
-  const position = cssPixelPair(backgroundPosition);
-  const size = cssPixelPair(backgroundSize);
-
-  if (!position || !size) {
-    return null;
-  }
-
-  const [left, top] = position;
-  const [width, height] = size;
-
-  return {
-    left,
-    top,
-    right: left + width,
-    bottom: top + height,
-    width,
-    height,
-  };
-}
-
-function backgroundImageViewportGaps(
-  rect: BackdropImageRect | null,
-  viewportWidth: number | null,
-  viewportHeight: number | null
-): { left: number; top: number; right: number; bottom: number } | null {
-  if (!rect || viewportWidth === null || viewportHeight === null) {
-    return null;
-  }
-
-  return {
-    left: Math.max(0, rect.left),
-    top: Math.max(0, rect.top),
-    right: Math.max(0, viewportWidth - rect.right),
-    bottom: Math.max(0, viewportHeight - rect.bottom),
-  };
-}
-
 function isPaintedRuntimeRoot(root: Record<string, unknown>): boolean {
   return (
     cssAlphaValue(cssString(root.backgroundColor)) !== 0 ||
     !isCssNoneValue(cssString(root.backgroundImage))
   );
-}
-
-interface BackdropImageRect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  width: number;
-  height: number;
-}
-
-function cssPixelPair(value: string | null): [number, number] | null {
-  if (!value) {
-    return null;
-  }
-
-  const parts = value.trim().split(/\s+/);
-  if (parts.length !== 2) {
-    return null;
-  }
-
-  const first = cssPixelValue(parts[0]);
-  const second = cssPixelValue(parts[1]);
-
-  return first === null || second === null ? null : [first, second];
 }
 
 function findRuntimeRoot(roots: unknown, tag: string, id?: string): Record<string, unknown> | null {

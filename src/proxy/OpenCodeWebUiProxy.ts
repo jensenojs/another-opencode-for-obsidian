@@ -1,13 +1,13 @@
 import * as http from "http";
 import { EventEmitter } from "events";
 import { createLogger } from "../debug/RuntimeDiagnostics";
-import { injectOpenCodeProxyHtml } from "./ProxyInjection";
+import { injectOpenCodeWebUiProxyHtml } from "./ProxyInjection";
 import type { WebViewAppearance, WebViewTheme } from "../types";
 
 type WebViewThemeProvider = () => WebViewTheme | null;
 type WebViewThemeSource = WebViewTheme | WebViewThemeProvider | null;
 
-export class OpenCodeProxy extends EventEmitter {
+export class OpenCodeWebUiProxy extends EventEmitter {
   private server: http.Server | null = null;
   private targetHost: string;
   private targetPort: number;
@@ -53,8 +53,8 @@ export class OpenCodeProxy extends EventEmitter {
     if (this.server) return true;
 
     for (
-      let port = OpenCodeProxy.START_PORT;
-      port < OpenCodeProxy.START_PORT + OpenCodeProxy.MAX_ATTEMPTS;
+      let port = OpenCodeWebUiProxy.START_PORT;
+      port < OpenCodeWebUiProxy.START_PORT + OpenCodeWebUiProxy.MAX_ATTEMPTS;
       port++
     ) {
       const ok = await this.tryListen(port);
@@ -200,7 +200,7 @@ export class OpenCodeProxy extends EventEmitter {
   }
 
   private injectScript(body: string): string {
-    return injectOpenCodeProxyHtml(body, this.appearance, this.resolveTheme());
+    return injectOpenCodeWebUiProxyHtml(body, this.appearance, this.resolveTheme());
   }
 
   private resolveTheme(): WebViewTheme | null {
