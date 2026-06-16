@@ -1,49 +1,18 @@
 import * as http from "http";
 import { EventEmitter } from "events";
 import { createLogger } from "../debug/RuntimeDiagnostics";
-import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../bridge/BridgeProtocol";
+import { injectOpenCodeProxyHtml } from "./ProxyInjection";
 import type { WebViewAppearance, WebViewTheme } from "../types";
 
-const INJECTED_SCRIPT = `
-<script>
-(function() {
-  var ns = ${JSON.stringify(BRIDGE_NAMESPACE)};
-  var version = ${JSON.stringify(BRIDGE_VERSION)};
-  var messages = ${JSON.stringify(BRIDGE_MESSAGES)};
-    function post(type, payload) {
-      window.parent.postMessage({ ns: ns, version: version, type: type, payload: payload }, '*');
-    }
-  post(messages.proxyLoaded);
-  function toggleHandler(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      post(messages.viewToggle);
-    }
-  }
-  window.addEventListener('keydown', toggleHandler, true);
-  document.addEventListener('keydown', toggleHandler, true);
-})();
-</script>
-`;
-
-const OBSIDIAN_APPEARANCE_STYLE = `
-<style data-opencode-obsidian-appearance>
-html,
-body,
-#root {
-  background: var(--background-base) !important;
-}
-</style>
-`;
+type WebViewThemeProvider = () => WebViewTheme | null;
+type WebViewThemeSource = WebViewTheme | WebViewThemeProvider | null;
 
 export class OpenCodeProxy extends EventEmitter {
   private server: http.Server | null = null;
   private targetHost: string;
   private targetPort: number;
   private appearance: WebViewAppearance;
-  private theme: WebViewTheme | null;
+  private theme: WebViewThemeSource;
   private effectivePort: number = 0;
   private logger = createLogger("proxy");
   private static readonly START_PORT = 4097;
@@ -53,7 +22,7 @@ export class OpenCodeProxy extends EventEmitter {
     targetHost: string,
     targetPort: number,
     appearance: WebViewAppearance = "opencode",
-    theme: WebViewTheme | null = null
+    theme: WebViewThemeSource = null
   ) {
     super();
     this.targetHost = targetHost;
@@ -75,7 +44,7 @@ export class OpenCodeProxy extends EventEmitter {
     this.targetPort = targetPort;
   }
 
-  updateAppearance(appearance: WebViewAppearance, theme: WebViewTheme | null = null): void {
+  updateAppearance(appearance: WebViewAppearance, theme: WebViewThemeSource = null): void {
     this.appearance = appearance;
     this.theme = theme;
   }
@@ -231,169 +200,10 @@ export class OpenCodeProxy extends EventEmitter {
   }
 
   private injectScript(body: string): string {
-    return body.replace("<head>", "<head>" + INJECTED_SCRIPT + this.getAppearanceInjection());
+    return injectOpenCodeProxyHtml(body, this.appearance, this.resolveTheme());
   }
 
-  private getAppearanceInjection(): string {
-    if (this.appearance !== "obsidian") {
-      return "";
-    }
-
-    return OBSIDIAN_APPEARANCE_STYLE + createThemeInjection(this.theme);
+  private resolveTheme(): WebViewTheme | null {
+    return typeof this.theme === "function" ? this.theme() : this.theme;
   }
-}
-
-function createThemeInjection(theme: WebViewTheme | null): string {
-  if (!theme) {
-    return "";
-  }
-
-  const safeTheme: WebViewTheme = {
-    colorScheme: theme.colorScheme,
-    variables: {},
-  };
-  for (const [name, value] of Object.entries(theme.variables)) {
-    if (/^--[-_a-zA-Z0-9]+$/.test(name) && typeof value === "string" && value.length > 0) {
-      safeTheme.variables[name] = value;
-    }
-  }
-
-  const payload = JSON.stringify(safeTheme);
-
-  return `
-<script data-opencode-obsidian-theme>
-(function() {
-  var theme = ${payload};
-      function applyTheme() {
-        var root = document.documentElement;
-        root.dataset.opencodeObsidianAppearance = 'obsidian';
-        root.dataset.colorScheme = theme.colorScheme;
-        root.style.colorScheme = theme.colorScheme;
-        Object.keys(theme.variables).forEach(function(name) {
-          root.style.setProperty(name, theme.variables[name]);
-      });
-    }
-      function isVisibleOpaqueBackground(style) {
-        var color = style.backgroundColor || '';
-        var image = style.backgroundImage || '';
-        var hasOpaqueColor = color !== '' &&
-          color !== 'transparent' &&
-          color !== 'rgba(0, 0, 0, 0)' &&
-          !/rgba\\([^)]*,\\s*0\\)/.test(color);
-        return hasOpaqueColor || image !== 'none';
-      }
-    function describeElement(element) {
-      if (!element) return null;
-      var style = getComputedStyle(element);
-      var rect = element.getBoundingClientRect();
-      return {
-        tag: element.tagName.toLowerCase(),
-        id: element.id || null,
-        className: typeof element.className === 'string' ? element.className.slice(0, 180) : null,
-        dataComponent: element.getAttribute('data-component'),
-        dataSlot: element.getAttribute('data-slot'),
-        backgroundColor: style.backgroundColor,
-        backgroundImage: style.backgroundImage,
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-        area: Math.round(rect.width * rect.height)
-      };
-    }
-    function rootVariables() {
-      var style = getComputedStyle(document.documentElement);
-      var names = [
-        '--background-base',
-        '--background-weak',
-        '--background-strong',
-          '--background-stronger',
-          '--v2-background-bg-base',
-          '--v2-background-bg-deep',
-          '--background-bg-base',
-          '--background-bg-layer-01',
-          '--surface-raised-base',
-          '--input-base',
-          '--text-text-base',
-          '--border-border-base'
-        ];
-      return names.reduce(function(result, name) {
-        result[name] = style.getPropertyValue(name).trim();
-        return result;
-      }, {});
-    }
-    function collectOpaqueBackgrounds() {
-      if (!document.body) {
-        return [];
-      }
-      var minArea = Math.max(2000, window.innerWidth * window.innerHeight * 0.04);
-      return Array.prototype.slice.call(document.body.querySelectorAll('*'))
-        .map(function(element) {
-          var style = getComputedStyle(element);
-          var rect = element.getBoundingClientRect();
-          return { element: element, style: style, rect: rect, area: rect.width * rect.height };
-        })
-        .filter(function(item) {
-          return item.area >= minArea && isVisibleOpaqueBackground(item.style);
-        })
-        .sort(function(left, right) {
-          return right.area - left.area;
-        })
-        .slice(0, 12)
-        .map(function(item) {
-          return describeElement(item.element);
-        });
-    }
-    function postThemeDiagnostics(reason) {
-      try {
-        var payload = {
-          reason: reason,
-          url: location.href,
-          viewport: { width: window.innerWidth, height: window.innerHeight },
-          variables: rootVariables(),
-          roots: [
-            describeElement(document.documentElement),
-            describeElement(document.body),
-            describeElement(document.getElementById('root'))
-          ],
-          opaqueBackgrounds: collectOpaqueBackgrounds()
-        };
-        window.parent.postMessage({
-          ns: ${JSON.stringify(BRIDGE_NAMESPACE)},
-          version: ${JSON.stringify(BRIDGE_VERSION)},
-          type: ${JSON.stringify(BRIDGE_MESSAGES.themeDiagnostics)},
-          payload: payload
-        }, '*');
-      } catch (error) {
-        window.parent.postMessage({
-          ns: ${JSON.stringify(BRIDGE_NAMESPACE)},
-          version: ${JSON.stringify(BRIDGE_VERSION)},
-          type: ${JSON.stringify(BRIDGE_MESSAGES.themeDiagnostics)},
-          payload: {
-            reason: reason,
-            url: location.href,
-            error: error instanceof Error ? error.message : String(error)
-          }
-        }, '*');
-      }
-    }
-    function scheduleThemeDiagnostics(reason) {
-      setTimeout(function() {
-        postThemeDiagnostics(reason);
-      }, 120);
-    }
-    applyTheme();
-    postThemeDiagnostics('after-apply');
-    scheduleThemeDiagnostics('initial');
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', function() {
-        applyTheme();
-        scheduleThemeDiagnostics('dom-content-loaded');
-      }, { once: true });
-    }
-    window.addEventListener('load', function() {
-      applyTheme();
-      scheduleThemeDiagnostics('load');
-    }, { once: true });
-  })();
-  </script>
-  `;
 }

@@ -7,6 +7,7 @@ export const BRIDGE_MESSAGES = {
   proxyLoaded: "proxy:loaded",
   viewToggle: "view:toggle",
   themeDiagnostics: "theme:diagnostics",
+  themeUpdate: "theme:update",
 } as const;
 
 export type BridgeMessageType = (typeof BRIDGE_MESSAGES)[keyof typeof BRIDGE_MESSAGES];

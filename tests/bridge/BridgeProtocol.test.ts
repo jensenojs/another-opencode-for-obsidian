@@ -15,6 +15,14 @@ describe("BridgeProtocol", () => {
         type: BRIDGE_MESSAGES.viewToggle,
       })
     ).toBe(true);
+    expect(
+      isBridgeMessage({
+        ns: BRIDGE_NAMESPACE,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGES.themeUpdate,
+        payload: { colorScheme: "dark", variables: {} },
+      })
+    ).toBe(true);
   });
 
   test("rejects unscoped messages", () => {

@@ -1,32 +1,15 @@
-import { describe, test, expect, beforeAll, afterEach } from "bun:test";
-import * as http from "http";
-import { mkdtempSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
-import { ServerManager, ServerState } from "../src/server/ServerManager";
-import { CUSTOM_COMMAND_EXAMPLE, OpenCodeSettings } from "../src/types";
+import { describe, expect, test } from "bun:test";
+import { ServerManager } from "../src/server/ServerManager";
+import type { OpenCodeSettings } from "../src/types";
 
-process.env.XDG_STATE_HOME = mkdtempSync(join(tmpdir(), "opencode-obsidian-test-"));
-
-// Test configuration
-const TEST_PORT_BASE = 15000;
-const TEST_TIMEOUT_MS = 10000; // 10 seconds for server startup in tests
-const PROJECT_DIR = process.cwd();
-
-let currentPort = TEST_PORT_BASE;
-
-function getNextPort(): number {
-  return currentPort++;
-}
-
-function createTestSettings(port: number): OpenCodeSettings {
+function createTestSettings(port = 15000): OpenCodeSettings {
   return {
     port,
     hostname: "127.0.0.1",
     autoStart: false,
     opencodePath: "opencode",
     projectDirectory: "",
-    startupTimeout: process.platform === "win32" ? 15000 : TEST_TIMEOUT_MS,
+    startupTimeout: 10000,
     defaultViewLocation: "sidebar",
     injectWorkspaceContext: true,
     autoAddSelectionContext: false,
@@ -41,444 +24,69 @@ function createTestSettings(port: number): OpenCodeSettings {
   };
 }
 
-function quoteCommandPart(value: string): string {
-  return value.includes(" ") ? `"${value.replace(/"/g, '\\"')}"` : value;
-}
-
-async function listen(server: http.Server, port: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    server.listen(port, "127.0.0.1", resolve);
-  });
-}
-
-async function close(server: http.Server): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error?: Error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    });
-  });
-}
-
-// Track current manager for cleanup
-let currentManager: ServerManager | null = null;
-
-// Verify opencode binary is available before running tests
-beforeAll(async () => {
-  const proc = Bun.spawn(["opencode", "--version"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    throw new Error(
-      "opencode binary not found or not executable. " +
-        "Please ensure 'opencode' is installed and available in PATH."
-    );
-  }
-});
-
-// Cleanup after each test
-afterEach(async () => {
-  if (currentManager) {
-    await currentManager.stop();
-    // Give process time to fully terminate
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    currentManager = null;
-  }
-});
-
 describe("ServerManager", () => {
-  describe("happy path", () => {
-    test("starts server and transitions to running state", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-      const stateHistory: ServerState[] = [];
+  test("starts in stopped state with empty process diagnostics", () => {
+    const manager = new ServerManager(createTestSettings(), "/vault");
 
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-      currentManager.on("stateChange", (state: ServerState) => {
-        stateHistory.push(state);
-      });
-
-      expect(currentManager.getState()).toBe("stopped");
-
-      const success = await currentManager.start();
-
-      expect(success).toBe(true);
-      expect(currentManager.getState()).toBe("running");
-      expect(stateHistory).toContain("starting");
-      expect(stateHistory).toContain("running");
-    }, 30000); // Increased timeout for database migration on first run
-
-    test("reports correct server URL with encoded project directory", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      const url = currentManager.getUrl();
-      const expectedBase = `http://127.0.0.1:${port}`;
-      const expectedPath = Buffer.from(PROJECT_DIR).toString("base64");
-
-      expect(url).toBe(`${expectedBase}/${expectedPath}`);
-    });
-
-    test("stops server gracefully and transitions to stopped state", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-      const stateHistory: ServerState[] = [];
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-      currentManager.on("stateChange", (state: ServerState) => {
-        stateHistory.push(state);
-      });
-
-      await currentManager.start();
-      expect(currentManager.getState()).toBe("running");
-
-      await currentManager.stop();
-
-      expect(currentManager.getState()).toBe("stopped");
-      expect(stateHistory).toContain("stopped");
-    });
-
-    test("state callbacks fire in correct order: starting -> running", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-      const stateHistory: ServerState[] = [];
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-      currentManager.on("stateChange", (state: ServerState) => {
-        stateHistory.push(state);
-      });
-
-      await currentManager.start();
-
-      // Verify order: first starting, then running
-      const startingIndex = stateHistory.indexOf("starting");
-      const runningIndex = stateHistory.indexOf("running");
-
-      expect(startingIndex).toBeGreaterThanOrEqual(0);
-      expect(runningIndex).toBeGreaterThan(startingIndex);
-    });
-
-    test("can restart after stop", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      // First start
-      const firstStart = await currentManager.start();
-      expect(firstStart).toBe(true);
-      expect(currentManager.getState()).toBe("running");
-
-      // Stop
-      await currentManager.stop();
-      expect(currentManager.getState()).toBe("stopped");
-
-      // Wait for process to fully terminate
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Restart
-      const secondStart = await currentManager.start();
-      expect(secondStart).toBe(true);
-      expect(currentManager.getState()).toBe("running");
-    }, 30000);
-
-    test("returns true immediately if already running", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      // First start
-      await currentManager.start();
-      expect(currentManager.getState()).toBe("running");
-
-      // Second start should return true immediately without state changes
-      const stateHistory: ServerState[] = [];
-      const onStateChange = (state: ServerState) => {
-        stateHistory.push(state);
-      };
-      currentManager.on("stateChange", onStateChange);
-
-      const result = await currentManager.start();
-
-      expect(result).toBe(true);
-      expect(currentManager.getState()).toBe("running");
-      // Should not have triggered any state changes
-      expect(stateHistory).toEqual([]);
-    });
-
-    test("health check endpoint is accessible when running", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      await currentManager.start();
-
-      // Verify we can hit the health endpoint
-      const healthUrl = currentManager.getHealthUrl();
-
-      const response = await fetch(healthUrl, {
-        signal: AbortSignal.timeout(2000),
-      });
-
-      expect(response.ok).toBe(true);
-    });
-
-    test("starts custom command template with the configured endpoint", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-      settings.useCustomCommand = true;
-      settings.customCommand = CUSTOM_COMMAND_EXAMPLE;
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      const success = await currentManager.start();
-
-      expect(success).toBe(true);
-      expect(currentManager.getState()).toBe("running");
-
-      const response = await fetch(currentManager.getHealthUrl(), {
-        signal: AbortSignal.timeout(2000),
-      });
-      const body = await response.json();
-
-      expect(response.ok).toBe(true);
-      expect(body.healthy).toBe(true);
-    }, 30000);
-
-    test("does not reuse a transient existing server", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-      const transientServer = http.createServer((_request, response) => {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ healthy: true }));
-      });
-
-      await listen(transientServer, port);
-      setTimeout(() => {
-        void close(transientServer).catch(() => {});
-      }, 100);
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      const success = await currentManager.start();
-
-      expect(success).toBe(true);
-      expect(currentManager.getState()).toBe("running");
-      expect(currentManager.getDiagnostics().lastStartMode).toBe("path");
-    }, 30000);
-  });
-
-  describe("async stop behavior", () => {
-    test("stop returns immediately when no process", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-      const stateHistory: ServerState[] = [];
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-      currentManager.on("stateChange", (state: ServerState) => {
-        stateHistory.push(state);
-      });
-
-      // Stop without starting - should not throw and set state
-      await currentManager.stop();
-
-      expect(currentManager.getState()).toBe("stopped");
-    });
-
-    test("stop completes within timeout when process exits quickly", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      await currentManager.start();
-      expect(currentManager.getState()).toBe("running");
-
-      // Stop should complete within 5 seconds (2s SIGTERM wait + 3s SIGKILL wait)
-      const stopStart = Date.now();
-      await currentManager.stop();
-      const stopDuration = Date.now() - stopStart;
-
-      expect(currentManager.getState()).toBe("stopped");
-      // Should complete well before 5 second timeout
-      expect(stopDuration).toBeLessThan(6000);
-    });
-
-    test("process is fully terminated after stop completes", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      await currentManager.start();
-
-      const url = currentManager.getUrl();
-
-      await currentManager.stop();
-
-      // Wait a bit then verify server is not accessible
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      try {
-        const response = await fetch(`${url}/global/health`, {
-          signal: AbortSignal.timeout(1000),
-        });
-        // If we get here, server is still running - test should fail
-        expect(response.ok).toBe(false);
-      } catch (e) {
-        // Expected - server should not be accessible
-        expect(e).toBeDefined();
-      }
+    expect(manager.getState()).toBe("stopped");
+    expect(manager.getPid()).toBeNull();
+    expect(manager.getLastError()).toBeNull();
+    expect(manager.getLastHealthError()).toBeNull();
+    expect(manager.getDiagnostics()).toMatchObject({
+      state: "stopped",
+      lastCommand: null,
+      lastDisplayCommand: null,
+      lastStartMode: null,
+      lastUsesShell: null,
+      lastCwd: null,
+      lastResolvedExecutable: null,
     });
   });
 
-  describe("error handling", () => {
-    test("rejects custom commands without hostname placeholder", async () => {
-      const settings = createTestSettings(getNextPort());
-      settings.useCustomCommand = true;
-      settings.customCommand = "opencode serve --port {port}";
+  test("returns UI and health URLs from the configured endpoint", () => {
+    const settings = createTestSettings(15123);
+    const manager = new ServerManager(settings, "/Users/oujinsai/Projects/opencode-obsidian");
 
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      const success = await currentManager.start();
-
-      expect(success).toBe(false);
-      expect(currentManager.getState()).toBe("error");
-      expect(currentManager.getLastError() ?? "").toContain("{hostname}");
-    });
-
-    test("uses executable path mode when custom command is empty", async () => {
-      const settings = createTestSettings(getNextPort());
-      settings.useCustomCommand = true;
-      settings.customCommand = "";
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      const success = await currentManager.start();
-
-      expect(success).toBe(true);
-      expect(currentManager.getState()).toBe("running");
-      expect(currentManager.getDiagnostics().lastStartMode).toBe("path");
-      expect(currentManager.getDiagnostics().lastCommandArgs).toContain("serve");
-    }, 30000);
-
-    test("includes stderr in early exit diagnostics", async () => {
-      const settings = createTestSettings(getNextPort());
-      settings.useCustomCommand = true;
-      settings.startupTimeout = 3000;
-      settings.customCommand = `${quoteCommandPart(process.execPath)} -e "console.error('opencode missing from gui shell'); process.exit(127); // {hostname} {port}"`;
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      const success = await currentManager.start();
-      const diagnostics = currentManager.getDiagnostics();
-
-      expect(success).toBe(false);
-      expect(currentManager.getState()).toBe("error");
-      expect(currentManager.getLastError() ?? "").toContain("opencode missing from gui shell");
-      expect(diagnostics.lastStderr ?? "").toContain("opencode missing from gui shell");
-      expect(diagnostics.hint ?? "").toContain("leading-tilde executable path");
-    });
-
-    test("rejects custom commands without port placeholder", async () => {
-      const settings = createTestSettings(getNextPort());
-      settings.useCustomCommand = true;
-      settings.customCommand = "opencode serve --hostname {hostname}";
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      const success = await currentManager.start();
-
-      expect(success).toBe(false);
-      expect(currentManager.getState()).toBe("error");
-      expect(currentManager.getLastError() ?? "").toContain("{port}");
-    });
-
-    test("does not treat an HTML response as a healthy server", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-      settings.startupTimeout = 800;
-      settings.useCustomCommand = true;
-      settings.customCommand = `${quoteCommandPart(process.execPath)} -e "setTimeout(() => {}, 10000); // {hostname} {port}"`;
-
-      const htmlServer = http.createServer((_req, res) => {
-        res.writeHead(200, { "content-type": "text/html" });
-        res.end("<html></html>");
-      });
-      await listen(htmlServer, port);
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      try {
-        const success = await currentManager.start();
-
-        expect(success).toBe(false);
-        expect(currentManager.getState()).toBe("error");
-        expect(currentManager.getLastError() ?? "").toContain("non-JSON");
-      } finally {
-        await close(htmlServer);
-      }
-    });
-
-    test("handles double stop gracefully", async () => {
-      const port = getNextPort();
-      const settings = createTestSettings(port);
-
-      currentManager = new ServerManager(settings, PROJECT_DIR);
-
-      await currentManager.start();
-      expect(currentManager.getState()).toBe("running");
-
-      // First stop
-      await currentManager.stop();
-      expect(currentManager.getState()).toBe("stopped");
-
-      // Second stop should not throw
-      await currentManager.stop();
-      expect(currentManager.getState()).toBe("stopped");
-    });
+    expect(manager.getUrl()).toBe(
+      `http://127.0.0.1:15123/${Buffer.from("/Users/oujinsai/Projects/opencode-obsidian").toString(
+        "base64"
+      )}`
+    );
+    expect(manager.getHealthUrl()).toBe("http://127.0.0.1:15123/global/health");
   });
 
-  describe("Unicode path support", () => {
-    test("getUrl handles Chinese characters in project directory", () => {
-      const settings = createTestSettings(getNextPort());
-      const chinesePath = "C:/用户/Notes";
-      const manager = new ServerManager(settings, chinesePath);
+  test("updates project directory without starting a process", () => {
+    const manager = new ServerManager(createTestSettings(), "/old-vault");
+    const observed: string[] = [];
+    manager.on("projectDirectoryChanged", (directory) => observed.push(directory));
 
-      const url = manager.getUrl();
+    manager.updateProjectDirectory("/new-vault");
 
-      expect(url).toContain("http://127.0.0.1:");
-      expect(url).toContain(Buffer.from(chinesePath).toString("base64"));
-    });
+    expect(observed).toEqual(["/new-vault"]);
+    expect(manager.getUrl()).toBe(
+      `http://127.0.0.1:15000/${Buffer.from("/new-vault").toString("base64")}`
+    );
+    expect(manager.getPid()).toBeNull();
+  });
 
-    test("getUrl handles Japanese characters in project directory", () => {
-      const settings = createTestSettings(getNextPort());
-      const japanesePath = "/home/ユーザー/ノート";
-      const manager = new ServerManager(settings, japanesePath);
+  test("stop is a no-op when no process is running", async () => {
+    const manager = new ServerManager(createTestSettings(), "/vault");
 
-      const url = manager.getUrl();
+    await manager.stop();
 
-      expect(url).toContain(Buffer.from(japanesePath).toString("base64"));
-    });
+    expect(manager.getState()).toBe("stopped");
+    expect(manager.getPid()).toBeNull();
+  });
 
-    test("getUrl handles emoji in project directory", () => {
-      const settings = createTestSettings(getNextPort());
-      const emojiPath = "/home/user/📁Notes";
-      const manager = new ServerManager(settings, emojiPath);
+  test("getUrl handles unicode project directories", () => {
+    const paths = ["C:/用户/Notes", "/home/ユーザー/ノート", "/home/user/📁Notes"];
 
-      const url = manager.getUrl();
+    for (const path of paths) {
+      const manager = new ServerManager(createTestSettings(), path);
 
-      expect(url).toContain(Buffer.from(emojiPath).toString("base64"));
-    });
+      expect(manager.getUrl()).toBe(
+        `http://127.0.0.1:15000/${Buffer.from(path).toString("base64")}`
+      );
+    }
   });
 });

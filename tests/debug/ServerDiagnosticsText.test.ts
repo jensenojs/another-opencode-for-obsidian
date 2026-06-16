@@ -16,12 +16,32 @@ function diagnostics(
     lastCommandArgs: ["serve", "--hostname", "127.0.0.1", "--port", "4096"],
     lastDisplayCommand: "opencode serve --hostname 127.0.0.1 --port 4096",
     lastStartMode: "custom",
+    lastUsesShell: true,
     lastCwd: "/Users/alice/Notes",
     lastStdout: null,
     lastStderr: "opencode missing from gui shell",
     lastExitCode: 127,
     lastExitSignal: null,
     lastProcessErrorStack: null,
+    processEnvironment: {
+      platform: "darwin",
+      pathKey: "PATH",
+      path: "/usr/bin:/bin",
+      pathEntries: ["/usr/bin", "/bin"],
+      shell: "/bin/zsh",
+      envKeys: ["HOME", "OPENAI_API_KEY", "PATH", "SHELL"],
+      secretLikeEnvKeys: ["OPENAI_API_KEY"],
+    },
+    lastSpawnEnvironment: {
+      platform: "darwin",
+      pathKey: "PATH",
+      path: "/usr/bin:/bin",
+      pathEntries: ["/usr/bin", "/bin"],
+      shell: "/bin/zsh",
+      envKeys: ["HOME", "NODE_USE_SYSTEM_CA", "OPENAI_API_KEY", "PATH", "SHELL"],
+      secretLikeEnvKeys: ["OPENAI_API_KEY"],
+    },
+    lastResolvedExecutable: null,
     hint: "Custom command exited with 127. Check the executable path visible to Obsidian.",
     logFile: "/Users/alice/.local/state/opencode-obsidian/opencode-obsidian.log",
     statusFile: "/Users/alice/.local/state/opencode-obsidian/status.json",
@@ -37,8 +57,13 @@ describe("ServerDiagnosticsText", () => {
     expect(payload.lastError).toContain("exit code 127");
     expect(payload.hint).toContain("executable path");
     expect(payload.lastCommand).toBe("opencode");
+    expect(payload.lastUsesShell).toBe(true);
     expect(payload.lastCommandArgs).toEqual(["serve", "--hostname", "127.0.0.1", "--port", "4096"]);
     expect(payload.lastStderr).toBe("opencode missing from gui shell");
+    expect(payload.processEnvironment.path).toBe("/usr/bin:/bin");
+    expect(payload.lastSpawnEnvironment.envKeys).toContain("NODE_USE_SYSTEM_CA");
+    expect(payload.processEnvironment.secretLikeEnvKeys).toEqual(["OPENAI_API_KEY"]);
+    expect(JSON.stringify(payload)).not.toContain("sk-");
     expect(payload.logFile).toBe(
       "/Users/alice/.local/state/opencode-obsidian/opencode-obsidian.log"
     );

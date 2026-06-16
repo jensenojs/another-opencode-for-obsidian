@@ -2,17 +2,21 @@ import { ChildProcess, SpawnOptions } from "child_process";
 import { EventEmitter } from "events";
 import * as http from "http";
 import {
-  OpenCodeSettings,
-  ServerEndpoint,
   createServerEndpoint,
   getExplicitCustomCommand,
   usesExplicitCustomCommand,
+  type OpenCodeSettings,
+  type ServerEndpoint,
 } from "../types";
-import { ServerState } from "./types";
+import type { ServerState } from "./types";
 import { OpenCodeProcess } from "./process/OpenCodeProcess";
 import { WindowsProcess } from "./process/WindowsProcess";
 import { PosixProcess } from "./process/PosixProcess";
 import { ExecutableResolver } from "./ExecutableResolver";
+import {
+  collectEnvironmentDiagnostics,
+  type EnvironmentDiagnostics,
+} from "./EnvironmentDiagnostics";
 import { createLogger } from "../debug/RuntimeDiagnostics";
 
 export type { ServerState } from "./types";
@@ -27,6 +31,7 @@ interface StartPlan {
   displayCommand: string;
   usesShell: boolean;
   cwd: string;
+  spawnEnvironment: EnvironmentDiagnostics;
 }
 
 export interface ServerDiagnostics {
@@ -37,12 +42,16 @@ export interface ServerDiagnostics {
   lastCommandArgs: string[];
   lastDisplayCommand: string | null;
   lastStartMode: StartMode | null;
+  lastUsesShell: boolean | null;
   lastCwd: string | null;
   lastStdout: string | null;
   lastStderr: string | null;
   lastExitCode: number | null;
   lastExitSignal: NodeJS.Signals | null;
   lastProcessErrorStack: string | null;
+  processEnvironment: EnvironmentDiagnostics;
+  lastSpawnEnvironment: EnvironmentDiagnostics | null;
+  lastResolvedExecutable: string | null;
   hint: string | null;
 }
 
@@ -59,12 +68,15 @@ export class ServerManager extends EventEmitter {
   private lastCommandArgs: string[] = [];
   private lastDisplayCommand: string | null = null;
   private lastStartMode: StartMode | null = null;
+  private lastUsesShell: boolean | null = null;
   private lastCwd: string | null = null;
   private lastStdout: string | null = null;
   private lastStderr: string | null = null;
   private lastExitCode: number | null = null;
   private lastExitSignal: NodeJS.Signals | null = null;
   private lastProcessErrorStack: string | null = null;
+  private lastSpawnEnvironment: EnvironmentDiagnostics | null = null;
+  private lastResolvedExecutable: string | null = null;
   private settings: OpenCodeSettings;
   private projectDirectory: string;
   private processImpl: OpenCodeProcess;
@@ -107,12 +119,16 @@ export class ServerManager extends EventEmitter {
       lastCommandArgs: [...this.lastCommandArgs],
       lastDisplayCommand: this.lastDisplayCommand,
       lastStartMode: this.lastStartMode,
+      lastUsesShell: this.lastUsesShell,
       lastCwd: this.lastCwd,
       lastStdout: this.lastStdout,
       lastStderr: this.lastStderr,
       lastExitCode: this.lastExitCode,
       lastExitSignal: this.lastExitSignal,
       lastProcessErrorStack: this.lastProcessErrorStack,
+      processEnvironment: collectEnvironmentDiagnostics(),
+      lastSpawnEnvironment: this.lastSpawnEnvironment,
+      lastResolvedExecutable: this.lastResolvedExecutable,
       hint: this.getDiagnosticHint(),
     };
   }
@@ -289,6 +305,7 @@ export class ServerManager extends EventEmitter {
       env: { ...process.env, NODE_USE_SYSTEM_CA: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     };
+    const spawnEnvironment = collectEnvironmentDiagnostics(baseOptions.env);
 
     if (usesExplicitCustomCommand(this.settings)) {
       const resolvedCommand = this.resolveCustomCommand(
@@ -310,10 +327,12 @@ export class ServerManager extends EventEmitter {
         displayCommand: resolvedCommand,
         usesShell: true,
         cwd: this.projectDirectory,
+        spawnEnvironment,
       };
     }
 
     const executablePath = ExecutableResolver.resolve(this.settings.opencodePath);
+    this.lastResolvedExecutable = executablePath;
     const commandError = await this.processImpl.verifyCommand(executablePath);
     if (commandError) {
       return { message: commandError };
@@ -337,6 +356,7 @@ export class ServerManager extends EventEmitter {
       displayCommand: formatCommand(executablePath, args),
       usesShell: false,
       cwd: this.projectDirectory,
+      spawnEnvironment,
     };
   }
 
@@ -368,7 +388,11 @@ export class ServerManager extends EventEmitter {
     this.lastCommandArgs = [...startPlan.args];
     this.lastDisplayCommand = startPlan.displayCommand;
     this.lastStartMode = startPlan.mode;
+    this.lastUsesShell = startPlan.usesShell;
     this.lastCwd = startPlan.cwd;
+    this.lastSpawnEnvironment = startPlan.spawnEnvironment;
+    this.lastResolvedExecutable =
+      startPlan.mode === "path" ? startPlan.command : this.lastResolvedExecutable;
   }
 
   private resetProcessDiagnostics(): void {
@@ -376,12 +400,15 @@ export class ServerManager extends EventEmitter {
     this.lastCommandArgs = [];
     this.lastDisplayCommand = null;
     this.lastStartMode = null;
+    this.lastUsesShell = null;
     this.lastCwd = null;
     this.lastStdout = null;
     this.lastStderr = null;
     this.lastExitCode = null;
     this.lastExitSignal = null;
     this.lastProcessErrorStack = null;
+    this.lastSpawnEnvironment = null;
+    this.lastResolvedExecutable = null;
   }
 
   private rememberProcessOutput(kind: "stdout" | "stderr", text: string): void {
@@ -418,9 +445,9 @@ export class ServerManager extends EventEmitter {
       /command not found|not recognized|ENOENT|executable not found/i.test(evidence)
     ) {
       if (this.lastStartMode === "custom") {
-        return "Custom commands run through Obsidian's GUI shell. Use an absolute or leading-tilde executable path, or leave Custom command empty to use OpenCode executable path mode.";
+        return "Custom commands run through a shell with Obsidian's GUI process environment. Use an absolute or leading-tilde executable path, or leave Custom command empty to use OpenCode executable path mode.";
       }
-      return "OpenCode executable was not found. Set OpenCode executable path to an absolute path, or use Autodetect in Settings.";
+      return "OpenCode executable was not found in the environment visible to Obsidian. Set OpenCode executable path to an absolute path, or use Autodetect in Settings.";
     }
 
     if (this.lastStartMode === "custom" && this.lastHealthError) {

@@ -18,12 +18,16 @@ export interface RuntimeStatusSnapshot {
   lastCommand: string | null;
   lastDisplayCommand: string | null;
   lastStartMode: string | null;
+  lastUsesShell: boolean | null;
   lastCwd: string | null;
   lastStdout: string | null;
   lastStderr: string | null;
   lastExitCode: number | null;
   lastExitSignal: string | null;
   lastProcessErrorStack: string | null;
+  processEnvironment: unknown;
+  lastSpawnEnvironment: unknown;
+  lastResolvedExecutable: string | null;
   diagnosticHint: string | null;
   pid: number | null;
   hostname: string;
