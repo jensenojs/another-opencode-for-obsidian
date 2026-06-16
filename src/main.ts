@@ -4,6 +4,7 @@ import {
   OPENCODE_VIEW_TYPE,
   createServerEndpoint,
   type OpenCodeSettings,
+  type WebViewTheme,
 } from "./types";
 import { OpenCodeView } from "./ui/OpenCodeView";
 import { ViewManager } from "./ui/ViewManager";
@@ -31,7 +32,7 @@ import {
   formatStartFailureNotice,
 } from "./debug/ServerDiagnosticsText";
 import { BRIDGE_MESSAGES, isBridgeMessage } from "./bridge/BridgeProtocol";
-import { captureObsidianWebViewTheme } from "./theme/WebViewTheme";
+import { captureObsidianWebViewTheme, findObsidianWebViewThemeSource } from "./theme/WebViewTheme";
 
 export default class OpenCodePlugin extends Plugin {
   settings: OpenCodeSettings = DEFAULT_SETTINGS;
@@ -87,10 +88,14 @@ export default class OpenCodePlugin extends Plugin {
       }
       if (event.data.type === BRIDGE_MESSAGES.proxyLoaded) {
         this.logger.info("bridge script loaded", { origin: event.origin });
+        this.syncOpenCodeViewThemes("proxy-loaded");
       }
       if (event.data.type === BRIDGE_MESSAGES.themeDiagnostics) {
         this.runtimeDiagnostics.theme = event.data.payload ?? null;
-        this.logger.info("theme diagnostics", this.runtimeDiagnostics.theme);
+        this.logger.info(
+          "theme diagnostics",
+          summarizeDiagnosticPayload(this.runtimeDiagnostics.theme)
+        );
         this.writeStatus("theme-diagnostics");
       }
       if (event.data.type === BRIDGE_MESSAGES.viewToggle) {
@@ -473,8 +478,12 @@ export default class OpenCodePlugin extends Plugin {
 
   private refreshProxyAppearance(): void {
     const theme =
-      this.settings.webViewAppearance === "obsidian" ? captureObsidianWebViewTheme() : null;
+      this.settings.webViewAppearance === "obsidian" ? () => this.getWebViewTheme() : null;
     this.openCodeProxy.updateAppearance(this.settings.webViewAppearance, theme);
+  }
+
+  getWebViewTheme(paneSource?: HTMLElement): WebViewTheme {
+    return captureObsidianWebViewTheme(findObsidianWebViewThemeSource(), { paneSource });
   }
 
   refreshOpenCodeViews(): void {
@@ -485,9 +494,21 @@ export default class OpenCodePlugin extends Plugin {
     }
   }
 
+  syncOpenCodeViewThemes(reason: string): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(OPENCODE_VIEW_TYPE)) {
+      if (leaf.view instanceof OpenCodeView) {
+        leaf.view.syncThemeToIframe(reason);
+      }
+    }
+  }
+
+  getProxyOrigin(): string | null {
+    return this.openCodeProxy.getPort() > 0 ? this.openCodeProxy.getOrigin() : null;
+  }
+
   recordIframeDiagnostics(payload: unknown): void {
     this.runtimeDiagnostics.iframe = payload;
-    this.logger.info("iframe diagnostics", payload);
+    this.logger.info("iframe diagnostics", summarizeDiagnosticPayload(payload));
     this.writeStatus("iframe-diagnostics");
   }
 
@@ -605,4 +626,32 @@ export default class OpenCodePlugin extends Plugin {
       statusFile: getRuntimePaths().statusFile,
     });
   }
+}
+
+function summarizeDiagnosticPayload(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const input = value as Record<string, unknown>;
+  const summary: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(input)) {
+    if (key === "reason" || key === "url" || key === "error") {
+      summary[key] = nested;
+      continue;
+    }
+    summary[key] = summarizeDiagnosticValue(nested);
+  }
+  return summary;
+}
+
+function summarizeDiagnosticValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return { count: value.length };
+  }
+  if (value && typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>);
+    return { keyCount: keys.length, keys: keys.slice(0, 16) };
+  }
+  return value;
 }

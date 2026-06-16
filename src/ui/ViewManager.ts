@@ -1,17 +1,17 @@
 import { App, WorkspaceLeaf } from "obsidian";
-import { OPENCODE_VIEW_TYPE, OpenCodeSettings } from "../types";
+import { OPENCODE_VIEW_TYPE, type OpenCodeSettings } from "../types";
 import { OpenCodeView } from "./OpenCodeView";
 import { OpenCodeClient } from "../client/OpenCodeClient";
 import { ContextManager } from "../context/ContextManager";
-import { ServerState } from "../server/types";
+import { CurrentContextSession } from "../context/ContextSessionResolver";
+import type { ServerState } from "../server/types";
 
 type ViewManagerDeps = {
   app: App;
   settings: OpenCodeSettings;
   client: OpenCodeClient;
   contextManager: ContextManager;
-  getCachedIframeUrl: () => string | null;
-  setCachedIframeUrl: (url: string | null) => void;
+  currentSession: CurrentContextSession;
   getServerState: () => ServerState;
 };
 
@@ -20,8 +20,7 @@ export class ViewManager {
   private settings: OpenCodeSettings;
   private client: OpenCodeClient;
   private contextManager: ContextManager;
-  private getCachedIframeUrl: () => string | null;
-  private setCachedIframeUrl: (url: string | null) => void;
+  private currentSession: CurrentContextSession;
   private getServerState: () => string;
   private previousEditorLeaf: WorkspaceLeaf | null = null;
 
@@ -30,8 +29,7 @@ export class ViewManager {
     this.settings = deps.settings;
     this.client = deps.client;
     this.contextManager = deps.contextManager;
-    this.getCachedIframeUrl = deps.getCachedIframeUrl;
-    this.setCachedIframeUrl = deps.setCachedIframeUrl;
+    this.currentSession = deps.currentSession;
     this.getServerState = deps.getServerState;
   }
 
@@ -136,15 +134,18 @@ export class ViewManager {
     const latestSessionId = await this.client.getLatestSessionId();
     if (latestSessionId) {
       const latestSessionUrl = this.client.getSessionUrl(latestSessionId);
-      this.setCachedIframeUrl(latestSessionUrl);
+      this.currentSession.rememberSessionUrl(latestSessionUrl);
       view.setIframeUrl(latestSessionUrl);
+      await this.contextManager.restoreFromServer(latestSessionId);
+      if (this.app.workspace.activeLeaf === view.leaf) {
+        await this.contextManager.refreshVisibleOpenCodeContext();
+      }
       return;
     }
 
-    const cachedUrl = this.getCachedIframeUrl();
-    const existingUrl = cachedUrl ?? view.getIframeUrl();
-    if (existingUrl && this.client.resolveSessionId(existingUrl)) {
-      this.setCachedIframeUrl(existingUrl);
+    const currentSessionId = this.currentSession.getSessionIdForLeaf(view.leaf);
+    if (currentSessionId) {
+      await this.contextManager.restoreFromServer(currentSessionId);
       return;
     }
 
@@ -154,11 +155,12 @@ export class ViewManager {
     }
 
     const sessionUrl = this.client.getSessionUrl(sessionId);
-    this.setCachedIframeUrl(sessionUrl);
+    this.currentSession.rememberSessionUrl(sessionUrl);
     view.setIframeUrl(sessionUrl);
+    await this.contextManager.restoreFromServer(sessionId);
 
     if (this.app.workspace.activeLeaf === view.leaf) {
-      await this.contextManager.refreshContextForView(view);
+      await this.contextManager.refreshVisibleOpenCodeContext();
     }
   }
 }
