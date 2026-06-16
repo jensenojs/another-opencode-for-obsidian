@@ -1,82 +1,136 @@
-# OpenCode plugin for Obsidian
+# OpenCode for Obsidian
 
-Give your notes AI capability by embedding Opencode [OpenCode](https://opencode.ai) AI assistant directly in Obsidian:
+OpenCode for Obsidian embeds [OpenCode](https://opencode.ai/) in Obsidian and
+adds Obsidian-native context, provenance, navigation, and diagnostics around the
+running OpenCode session.
 
-<img src="./assets/opencode_in_obsidian.png" alt="OpenCode embeded in Obsidian" />
+The current goal is practical: make OpenCode usable from inside Obsidian without
+turning this plugin into a second chat client. The OpenCode Web UI remains the
+main conversation surface. The plugin adds the Obsidian-side facts that the Web
+UI does not know by itself: which vault context was sent, where it came from,
+whether it can be restored safely, and how to get back to the source note.
 
-**Use cases:**
+This fork is beta software. It is ready for local use and BRAT installation, but
+larger GraphRAG features are still research and design work.
 
-- Summarize and distill long-form content
-- Draft, edit, and refine your writing
-- Query and explore your knowledge base
-- Generate outlines and structured notes
+_This is a third-party plugin. It is not affiliated with OpenCode or Obsidian._
 
-This plugin uses OpenCode's web view that can be embedded directly into Obsidian window. Usually similar plugins would use the ACP protocol, but I want to see how how much is possible without having to implement (and manage) a custom chat UI - I want the full power of OpenCode in my Obsidian.
+## Current Status
 
-_Note: plugin author is not afiliated with OpenCode or Obsidian - this is a 3rd party software._
+Works today:
 
-## Requirements
+- Start or attach to an OpenCode server from Obsidian.
+- Open the OpenCode Web UI in an Obsidian pane.
+- Use either OpenCode's native appearance or an Obsidian-derived appearance.
+- Add Obsidian note, selection, workspace, backlink, and cursor context to the
+  current OpenCode session.
+- Keep plugin context hidden from the visible OpenCode transcript by sending it
+  as synthetic OpenCode text parts.
+- Show active context items in an Obsidian status bar surface.
+- Navigate context items back to existing vault content without creating missing
+  files.
+- Restore plugin context after session reload with `known` or `uncertain`
+  provenance.
+- Copy diagnostics that include metadata, message/part IDs, text length,
+  provenance status, server launch state, and runtime paths without copying note
+  bodies.
+- Consume OpenCode `/api/event` as a read-only diagnostics stream.
 
-- Desktop only (uses Node.js child processes)
-- [OpenCode CLI](https://opencode.ai) installed
-- [Bun](https://bun.sh) installed
+Still experimental:
+
+- The Obsidian-style Web UI appearance is usable, but theme compatibility depends
+  on Obsidian themes, Electron rendering, and OpenCode token changes.
+- Automatic context sources are useful for local workflows, but they are still
+  conservative and visible by design.
+- GraphIndex exists as a factual vault-link read model. GraphRAG ranking and
+  derived knowledge discovery are not part of the first usable release.
 
 ## Installation
 
-### For Users (BRAT - Recommended for Beta Testing)
+### BRAT
 
-The easiest way to install this plugin during beta is via [BRAT](https://github.com/TfTHacker/obsidian42-brat) (Beta Reviewer's Auto-update Tool):
+Use [BRAT](https://github.com/TfTHacker/obsidian42-brat) for beta installation.
 
-1. Install the BRAT plugin from Obsidian Community Plugins
-2. Open BRAT settings and click "Add Beta plugin"
-3. Enter: `mtymek/opencode-obsidian`
-4. Click "Add Plugin" - BRAT will install the latest release automatically
-5. Enable the OpenCode plugin in Obsidian Settings > Community Plugins
+1. Install BRAT from Obsidian Community Plugins.
+2. Open BRAT settings.
+3. Click **Add Beta plugin**.
+4. Enter:
 
-BRAT will automatically check for updates and notify you when new versions are available.
-
-### For Developers
-
-If you want to contribute or develop the plugin:
-
-1. Clone the repository and install dependencies:
-   ```bash
-   git clone https://github.com/mtymek/opencode-obsidian.git
-   cd opencode-obsidian
-   bun install
-   ```
-2. Build and link it into a vault:
-   ```bash
-   bun run build
-   bun run harness install --vault /path/to/vault
-   ```
-3. Enable in Obsidian Settings > Community Plugins
-4. Use the harness while developing:
-   ```bash
-   bun run harness status --vault /path/to/vault
-   bun run harness logs --lines 120
-   bun run dev:bridge --opencode /path/to/opencode
+   ```text
+   jensenojs/opencode-obsidian
    ```
 
-## Usage
+5. Select the latest release.
+6. Enable **OpenCode-Obsidian** in Obsidian Settings -> Community Plugins.
 
-- Click the terminal icon in the ribbon, or
-- `Cmd/Ctrl+Shift+O` to toggle the panel
-- Server starts automatically when you open the panel
+BRAT requires GitHub releases with `manifest.json`, `main.js`, and `styles.css`
+attached. Releases from this fork are published for that installation path.
+
+### Manual Install
+
+Download these files from the latest release and place them in:
+
+```text
+<vault>/.obsidian/plugins/opencode-obsidian/
+```
+
+Required files:
+
+- `manifest.json`
+- `main.js`
+- `styles.css`
+
+Then reload Obsidian and enable the plugin.
+
+### Development Install
+
+```bash
+git clone https://github.com/jensenojs/opencode-obsidian.git
+cd opencode-obsidian
+bun install
+bun run build
+bun run harness install --vault /path/to/vault
+```
+
+## Requirements
+
+- Obsidian desktop.
+- OpenCode CLI installed or a custom command that starts `opencode serve`.
+- Bun for development and local builds.
+
+GUI-launched Obsidian on macOS and Linux may not inherit the same `PATH` as your
+terminal. If OpenCode or local MCP tools cannot be found, prefer an absolute
+`opencodePath` or an explicit custom command.
+
+## Basic Usage
+
+- Use the ribbon icon or command palette to open the OpenCode pane.
+- Start the OpenCode server from the plugin controls, or configure auto-start.
+- Use the OpenCode Web UI normally.
+- Add current note or selection context from Obsidian commands.
+- Use the status bar context surface to inspect, navigate, or ignore sent
+  context.
+
+The plugin does not create missing vault files when navigating context sources.
+If a source cannot be resolved, it is reported as unresolved instead of using
+Obsidian's link-open behavior.
 
 ## Settings
 
-### Custom Command Mode
+### Server Startup
 
-Enable "Use custom command" when you need more control over how OpenCode starts—for example, to add extra CLI flags, use a custom wrapper script, or run OpenCode through a container or virtual environment.
+The default path mode resolves and runs `opencode serve` directly.
 
-When using custom command:
+Enable **Use custom command** when you need shell-specific setup, a wrapper
+script, a patched OpenCode binary, or a managed runtime. The command is a shell
+template and should include `{hostname}` and `{port}`.
 
-- Empty value uses the normal executable path mode.
-- A non-empty value is a shell command template. It must include `{hostname}` and `{port}` so the plugin and server share one endpoint.
-- `{cors}` expands to `app://obsidian.md`.
-- `{projectDirectory}` expands to the active project directory.
-- GUI-launched Obsidian may not inherit your terminal PATH. Use an absolute executable path or a leading `~` path in non-empty custom commands.
+Available placeholders:
+
+- `{hostname}`
+- `{port}`
+- `{cors}` expands to `app://obsidian.md`
+- `{projectDirectory}`
 
 Example:
 
@@ -84,94 +138,128 @@ Example:
 opencode serve --hostname {hostname} --port {port} --cors {cors}
 ```
 
-Other settings (port, hostname, auto-start, view location, context injection) are available through the settings UI and are self-explanatory.
+Custom command mode is explicit. The plugin does not automatically source
+`.zshrc`, `.bashrc`, PowerShell profiles, or other shell startup files.
 
-### Web view appearance
+### Web View Appearance
 
-The embedded web view can use either:
+Two modes are available:
 
-- `Obsidian`: inherit the active Obsidian theme. Page-level OpenCode background tokens use the Obsidian pane background, while local controls and panels use translucent surfaces derived from Obsidian variables.
-- `OpenCode`: keep OpenCode's own web UI styling.
+- `OpenCode`: keep OpenCode's own Web UI styling.
+- `Obsidian`: derive OpenCode Web UI tokens from the active Obsidian theme.
 
-The Obsidian mode uses the stable CSS-variable surfaces exposed by both apps. It reads Obsidian variables such as `--background-primary`, `--text-normal`, and `--interactive-accent`, then injects OpenCode token overrides such as `--background-base`, `--surface-raised-base`, `--text-strong`, and `--border-weak-base` through the local proxy. OpenCode v2 has both `--v2-*` tokens and unprefixed component tokens such as `--background-bg-base`; the unprefixed tokens alias to the `--v2-*` tokens so the mapping has one source. This code does not target OpenCode component class names.
+Obsidian appearance mode maps stable Obsidian CSS variables onto OpenCode
+appearance tokens. It does not patch OpenCode component class names. The goal is
+to make the embedded Web UI feel like it belongs inside Obsidian while keeping
+the OpenCode UI intact.
 
 Relevant upstream surfaces:
 
-- Obsidian CSS variables: https://docs.obsidian.md/Reference/CSS+variables/CSS+variables
-- OpenCode theme tokens: https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/theme.css
-- OpenCode Tailwind entry: https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/tailwind.css
+- [Obsidian CSS variables](https://docs.obsidian.md/Reference/CSS+variables/CSS+variables)
+- [OpenCode v2 theme tokens](https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/theme.css)
+- [OpenCode Tailwind color entry](https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/tailwind/colors.css)
 
-### Context injection (experimental)
+### Context
 
-This plugin can automatically inject context to the running OC instance: list of open notes and currently selected text.
+The plugin can send explicit and automatic context into the current OpenCode
+session.
 
-Currently, this is work-in-progress feature with some limitations - it won't work when creating new session from OC interface.
+Supported context sources:
 
-## Development diagnostics
+- current note
+- current selection
+- currently open workspace notes
+- active note backlinks
+- cursor position
 
-Runtime logs and status are written under the XDG state directory:
+Each context item records metadata such as type, label, source file, optional
+navigation source, line range, text length, message ID, part ID, creation time,
+and provenance status.
+
+Restored context is treated carefully:
+
+- valid plugin provenance restores as `known`;
+- old or invalid context restores as `uncertain`;
+- uncertain context is shown as coming from the OpenCode session, not from a
+  trusted vault file.
+
+## Diagnostics
+
+Runtime logs and status live under the XDG state directory:
 
 ```bash
 $XDG_STATE_HOME/opencode-obsidian/opencode-obsidian.log
 $XDG_STATE_HOME/opencode-obsidian/status.json
 ```
 
-If `XDG_STATE_HOME` is unset, the plugin uses `~/.local/state`.
+If `XDG_STATE_HOME` is unset, the plugin uses:
 
-The harness reads these files directly:
+```text
+~/.local/state/opencode-obsidian/
+```
+
+Useful commands:
 
 ```bash
-bun run harness paths
-bun run harness status --vault /path/to/vault
-bun run harness logs --lines 120
-bun run harness doctor --vault /path/to/vault
-bun run dev:bridge --opencode /path/to/opencode
-bun run dev:theme --vault /path/to/vault
+bun run dev:status
+bun run dev:logs
+bun run dev:doctor
+bun run dev:bridge
+bun run dev:theme
 bun run dev:theme:fixture
 ```
 
-See the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/) for the state directory convention.
+`dev:bridge` checks local OpenCode and Obsidian contract files. It does not fetch
+remote URLs.
 
-When startup fails, the panel and settings page show the same diagnostics written to `status.json`: the effective start mode, command, stderr, health-check error, and log path.
+`dev:theme` checks the running Obsidian plugin instance. `dev:theme:fixture`
+checks the current workspace code without requiring an Obsidian reload.
 
-The intended path is visible first: a user should not have to know where logs live before seeing why startup failed. The harness commands move the same evidence between machines. For appearance issues, `bun run dev:theme` reads the running Obsidian plugin proxy and reports whether the active instance injected the expected tokens. Its `summary` and `actions` fields explain common runtime failures such as a stopped OpenCode server, collapsed pane, or missing iframe diagnostics. `bun run dev:theme:fixture` checks the current workspace code with a local HTML fixture, so agents can verify theme injection before Obsidian reloads the plugin.
+## Development
 
-The context popover includes a copy action for diagnostics. It copies item metadata such as type, label, source file, line range, message/part IDs, text length, and creation time. It does not copy full note text.
+```bash
+bun install
+bun run build
+bun test
+bun run check
+```
 
-### Reporting issues
+`bun run check` runs formatting checks, lint, typecheck, production build, and
+tests.
 
-Please include the diagnostics requested by the bug report template when opening an issue:
+Some tests start temporary HTTP servers on `127.0.0.1`. In sandboxed agent
+environments this may require explicit permission for loopback listening.
 
-- Click "Copy diagnostics" in the plugin error panel and paste the JSON.
-- Include recent lines from the XDG log path shown in diagnostics.
-- Include Obsidian version, OS, OpenCode version, start mode, and the exact custom command or executable path.
-- Describe the project/vault path shape: spaces, Unicode, `%`, Windows drive letters, UNC paths, symlinks, or network mounts.
+## Product Direction
 
-The client follows OpenCode's JS SDK behavior for project directories: `x-opencode-directory` is percent-encoded before it is sent, and the server decodes it before loading the instance. This matters for non-ASCII paths and Windows-style paths.
+The first product milestone is a stable OpenCode-in-Obsidian workflow:
 
-### Bridge contract checks
+- OpenCode remains the text interaction surface.
+- Obsidian provides visible context, vault evidence, safe navigation, and
+  diagnostics.
+- The user can see what context was sent and where it came from.
 
-`bun run dev:bridge` checks this plugin against local contract files:
+The next research direction is GraphRAG over the Obsidian vault:
 
-- OpenCode HTTP: `/path/to/opencode/packages/sdk/openapi.json`
-- OpenCode hooks: `/path/to/opencode/packages/plugin/src/index.ts`
-- Obsidian workspace events: `node_modules/obsidian/obsidian.d.ts`
+- GraphIndex is the factual layer over Obsidian `Vault` and `MetadataCache`.
+- Derived GraphRAG indexes should help discover useful relationships, gaps, and
+  context candidates.
+- Recommendation and ranking policy should stay above GraphIndex, not inside it.
 
-The command does not fetch remote URLs. To test a newer upstream, update the local OpenCode checkout or npm dependency, then rerun the harness.
+That future layer should help new knowledge emerge from the user's notes. It
+should not silently auto-inject context or turn the vault graph into a hidden
+echo chamber.
 
-## Windows Troubleshooting
+## Reporting Issues
 
-If you see "Executable not found at 'opencode'" despite opencode being installed:
+When reporting a problem, include:
 
-1. Find your opencode.cmd path:
+- Obsidian version and OS.
+- OpenCode version.
+- Plugin version.
+- Start mode: path mode or custom command.
+- The exact custom command or executable path if relevant.
+- The copied diagnostics from the plugin UI or `status.json`.
+- Relevant recent lines from the XDG log.
 
-   ```
-   where opencode.cmd
-   ```
-
-2. Configure the full path in plugin settings:
-   ```
-   C:\Users\{username}\AppData\Roaming\npm\opencode.cmd
-   ```
-
-This is due to Electron/Obsidian not fully inheriting PATH on Windows.
+Diagnostics intentionally avoid copying full note text.
