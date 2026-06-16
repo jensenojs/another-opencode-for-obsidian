@@ -1,6 +1,6 @@
-# AGENTS.md - Obsidian OpenCode Plugin
+# AGENTS.md - Another OpenCode for Obsidian
 
-AI 编码代理在 obsidian-opencode 插件上工作的指南。
+AI 编码代理在 Another OpenCode for Obsidian 插件上工作的指南。
 
 ## 项目概述
 

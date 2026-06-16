@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Obsidian plugin that embeds the OpenCode AI assistant via an iframe. The plugin spawns a local OpenCode server process and displays its web UI in the Obsidian sidebar, enabling AI-assisted coding and note-taking within Obsidian.
+Another OpenCode integration for Obsidian. The plugin spawns or attaches to a local OpenCode server process, displays its Web UI in Obsidian, and adds vault navigation, context provenance, and diagnostics around the running session.
 
 ## Tech Stack
 

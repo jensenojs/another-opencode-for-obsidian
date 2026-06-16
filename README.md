@@ -1,8 +1,8 @@
-# OpenCode for Obsidian
+# Another OpenCode for Obsidian
 
-OpenCode for Obsidian embeds [OpenCode](https://opencode.ai/) in Obsidian and
-adds Obsidian-native context, provenance, navigation, and diagnostics around the
-running OpenCode session.
+Another OpenCode for Obsidian embeds [OpenCode](https://opencode.ai/) in
+Obsidian and adds Obsidian-native context, provenance, navigation, and
+diagnostics around the running OpenCode session.
 
 The current goal is practical: make OpenCode usable from inside Obsidian without
 turning this plugin into a second chat client. The OpenCode Web UI remains the
@@ -13,7 +13,7 @@ whether it can be restored safely, and how to get back to the source note.
 This fork is beta software. It is ready for local use and BRAT installation, but
 larger GraphRAG features are still research and design work.
 
-_This is a third-party plugin. It is not affiliated with OpenCode or Obsidian._
+_This is a third-party fork. It is not affiliated with OpenCode or Obsidian._
 
 ## What This Plugin Does Differently
 
@@ -80,11 +80,11 @@ Use [BRAT](https://github.com/TfTHacker/obsidian42-brat) for beta installation.
 4. Enter:
 
    ```text
-   jensenojs/opencode-obsidian
+   jensenojs/another-opencode-for-obsidian
    ```
 
 5. Select the latest release.
-6. Enable **OpenCode-Obsidian** in Obsidian Settings -> Community Plugins.
+6. Enable **Another OpenCode for Obsidian** in Obsidian Settings -> Community Plugins.
 
 BRAT requires GitHub releases with `manifest.json`, `main.js`, and `styles.css`
 attached. Releases from this fork are published for that installation path.
@@ -108,8 +108,8 @@ Then reload Obsidian and enable the plugin.
 ### Development Install
 
 ```bash
-git clone https://github.com/jensenojs/opencode-obsidian.git
-cd opencode-obsidian
+git clone https://github.com/jensenojs/another-opencode-for-obsidian.git
+cd another-opencode-for-obsidian
 bun install
 bun run build
 bun run harness install --vault /path/to/vault

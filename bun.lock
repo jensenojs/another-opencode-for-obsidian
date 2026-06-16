@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "obsidian-opencode",
+      "name": "another-opencode-for-obsidian",
       "devDependencies": {
         "@eslint/js": "^10.0.1",
         "@types/bun": "^1.3.5",

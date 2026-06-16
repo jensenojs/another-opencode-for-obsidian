@@ -1,4 +1,4 @@
-# OpenCode-Obsidian Plugin roadmap and ideas
+# Another OpenCode for Obsidian roadmap and ideas
 
 ## Roadmap
 
