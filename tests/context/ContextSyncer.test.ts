@@ -184,4 +184,50 @@ describe("ContextSyncer", () => {
       },
     ]);
   });
+
+  test("restores invalid provenance as uncertain without trusting the encoded source", async () => {
+    const messages: OpenCodeMessage[] = [
+      {
+        info: { id: "msg_1", sessionID: "ses_1" },
+        parts: [
+          {
+            id: "prt_1",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: "text",
+            text: formatContextMessageText("changed text", {
+              version: 1,
+              type: "manual",
+              label: "note.md",
+              sourceFile: "note.md",
+              navigationSourceFile: "note.md",
+              startLine: 4,
+              endLine: 4,
+              textLength: "original text".length,
+              createdAt: 456,
+            }),
+            time: { start: 123 },
+          },
+        ],
+      },
+    ];
+    const syncer = new ContextSyncer({
+      listSessionMessages: async () => messages,
+    } as unknown as OpenCodeClient);
+
+    expect(await syncer.restore("ses_1")).toEqual([
+      {
+        id: "msg_1:prt_1",
+        type: "manual",
+        label: "Restored context",
+        text: "changed text",
+        sourceFile: "OpenCode session",
+        messageId: "msg_1",
+        partId: "prt_1",
+        textLength: "changed text".length,
+        provenanceStatus: "uncertain",
+        createdAt: 123,
+      },
+    ]);
+  });
 });
