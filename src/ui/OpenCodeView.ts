@@ -347,7 +347,7 @@ export class OpenCodeView extends ItemView {
     });
     settingsButton.addEventListener("click", () => {
       (this.app as any).setting.open();
-      (this.app as any).setting.openTabById("obsidian-opencode");
+      (this.app as any).setting.openTabById("another-opencode-for-obsidian");
     });
 
     const copyButton = buttonContainer.createEl("button", {
@@ -601,10 +601,10 @@ export class OpenCodeView extends ItemView {
   private collectAppearanceVariables(element: HTMLElement): Record<string, string> {
     const style = getComputedStyle(element);
     const names = [
-      "--opencode-obsidian-page-background",
-      "--opencode-obsidian-background-primary",
-      "--opencode-obsidian-background-primary-alt",
-      "--opencode-obsidian-background-secondary",
+      "--another-opencode-for-obsidian-page-background",
+      "--another-opencode-for-obsidian-background-primary",
+      "--another-opencode-for-obsidian-background-primary-alt",
+      "--another-opencode-for-obsidian-background-secondary",
     ];
     return Object.fromEntries(names.map((name) => [name, style.getPropertyValue(name).trim()]));
   }

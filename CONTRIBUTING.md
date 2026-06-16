@@ -10,7 +10,7 @@ We welcome the following types of contributions:
 - Documentation improvements
 - Bug fixes
 
-**Note:** Core product features and major changes require prior discussion. Please [open an issue](https://github.com/mtymek/opencode-obsidian/issues) first to discuss your proposal before starting work. PRs for new features submitted without prior approval may be closed.
+**Note:** Core product features and major changes require prior discussion. Please [open an issue](https://github.com/mtymek/another-opencode-for-obsidian/issues) first to discuss your proposal before starting work. PRs for new features submitted without prior approval may be closed.
 
 I'm also interested in collecting a set of Agent Skills useful in the context of Obsidian vaults. Feel free to submit an issue or PR with your ideas.
 
@@ -24,8 +24,8 @@ I'm also interested in collecting a set of Agent Skills useful in the context of
 ### Getting Started
 
 ```bash
-git clone https://github.com/mtymek/opencode-obsidian.git
-cd opencode-obsidian
+git clone https://github.com/mtymek/another-opencode-for-obsidian.git
+cd another-opencode-for-obsidian
 bun install
 ```
 
@@ -43,7 +43,7 @@ To work on the plugin during development:
 
 3. For testing in Obsidian:
    - Enable Community Plugins in Obsidian settings
-   - Copy the built plugin to your vault's `.obsidian/plugins/opencode-obsidian/` directory
+   - Copy the built plugin to your vault's `.obsidian/plugins/another-opencode-for-obsidian/` directory
    - Reload Obsidian or use the "Reload app without saving" command
 
 ### Commands

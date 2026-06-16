@@ -14,9 +14,26 @@ const obsidianHostBackgroundCheckName = "runtime Obsidian appearance host stays 
 const openCodeDocumentBackgroundCheckName =
   "runtime OpenCode document uses the iframe workspace backdrop";
 const obsidianDialogScrimPercent = {
-  dark: 60,
+  dark: 70,
   light: 34,
 };
+
+const obsidianMaterialAlphaSets = [
+  {
+    backgroundBase: 28,
+    layer01: 36,
+    layer02: 46,
+    layer03: 58,
+    layer04: 68,
+  },
+  {
+    backgroundBase: 40,
+    layer01: 50,
+    layer02: 60,
+    layer03: 70,
+    layer04: 80,
+  },
+];
 const themeBoundaryFiles = {
   stylesCss: "styles.css",
   proxyInjectionTs: join("src", "proxy", "ProxyInjection.ts"),
@@ -348,10 +365,10 @@ function buildThemeReportFromRuntimeDiagnostics(input: {
     textAndBorder: pickVariables(variables, ["--text-text-base", "--border-border-base"]),
   };
   const expectedRootBackground =
-    typeof variables["--opencode-obsidian-page-background"] === "string"
-      ? variables["--opencode-obsidian-page-background"]
-      : typeof variables["--opencode-obsidian-background-primary"] === "string"
-        ? variables["--opencode-obsidian-background-primary"]
+    typeof variables["--another-opencode-for-obsidian-page-background"] === "string"
+      ? variables["--another-opencode-for-obsidian-page-background"]
+      : typeof variables["--another-opencode-for-obsidian-background-primary"] === "string"
+        ? variables["--another-opencode-for-obsidian-background-primary"]
         : null;
 
   input.checks.push({
@@ -383,7 +400,7 @@ function buildThemeReportFromRuntimeDiagnostics(input: {
     ok: Boolean(input.iframeDiagnostics),
     detail:
       input.iframeDiagnostics ??
-      "No iframe composition diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:open-opencode-view`, then rerun this harness command.",
+      "No iframe composition diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=another-opencode-for-obsidian:open-opencode-view`, then rerun this harness command.",
   });
   input.checks.push(iframeAvoidsTransparentCompositingCheck(input.iframeDiagnostics));
   input.checks.push(iframeAvoidsBlackHostPaintCheck(input.iframeDiagnostics));
@@ -430,7 +447,7 @@ function buildThemeReportFromHtml(input: {
   const variables = injectedTheme?.variables ?? {};
   const tokens = {
     rootBackground: pickVariables(variables, [
-      "--opencode-obsidian-page-background",
+      "--another-opencode-for-obsidian-page-background",
       "--background-strong",
       "--v2-background-bg-deep",
       "--background-bg-deep",
@@ -472,18 +489,31 @@ function buildThemeReportFromHtml(input: {
     ]),
   };
   const injection = {
-    hasAppearanceStyle: input.html.body.includes("data-opencode-obsidian-appearance"),
-    hasThemeScript: input.html.body.includes("data-opencode-obsidian-theme"),
+    hasAppearanceStyle: input.html.body.includes("data-another-opencode-for-obsidian-appearance"),
+    hasThemeScript: input.html.body.includes("data-another-opencode-for-obsidian-theme"),
     colorScheme: typeof injectedTheme?.colorScheme === "string" ? injectedTheme.colorScheme : null,
   };
   const expectedScrimSource =
     injection.colorScheme === "dark"
-      ? "var(--opencode-obsidian-background-primary)"
-      : "var(--opencode-obsidian-text-normal)";
+      ? "var(--another-opencode-for-obsidian-background-primary)"
+      : "var(--another-opencode-for-obsidian-text-normal)";
   const expectedScrimPercent =
     injection.colorScheme === "dark"
       ? obsidianDialogScrimPercent.dark
       : obsidianDialogScrimPercent.light;
+  const materialTokensUseKnownAlphaSet = obsidianMaterialAlphaSets.some(
+    (alpha) =>
+      tokens.surfaces["--v2-background-bg-base"] ===
+        `color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) ${alpha.backgroundBase}%, transparent)` &&
+      tokens.surfaces["--v2-background-bg-layer-01"] ===
+        `color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) ${alpha.layer01}%, transparent)` &&
+      tokens.surfaces["--v2-background-bg-layer-02"] ===
+        `color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) ${alpha.layer02}%, transparent)` &&
+      tokens.surfaces["--v2-background-bg-layer-03"] ===
+        `color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) ${alpha.layer03}%, transparent)` &&
+      tokens.surfaces["--v2-background-bg-layer-04"] ===
+        `color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) ${alpha.layer04}%, transparent)`
+  );
 
   if (input.mode === "obsidian") {
     input.checks.push({
@@ -499,12 +529,14 @@ function buildThemeReportFromHtml(input: {
     input.checks.push({
       name: "root background tokens stay transparent in Obsidian appearance",
       ok:
-        typeof tokens.rootBackground["--opencode-obsidian-page-background"] === "string" &&
-        tokens.rootBackground["--opencode-obsidian-page-background"]!.length > 0 &&
+        typeof tokens.rootBackground["--another-opencode-for-obsidian-page-background"] ===
+          "string" &&
+        tokens.rootBackground["--another-opencode-for-obsidian-page-background"]!.length > 0 &&
         Object.entries(tokens.rootBackground)
           .filter(
             ([name]) =>
-              name !== "--opencode-obsidian-page-background" && name !== "--background-bg-deep"
+              name !== "--another-opencode-for-obsidian-page-background" &&
+              name !== "--background-bg-deep"
           )
           .every(([, value]) => value === "transparent") &&
         tokens.rootBackground["--background-bg-deep"] === "var(--v2-background-bg-deep)",
@@ -513,17 +545,7 @@ function buildThemeReportFromHtml(input: {
     input.checks.push({
       name: "v2 panel surface tokens stay Obsidian-derived with legacy aliases through v2",
       ok:
-        tokens.surfaces["--v2-background-bg-base"] ===
-          "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 28%, transparent)" &&
-        tokens.surfaces["--v2-background-bg-layer-01"] ===
-          "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 36%, transparent)" &&
-        tokens.surfaces["--v2-background-bg-layer-02"] ===
-          "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 46%, transparent)" &&
-        typeof tokens.surfaces["--v2-background-bg-layer-03"] === "string" &&
-        tokens.surfaces["--v2-background-bg-layer-03"] ===
-          "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 58%, transparent)" &&
-        tokens.surfaces["--v2-background-bg-layer-04"] ===
-          "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 68%, transparent)" &&
+        materialTokensUseKnownAlphaSet &&
         tokens.surfaces["--background-base"] === "var(--v2-background-bg-base)" &&
         tokens.surfaces["--background-bg-base"] === "var(--v2-background-bg-base)" &&
         tokens.surfaces["--background-weak"] === "var(--v2-background-bg-layer-01)" &&
@@ -548,7 +570,7 @@ function buildThemeReportFromHtml(input: {
           "var(--v2-overlay-simple-overlay-scrim)" &&
         typeof tokens.overlays["--v2-elevation-button-neutral"] === "string" &&
         tokens.overlays["--v2-elevation-button-neutral"]!.includes(
-          "var(--opencode-obsidian-background-primary)"
+          "var(--another-opencode-for-obsidian-background-primary)"
         ) &&
         tokens.overlays["--elevation-button-neutral"] === "var(--v2-elevation-button-neutral)",
       detail: tokens.overlays,
@@ -583,15 +605,15 @@ function buildThemeReportFromHtml(input: {
         ok: Boolean(input.runtimeDiagnostics),
         detail:
           input.runtimeDiagnostics ??
-          "No iframe diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:open-opencode-view`, then rerun this harness command.",
+          "No iframe diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=another-opencode-for-obsidian:open-opencode-view`, then rerun this harness command.",
       });
       input.checks.push(
         ...runtimeThemeChecks(
           input.runtimeDiagnostics,
-          typeof variables["--opencode-obsidian-page-background"] === "string"
-            ? variables["--opencode-obsidian-page-background"]
-            : typeof variables["--opencode-obsidian-background-primary"] === "string"
-              ? variables["--opencode-obsidian-background-primary"]
+          typeof variables["--another-opencode-for-obsidian-page-background"] === "string"
+            ? variables["--another-opencode-for-obsidian-page-background"]
+            : typeof variables["--another-opencode-for-obsidian-background-primary"] === "string"
+              ? variables["--another-opencode-for-obsidian-background-primary"]
               : null
         )
       );
@@ -603,7 +625,7 @@ function buildThemeReportFromHtml(input: {
         ok: Boolean(input.iframeDiagnostics),
         detail:
           input.iframeDiagnostics ??
-          "No iframe composition diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=opencode-obsidian:open-opencode-view`, then rerun this harness command.",
+          "No iframe composition diagnostics in runtime status yet. Open the OpenCode view, or run `obsidian command id=another-opencode-for-obsidian:open-opencode-view`, then rerun this harness command.",
       });
       input.checks.push(iframeAvoidsTransparentCompositingCheck(input.iframeDiagnostics));
       input.checks.push(obsidianAppearanceBackgroundCheck(input.iframeDiagnostics));
@@ -677,7 +699,7 @@ function themeAdvice(
         summary: "Runtime theme diagnostics passed; the OpenCode server is no longer serving HTML.",
         actions: [
           "The iframe already reported computed theme values, so this is valid theme evidence.",
-          "Run `obsidian command id=opencode-obsidian:start-opencode-server` before `bun run dev:theme` when you need to inspect live proxy HTML.",
+          "Run `obsidian command id=another-opencode-for-obsidian:start-opencode-server` before `bun run dev:theme` when you need to inspect live proxy HTML.",
         ],
       };
     }
@@ -701,8 +723,8 @@ function themeAdvice(
       summary: "Obsidian runtime has not published a proxy URL yet.",
       actions: [
         `Run \`bun run dev:install --vault ${vault}\`.`,
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
-        "Run `obsidian command id=opencode-obsidian:start-opencode-server`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
+        "Run `obsidian command id=another-opencode-for-obsidian:start-opencode-server`.",
       ],
     };
   }
@@ -712,7 +734,7 @@ function themeAdvice(
       summary: "Runtime theme diagnostics came from an older loaded plugin bundle.",
       actions: [
         "Run `bun run build`.",
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
         "Open the OpenCode pane and rerun `bun run dev:theme`.",
       ],
     };
@@ -724,7 +746,7 @@ function themeAdvice(
         "Runtime theme diagnostics came from a loaded plugin bundle older than the current theme contract.",
       actions: [
         "Run `bun run build`.",
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
         "Open the OpenCode pane and rerun `bun run dev:theme`.",
       ],
     };
@@ -736,7 +758,7 @@ function themeAdvice(
         "Runtime theme diagnostics came from a loaded plugin bundle older than the current theme contract.",
       actions: [
         "Run `bun run build`.",
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
         "Open the OpenCode pane and rerun `bun run dev:theme`.",
       ],
     };
@@ -747,7 +769,7 @@ function themeAdvice(
       summary: "Runtime proxy HTML does not match the iframe backdrop contract.",
       actions: [
         "Run `bun run build`.",
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
         "Open the OpenCode pane and rerun `bun run dev:theme`.",
       ],
     };
@@ -759,7 +781,7 @@ function themeAdvice(
         "Runtime theme diagnostics came from a bundle without the iframe workspace background contract.",
       actions: [
         "Run `bun run build`.",
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
         "Open the OpenCode pane and rerun `bun run dev:theme`.",
       ],
     };
@@ -771,7 +793,7 @@ function themeAdvice(
         "Runtime OpenCode iframe document does not match the Obsidian workspace background contract.",
       actions: [
         "Run `bun run build`.",
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
         "Open the OpenCode pane and rerun `bun run dev:theme`.",
       ],
     };
@@ -782,7 +804,7 @@ function themeAdvice(
       summary: "Runtime Obsidian host pane is painting a backdrop outside the iframe.",
       actions: [
         "Run `bun run build`.",
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
         "Open the OpenCode pane and rerun `bun run dev:theme`.",
       ],
     };
@@ -793,7 +815,7 @@ function themeAdvice(
       summary: "Runtime iframe is still using transparent compositing.",
       actions: [
         "Run `bun run build`.",
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
         "Open the OpenCode pane and rerun `bun run dev:theme`.",
       ],
     };
@@ -804,7 +826,7 @@ function themeAdvice(
       summary: "Runtime OpenCode iframe element is still painting a black Obsidian backdrop.",
       actions: [
         "Run `bun run build`.",
-        "Run `obsidian plugin:reload id=opencode-obsidian`.",
+        "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
         "Open the OpenCode pane and rerun `bun run dev:theme`.",
       ],
     };
@@ -817,7 +839,7 @@ function themeAdvice(
         summary:
           "Runtime proxy is reachable, but the OpenCode server behind it is not serving HTML.",
         actions: [
-          "Run `obsidian command id=opencode-obsidian:start-opencode-server`.",
+          "Run `obsidian command id=another-opencode-for-obsidian:start-opencode-server`.",
           "Then run `bun run dev:theme` before `--shutdown-after-last-client` exits the server.",
           "Use `bun run dev:theme:fixture` when you only need to verify current workspace theme code.",
         ],
@@ -829,7 +851,7 @@ function themeAdvice(
         summary: "Runtime OpenCode iframe still has backdrop-filter sampling enabled.",
         actions: [
           "Run `bun run build`.",
-          "Run `obsidian plugin:reload id=opencode-obsidian`.",
+          "Run `obsidian plugin:reload id=another-opencode-for-obsidian`.",
           "Open the OpenCode pane and rerun `bun run dev:theme`.",
           "Inspect the failed `backdrop-filter sampling` check; it lists the remaining element or pseudo-element.",
         ],
@@ -850,7 +872,7 @@ function themeAdvice(
         "Runtime proxy injection is valid, but the OpenCode iframe is inside a collapsed Obsidian pane.",
       actions: [
         "Open the OpenCode pane in Obsidian so the iframe has non-zero width and height.",
-        "Run `obsidian command id=opencode-obsidian:open-opencode-view` to reveal the pane without toggling it closed.",
+        "Run `obsidian command id=another-opencode-for-obsidian:open-opencode-view` to reveal the pane without toggling it closed.",
         "Rerun `bun run dev:theme` while the pane is visible.",
       ],
     };
@@ -862,8 +884,8 @@ function themeAdvice(
         "Runtime proxy injection is valid, but the iframe has not reported internal theme diagnostics.",
       actions: [
         "Keep the OpenCode pane visible and rerun `bun run dev:theme` after the iframe finishes loading.",
-        "Use `obsidian command id=opencode-obsidian:open-opencode-view` when the pane state is unclear.",
-        "Check `$XDG_STATE_HOME/opencode-obsidian/opencode-obsidian.log` for `theme diagnostics` entries.",
+        "Use `obsidian command id=another-opencode-for-obsidian:open-opencode-view` when the pane state is unclear.",
+        "Check `$XDG_STATE_HOME/another-opencode-for-obsidian/another-opencode-for-obsidian.log` for `theme diagnostics` entries.",
         "Use `bun run dev:theme:fixture` to isolate workspace code from Obsidian window state.",
       ],
     };
@@ -973,21 +995,21 @@ export function proxyDocumentBackgroundLayerCheck(body: string): {
 } {
   const requiredSnippets = [
     "#root",
-    "--opencode-obsidian-page-background",
-    "var(--opencode-obsidian-background-primary, transparent)",
+    "--another-opencode-for-obsidian-page-background",
+    "var(--another-opencode-for-obsidian-background-primary, transparent)",
     "background: transparent !important",
     "body::before",
     "left: 0;",
     "top: 0;",
     "width: 100vw;",
     "height: 100vh;",
-    "background-repeat: var(--opencode-obsidian-workspace-background-repeat, no-repeat)",
-    "--opencode-obsidian-workspace-background-position",
-    "background-position: var(--opencode-obsidian-workspace-background-position, center)",
-    "background-size: var(--opencode-obsidian-workspace-background-size, cover)",
-    "background-image: var(--opencode-obsidian-workspace-background-image, none)",
-    "opacity: var(--opencode-obsidian-workspace-background-opacity, 0)",
-    "filter: var(--opencode-obsidian-workspace-background-filter, none)",
+    "background-repeat: var(--another-opencode-for-obsidian-workspace-background-repeat, no-repeat)",
+    "--another-opencode-for-obsidian-workspace-background-position",
+    "background-position: var(--another-opencode-for-obsidian-workspace-background-position, center)",
+    "background-size: var(--another-opencode-for-obsidian-workspace-background-size, cover)",
+    "background-image: var(--another-opencode-for-obsidian-workspace-background-image, none)",
+    "opacity: var(--another-opencode-for-obsidian-workspace-background-opacity, 0)",
+    "filter: var(--another-opencode-for-obsidian-workspace-background-filter, none)",
     "sourceBoundary:",
     "obsidian-workspace-background-v1",
     "injectionState: collectInjectionState()",
@@ -996,22 +1018,23 @@ export function proxyDocumentBackgroundLayerCheck(body: string): {
   ];
   const forbiddenSnippets = [
     "body::after",
-    "--opencode-obsidian-iframe-page-background",
-    "--opencode-obsidian-iframe-backdrop-left",
-    "--opencode-obsidian-iframe-backdrop-top",
-    "--opencode-obsidian-iframe-backdrop-width",
-    "--opencode-obsidian-iframe-backdrop-height",
-    "--opencode-obsidian-parent-viewport-width",
-    "--opencode-obsidian-iframe-left",
+    "min-height: 100dvh",
+    "--another-opencode-for-obsidian-iframe-page-background",
+    "--another-opencode-for-obsidian-iframe-backdrop-left",
+    "--another-opencode-for-obsidian-iframe-backdrop-top",
+    "--another-opencode-for-obsidian-iframe-backdrop-width",
+    "--another-opencode-for-obsidian-iframe-backdrop-height",
+    "--another-opencode-for-obsidian-parent-viewport-width",
+    "--another-opencode-for-obsidian-iframe-left",
     // Old projection/compositing contracts. If these return, the iframe is no
     // longer owning its local background and resize/focus artifacts can return.
-    "--opencode-obsidian-workspace-background-plane",
+    "--another-opencode-for-obsidian-workspace-background-plane",
     "sourceBoundary.plane",
     "plane:",
-    "--opencode-obsidian-editor-background-image",
-    "--opencode-obsidian-editor-background-opacity",
-    "--opencode-obsidian-editor-background-position",
-    "--opencode-obsidian-editor-background-bluriness",
+    "--another-opencode-for-obsidian-editor-background-image",
+    "--another-opencode-for-obsidian-editor-background-opacity",
+    "--another-opencode-for-obsidian-editor-background-position",
+    "--another-opencode-for-obsidian-editor-background-bluriness",
     "var(--obsidian-editor-background-position, center)",
     "background-image: var(--obsidian-editor-background-image, none)",
     "opacity: var(--obsidian-editor-background-opacity, 0)",
@@ -1036,9 +1059,9 @@ export function proxyDisablesBackdropFilterSamplingCheck(body: string): {
   detail?: unknown;
 } {
   const requiredSnippets = [
-    'html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *',
-    'html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *::before',
-    'html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *::after',
+    'html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *',
+    'html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *::before',
+    'html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *::after',
     "-webkit-backdrop-filter: none !important",
     "backdrop-filter: none !important",
   ];
@@ -1217,7 +1240,7 @@ function themeWorkspaceBackgroundState(diagnostics: unknown): string | null {
   }
 
   const variables = themeDiagnosticsVariables(diagnostics);
-  const variableState = variables["--opencode-obsidian-workspace-background-state"];
+  const variableState = variables["--another-opencode-for-obsidian-workspace-background-state"];
   return typeof variableState === "string" && variableState.length > 0 ? variableState : null;
 }
 
@@ -1240,7 +1263,7 @@ function themeDiagnosticsCustomProperties(
 
 function editorBackgroundVariableNames(variables: Record<string, unknown>): string[] {
   return Object.keys(variables).filter((name) =>
-    name.startsWith("--opencode-obsidian-editor-background-")
+    name.startsWith("--another-opencode-for-obsidian-editor-background-")
   );
 }
 
@@ -1504,19 +1527,19 @@ function openCodeDocumentBackgroundLayerCheck(diagnostics: unknown): {
   const forbiddenRuntimeVariables = editorBackgroundVariableNames(variables);
   const forbiddenInlineVariables = editorBackgroundVariableNames(inlineVariables);
   const expectedImage =
-    cssString(variables["--opencode-obsidian-workspace-background-image"]) ??
+    cssString(variables["--another-opencode-for-obsidian-workspace-background-image"]) ??
     cssString(variables["--obsidian-workspace-background-image"]);
   const expectedOpacity =
-    cssString(variables["--opencode-obsidian-workspace-background-opacity"]) ??
+    cssString(variables["--another-opencode-for-obsidian-workspace-background-opacity"]) ??
     cssString(variables["--obsidian-workspace-background-opacity"]);
   const expectedBackgroundPosition =
-    cssString(variables["--opencode-obsidian-workspace-background-position"]) ??
+    cssString(variables["--another-opencode-for-obsidian-workspace-background-position"]) ??
     cssString(variables["--obsidian-workspace-background-position"]);
   const expectedBackgroundSize =
-    cssString(variables["--opencode-obsidian-workspace-background-size"]) ??
+    cssString(variables["--another-opencode-for-obsidian-workspace-background-size"]) ??
     cssString(variables["--obsidian-workspace-background-size"]);
   const expectedBackgroundBlendMode =
-    cssString(variables["--opencode-obsidian-workspace-background-blend-mode"]) ??
+    cssString(variables["--another-opencode-for-obsidian-workspace-background-blend-mode"]) ??
     cssString(variables["--obsidian-workspace-background-blend-mode"]);
   const expectedOpacityNumber =
     expectedOpacity === null ? null : Number.parseFloat(expectedOpacity);
@@ -1693,10 +1716,10 @@ function sourceBoundaryContractCheck(diagnostics: unknown): {
   const forbiddenInlineVariables = editorBackgroundVariableNames(inlineVariables);
   const workspaceBackgroundState = themeWorkspaceBackgroundState(diagnostics);
   const expectedImage =
-    cssString(variables["--opencode-obsidian-workspace-background-image"]) ??
+    cssString(variables["--another-opencode-for-obsidian-workspace-background-image"]) ??
     cssString(variables["--obsidian-workspace-background-image"]);
   const expectedOpacity =
-    cssString(variables["--opencode-obsidian-workspace-background-opacity"]) ??
+    cssString(variables["--another-opencode-for-obsidian-workspace-background-opacity"]) ??
     cssString(variables["--obsidian-workspace-background-opacity"]);
   const expectedOpacityNumber =
     expectedOpacity === null ? null : Number.parseFloat(expectedOpacity);

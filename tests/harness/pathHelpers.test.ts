@@ -23,7 +23,9 @@ describe("harness path helpers", () => {
   });
 
   test("default path selection uses env first and home-relative defaults otherwise", () => {
-    expect(defaultVaultPath({ OPENCODE_OBSIDIAN_VAULT: "~/vault" })).toBe(join(homedir(), "vault"));
+    expect(defaultVaultPath({ ANOTHER_OPENCODE_FOR_OBSIDIAN_VAULT: "~/vault" })).toBe(
+      join(homedir(), "vault")
+    );
     expect(defaultOpenCodeSourcePath({ OPENCODE_SOURCE: "~/opencode" })).toBe(
       join(homedir(), "opencode")
     );
@@ -32,6 +34,6 @@ describe("harness path helpers", () => {
   });
 
   test("pluginDir remains the single vault plugin path constructor", () => {
-    expect(pluginDir("/vault")).toBe("/vault/.obsidian/plugins/opencode-obsidian");
+    expect(pluginDir("/vault")).toBe("/vault/.obsidian/plugins/another-opencode-for-obsidian");
   });
 });

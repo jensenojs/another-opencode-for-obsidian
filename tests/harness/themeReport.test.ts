@@ -8,8 +8,8 @@ import {
 } from "../../scripts/harness/themeReport";
 
 const baseThemeVariables = {
-  "--opencode-obsidian-page-background": "rgba(0, 0, 0, 0.25)",
-  "--opencode-obsidian-background-primary": "#000000",
+  "--another-opencode-for-obsidian-page-background": "rgba(0, 0, 0, 0.25)",
+  "--another-opencode-for-obsidian-background-primary": "#000000",
   "--obsidian-editor-background-image": 'url("https://example.test/bg.jpg")',
   "--obsidian-editor-background-opacity": "0.3",
   "--obsidian-editor-background-bluriness": "blur(5px)",
@@ -27,13 +27,14 @@ const baseThemeVariables = {
   "--obsidian-workspace-background-size": "cover",
   "--obsidian-workspace-background-repeat": "no-repeat",
   "--obsidian-workspace-background-blend-mode": "overlay",
-  "--opencode-obsidian-workspace-background-state": "enabled",
-  "--opencode-obsidian-workspace-background-image": 'url("https://example.test/bg.jpg")',
-  "--opencode-obsidian-workspace-background-opacity": "0.3",
-  "--opencode-obsidian-workspace-background-position": "center",
-  "--opencode-obsidian-workspace-background-size": "cover",
-  "--opencode-obsidian-workspace-background-repeat": "no-repeat",
-  "--opencode-obsidian-workspace-background-blend-mode": "overlay",
+  "--another-opencode-for-obsidian-workspace-background-state": "enabled",
+  "--another-opencode-for-obsidian-workspace-background-image":
+    'url("https://example.test/bg.jpg")',
+  "--another-opencode-for-obsidian-workspace-background-opacity": "0.3",
+  "--another-opencode-for-obsidian-workspace-background-position": "center",
+  "--another-opencode-for-obsidian-workspace-background-size": "cover",
+  "--another-opencode-for-obsidian-workspace-background-repeat": "no-repeat",
+  "--another-opencode-for-obsidian-workspace-background-blend-mode": "overlay",
 };
 
 const stableDocumentRoots = [
@@ -90,7 +91,7 @@ function buildRuntimeReport(runtimeDiagnostics: unknown) {
   return buildThemeReport({
     vault: "/vault",
     source: "runtime",
-    pluginDir: (vault) => `${vault}/.obsidian/plugins/opencode-obsidian`,
+    pluginDir: (vault) => `${vault}/.obsidian/plugins/another-opencode-for-obsidian`,
     formatPath: (path) => path,
     readJson: (path) => {
       if (path.endsWith("status.json")) {
@@ -292,12 +293,12 @@ function findCheck(report: Awaited<ReturnType<typeof buildThemeReport>>, name: s
 describe("proxyDocumentBackgroundLayerCheck", () => {
   test("passes current proxy HTML shape for the iframe workspace surface", () => {
     const check = proxyDocumentBackgroundLayerCheck(`
-          <style data-opencode-obsidian-appearance>
+          <style data-another-opencode-for-obsidian-appearance>
             html,
             body {
               background: var(
-                --opencode-obsidian-page-background,
-                var(--opencode-obsidian-background-primary, transparent)
+                --another-opencode-for-obsidian-page-background,
+                var(--another-opencode-for-obsidian-background-primary, transparent)
               ) !important;
             }
           #root {
@@ -310,12 +311,12 @@ describe("proxyDocumentBackgroundLayerCheck", () => {
               top: 0;
               width: 100vw;
               height: 100vh;
-              background-repeat: var(--opencode-obsidian-workspace-background-repeat, no-repeat);
-              background-position: var(--opencode-obsidian-workspace-background-position, center);
-              background-size: var(--opencode-obsidian-workspace-background-size, cover);
-              background-image: var(--opencode-obsidian-workspace-background-image, none);
-              opacity: var(--opencode-obsidian-workspace-background-opacity, 0);
-              filter: var(--opencode-obsidian-workspace-background-filter, none);
+              background-repeat: var(--another-opencode-for-obsidian-workspace-background-repeat, no-repeat);
+              background-position: var(--another-opencode-for-obsidian-workspace-background-position, center);
+              background-size: var(--another-opencode-for-obsidian-workspace-background-size, cover);
+              background-image: var(--another-opencode-for-obsidian-workspace-background-image, none);
+              opacity: var(--another-opencode-for-obsidian-workspace-background-opacity, 0);
+              filter: var(--another-opencode-for-obsidian-workspace-background-filter, none);
             }
             </style>
           <script>
@@ -336,25 +337,25 @@ describe("proxyDocumentBackgroundLayerCheck", () => {
 
   test("flags proxy HTML that paints extra iframe document backdrops", () => {
     const check = proxyDocumentBackgroundLayerCheck(`
-      <style data-opencode-obsidian-appearance>
+      <style data-another-opencode-for-obsidian-appearance>
         html,
         body,
         #root {
           background: transparent !important;
         }
           body {
-            background: var(--opencode-obsidian-iframe-page-background, transparent) !important;
+            background: var(--another-opencode-for-obsidian-iframe-page-background, transparent) !important;
           }
           body::before {
-            left: var(--opencode-obsidian-iframe-backdrop-left, 0px);
-          background-image: var(--opencode-obsidian-editor-background-image, none);
+            left: var(--another-opencode-for-obsidian-iframe-backdrop-left, 0px);
+          background-image: var(--another-opencode-for-obsidian-editor-background-image, none);
         }
           body::after {
             background-color: var(--background-primary);
           }
         </style>
-      <script data-opencode-obsidian-theme>
-        var theme = {"colorScheme":"dark","variables":{"--opencode-obsidian-editor-background-image":"none"}};
+      <script data-another-opencode-for-obsidian-theme>
+        var theme = {"colorScheme":"dark","variables":{"--another-opencode-for-obsidian-editor-background-image":"none"}};
         appearanceBackground: describePseudoElement(document.body, '::before')
       </script>
     `);
@@ -362,19 +363,19 @@ describe("proxyDocumentBackgroundLayerCheck", () => {
     expect(check.ok).toBe(false);
     expect(check.detail).toEqual({
       missingSnippets: [
-        "--opencode-obsidian-page-background",
-        "var(--opencode-obsidian-background-primary, transparent)",
+        "--another-opencode-for-obsidian-page-background",
+        "var(--another-opencode-for-obsidian-background-primary, transparent)",
         "left: 0;",
         "top: 0;",
         "width: 100vw;",
         "height: 100vh;",
-        "background-repeat: var(--opencode-obsidian-workspace-background-repeat, no-repeat)",
-        "--opencode-obsidian-workspace-background-position",
-        "background-position: var(--opencode-obsidian-workspace-background-position, center)",
-        "background-size: var(--opencode-obsidian-workspace-background-size, cover)",
-        "background-image: var(--opencode-obsidian-workspace-background-image, none)",
-        "opacity: var(--opencode-obsidian-workspace-background-opacity, 0)",
-        "filter: var(--opencode-obsidian-workspace-background-filter, none)",
+        "background-repeat: var(--another-opencode-for-obsidian-workspace-background-repeat, no-repeat)",
+        "--another-opencode-for-obsidian-workspace-background-position",
+        "background-position: var(--another-opencode-for-obsidian-workspace-background-position, center)",
+        "background-size: var(--another-opencode-for-obsidian-workspace-background-size, cover)",
+        "background-image: var(--another-opencode-for-obsidian-workspace-background-image, none)",
+        "opacity: var(--another-opencode-for-obsidian-workspace-background-opacity, 0)",
+        "filter: var(--another-opencode-for-obsidian-workspace-background-filter, none)",
         "sourceBoundary:",
         "obsidian-workspace-background-v1",
         "injectionState: collectInjectionState()",
@@ -382,10 +383,55 @@ describe("proxyDocumentBackgroundLayerCheck", () => {
       ],
       presentForbiddenSnippets: [
         "body::after",
-        "--opencode-obsidian-iframe-page-background",
-        "--opencode-obsidian-iframe-backdrop-left",
-        "--opencode-obsidian-editor-background-image",
+        "--another-opencode-for-obsidian-iframe-page-background",
+        "--another-opencode-for-obsidian-iframe-backdrop-left",
+        "--another-opencode-for-obsidian-editor-background-image",
       ],
+    });
+  });
+
+  test("flags proxy HTML that makes the OpenCode app root own viewport height", () => {
+    const check = proxyDocumentBackgroundLayerCheck(`
+          <style data-another-opencode-for-obsidian-appearance>
+            html,
+            body {
+              background: var(
+                --another-opencode-for-obsidian-page-background,
+                var(--another-opencode-for-obsidian-background-primary, transparent)
+              ) !important;
+            }
+            #root {
+              background: transparent !important;
+              min-height: 100dvh;
+            }
+            body::before {
+              content: "";
+              position: fixed;
+              left: 0;
+              top: 0;
+              width: 100vw;
+              height: 100vh;
+              background-repeat: var(--another-opencode-for-obsidian-workspace-background-repeat, no-repeat);
+              background-position: var(--another-opencode-for-obsidian-workspace-background-position, center);
+              background-size: var(--another-opencode-for-obsidian-workspace-background-size, cover);
+              background-image: var(--another-opencode-for-obsidian-workspace-background-image, none);
+              opacity: var(--another-opencode-for-obsidian-workspace-background-opacity, 0);
+              filter: var(--another-opencode-for-obsidian-workspace-background-filter, none);
+            }
+            </style>
+          <script>
+              sourceBoundary:
+                obsidian-workspace-background-v1
+            injectionState: collectInjectionState()
+            appearanceBackground: describePseudoElement(document.body, '::before')
+            appearanceImageBackground: describePseudoElement(document.body, '::after')
+        </script>
+    `);
+
+    expect(check.ok).toBe(false);
+    expect(check.detail).toEqual({
+      missingSnippets: [],
+      presentForbiddenSnippets: ["min-height: 100dvh"],
     });
   });
 });
@@ -393,10 +439,10 @@ describe("proxyDocumentBackgroundLayerCheck", () => {
 describe("proxyDisablesBackdropFilterSamplingCheck", () => {
   test("passes when Obsidian appearance disables iframe backdrop sampling by capability", () => {
     const check = proxyDisablesBackdropFilterSamplingCheck(`
-      <style data-opencode-obsidian-appearance>
-        html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *,
-        html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *::before,
-        html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *::after {
+      <style data-another-opencode-for-obsidian-appearance>
+        html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *,
+        html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *::before,
+        html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *::after {
           -webkit-backdrop-filter: none !important;
           backdrop-filter: none !important;
         }
@@ -409,7 +455,7 @@ describe("proxyDisablesBackdropFilterSamplingCheck", () => {
 
   test("fails when the proxy does not disable backdrop sampling globally", () => {
     const check = proxyDisablesBackdropFilterSamplingCheck(`
-      <style data-opencode-obsidian-appearance>
+      <style data-another-opencode-for-obsidian-appearance>
         .scroll-view__thumb::after {
           backdrop-filter: none !important;
         }
@@ -419,9 +465,9 @@ describe("proxyDisablesBackdropFilterSamplingCheck", () => {
     expect(check.ok).toBe(false);
     expect(check.detail).toEqual({
       missingSnippets: [
-        'html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *',
-        'html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *::before',
-        'html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *::after',
+        'html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *',
+        'html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *::before',
+        'html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *::after',
         "-webkit-backdrop-filter: none !important",
       ],
     });
@@ -433,7 +479,7 @@ describe("extractInjectedTheme", () => {
     const html = `
       <html>
         <head>
-          <script data-opencode-obsidian-theme>
+          <script data-another-opencode-for-obsidian-theme>
             (function() {
               var theme = {"colorScheme":"dark","variables":{"--background-base":"rgba(0, 0, 0, 0.25)"}};
             })();
@@ -461,7 +507,7 @@ describe("buildThemeReport", () => {
     const report = await buildThemeReport({
       vault: "/home/alice/vault",
       source: "runtime",
-      pluginDir: (vault) => `${vault}/.obsidian/plugins/opencode-obsidian`,
+      pluginDir: (vault) => `${vault}/.obsidian/plugins/another-opencode-for-obsidian`,
       formatPath: () => "~/vault",
       readJson: (path) => {
         if (path.endsWith("data.json")) {
@@ -503,7 +549,9 @@ describe("buildThemeReport", () => {
     expect(report.summary).toBe(
       "Runtime theme diagnostics came from an older loaded plugin bundle."
     );
-    expect(report.actions).toContain("Run `obsidian plugin:reload id=opencode-obsidian`.");
+    expect(report.actions).toContain(
+      "Run `obsidian plugin:reload id=another-opencode-for-obsidian`."
+    );
   });
 
   test("fails when active workspace background mode still has iframe backdrop sampling", async () => {
@@ -545,7 +593,7 @@ describe("buildThemeReport", () => {
     const report = await buildRuntimeReport(
       runtimeDiagnostics({
         variables: {
-          "--opencode-obsidian-workspace-background-state": "disabled",
+          "--another-opencode-for-obsidian-workspace-background-state": "disabled",
         },
         sourceBoundary: {
           workspaceBackgroundState: "disabled",
@@ -774,9 +822,9 @@ describe("buildThemeReport", () => {
             "--obsidian-editor-background-opacity": "0",
             "--obsidian-workspace-background-image": "none",
             "--obsidian-workspace-background-opacity": "0",
-            "--opencode-obsidian-workspace-background-state": "disabled",
-            "--opencode-obsidian-workspace-background-image": "none",
-            "--opencode-obsidian-workspace-background-opacity": "0",
+            "--another-opencode-for-obsidian-workspace-background-state": "disabled",
+            "--another-opencode-for-obsidian-workspace-background-image": "none",
+            "--another-opencode-for-obsidian-workspace-background-opacity": "0",
           },
           sourceBoundary: {
             contract: "obsidian-workspace-background-v1",

@@ -38,7 +38,9 @@ function runInjectedBridge(bodyMarkup: string): {
 }
 
 function extractBridgeScript(injected: string): string {
-  const match = injected.match(/<script data-opencode-obsidian-bridge>\s*([\s\S]*?)\s*<\/script>/);
+  const match = injected.match(
+    /<script data-another-opencode-for-obsidian-bridge>\s*([\s\S]*?)\s*<\/script>/
+  );
   if (!match) {
     throw new Error("Bridge script was not injected");
   }
@@ -137,8 +139,8 @@ describe("ProxyInjection", () => {
     expect(body).toContain("basic-tool-path-text");
     expect(body).toContain("absoluteFilesystemRootPattern");
     expect(body).toContain("lineNumberFromPath");
-    expect(body).not.toContain("data-opencode-obsidian-appearance");
-    expect(body).not.toContain("data-opencode-obsidian-theme");
+    expect(body).not.toContain("data-another-opencode-for-obsidian-appearance");
+    expect(body).not.toContain("data-another-opencode-for-obsidian-theme");
   });
 
   test("posts a vault file open message for a session review file path", () => {
@@ -510,27 +512,28 @@ describe("ProxyInjection", () => {
       colorScheme: "dark",
       variables: {
         "--background-base": "transparent",
-        "--opencode-obsidian-page-background": "rgba(0, 0, 0, 0.25)",
-        "--opencode-obsidian-background-primary": "#000000",
+        "--another-opencode-for-obsidian-page-background": "rgba(0, 0, 0, 0.25)",
+        "--another-opencode-for-obsidian-background-primary": "#000000",
         "--surface-raised-base": "color-mix(in srgb, #222222 64%, transparent)",
         "background-base": "invalid",
         "--empty": "",
       },
     });
 
-    expect(body).toContain("data-opencode-obsidian-appearance");
-    expect(body).toContain("data-opencode-obsidian-theme");
-    expect(body).toContain("data-opencode-obsidian-bridge");
+    expect(body).toContain("data-another-opencode-for-obsidian-appearance");
+    expect(body).toContain("data-another-opencode-for-obsidian-theme");
+    expect(body).toContain("data-another-opencode-for-obsidian-bridge");
     expect(body).toContain("body {");
     expect(body).toContain("position: relative;");
     expect(body).toContain("isolation: isolate;");
-    expect(body).toContain("--opencode-obsidian-page-background,");
-    expect(body).toContain("var(--opencode-obsidian-background-primary, transparent)");
+    expect(body).toContain("--another-opencode-for-obsidian-page-background,");
+    expect(body).toContain("var(--another-opencode-for-obsidian-background-primary, transparent)");
     expect(body).toContain("#root {");
     expect(body).toContain("background: transparent !important;");
-    expect(body).not.toContain("--opencode-obsidian-iframe-page-background");
-    expect(body).not.toContain("--opencode-obsidian-pane-background");
-    expect(body).not.toContain("--opencode-obsidian-pane-background-opacity");
+    expect(body).not.toContain("min-height: 100dvh");
+    expect(body).not.toContain("--another-opencode-for-obsidian-iframe-page-background");
+    expect(body).not.toContain("--another-opencode-for-obsidian-pane-background");
+    expect(body).not.toContain("--another-opencode-for-obsidian-pane-background-opacity");
     expect(body).toContain("body::before");
     expect(body).not.toContain("body::after");
     expect(body).toContain("position: fixed;");
@@ -538,36 +541,40 @@ describe("ProxyInjection", () => {
     expect(body).toContain("top: 0;");
     expect(body).toContain("width: 100vw;");
     expect(body).toContain("height: 100vh;");
-    expect(body).not.toContain("--opencode-obsidian-workspace-background-plane");
+    expect(body).not.toContain("--another-opencode-for-obsidian-workspace-background-plane");
     expect(body).toContain(
-      "background-blend-mode: var(--opencode-obsidian-workspace-background-blend-mode, overlay)"
+      "background-blend-mode: var(--another-opencode-for-obsidian-workspace-background-blend-mode, overlay)"
     );
     expect(body).toContain(
-      "background-repeat: var(--opencode-obsidian-workspace-background-repeat, no-repeat)"
+      "background-repeat: var(--another-opencode-for-obsidian-workspace-background-repeat, no-repeat)"
     );
-    expect(body).toContain("--opencode-obsidian-workspace-background-position");
+    expect(body).toContain("--another-opencode-for-obsidian-workspace-background-position");
     expect(body).toContain(
-      "background-position: var(--opencode-obsidian-workspace-background-position, center)"
-    );
-    expect(body).toContain(
-      "background-size: var(--opencode-obsidian-workspace-background-size, cover)"
+      "background-position: var(--another-opencode-for-obsidian-workspace-background-position, center)"
     );
     expect(body).toContain(
-      "background-image: var(--opencode-obsidian-workspace-background-image, none)"
+      "background-size: var(--another-opencode-for-obsidian-workspace-background-size, cover)"
     );
-    expect(body).toContain("opacity: var(--opencode-obsidian-workspace-background-opacity, 0)");
-    expect(body).toContain("filter: var(--opencode-obsidian-workspace-background-filter, none);");
-    expect(body).not.toContain("--opencode-obsidian-editor-background-position");
-    expect(body).not.toContain("--opencode-obsidian-editor-background-opacity");
-    expect(body).not.toContain("--opencode-obsidian-editor-background-bluriness");
-    expect(body).not.toContain("--opencode-obsidian-iframe-background-position");
-    expect(body).not.toContain("--opencode-obsidian-iframe-background-size");
-    expect(body).not.toContain("--opencode-obsidian-iframe-backdrop-left");
-    expect(body).not.toContain("--opencode-obsidian-iframe-backdrop-top");
-    expect(body).not.toContain("--opencode-obsidian-iframe-backdrop-width");
-    expect(body).not.toContain("--opencode-obsidian-iframe-backdrop-height");
-    expect(body).not.toContain("--opencode-obsidian-parent-viewport-width");
-    expect(body).not.toContain("--opencode-obsidian-iframe-left");
+    expect(body).toContain(
+      "background-image: var(--another-opencode-for-obsidian-workspace-background-image, none)"
+    );
+    expect(body).toContain(
+      "opacity: var(--another-opencode-for-obsidian-workspace-background-opacity, 0)"
+    );
+    expect(body).toContain(
+      "filter: var(--another-opencode-for-obsidian-workspace-background-filter, none);"
+    );
+    expect(body).not.toContain("--another-opencode-for-obsidian-editor-background-position");
+    expect(body).not.toContain("--another-opencode-for-obsidian-editor-background-opacity");
+    expect(body).not.toContain("--another-opencode-for-obsidian-editor-background-bluriness");
+    expect(body).not.toContain("--another-opencode-for-obsidian-iframe-background-position");
+    expect(body).not.toContain("--another-opencode-for-obsidian-iframe-background-size");
+    expect(body).not.toContain("--another-opencode-for-obsidian-iframe-backdrop-left");
+    expect(body).not.toContain("--another-opencode-for-obsidian-iframe-backdrop-top");
+    expect(body).not.toContain("--another-opencode-for-obsidian-iframe-backdrop-width");
+    expect(body).not.toContain("--another-opencode-for-obsidian-iframe-backdrop-height");
+    expect(body).not.toContain("--another-opencode-for-obsidian-parent-viewport-width");
+    expect(body).not.toContain("--another-opencode-for-obsidian-iframe-left");
     expect(body).toContain(
       "appearanceBackground: describePseudoElement(document.body, '::before')"
     );
@@ -575,7 +582,7 @@ describe("ProxyInjection", () => {
       "appearanceImageBackground: describePseudoElement(document.body, '::after')"
     );
     expect(body).not.toContain('[data-component="dialog-v2"][data-variant="settings"]');
-    expect(body).not.toContain("--opencode-obsidian-modal-surface");
+    expect(body).not.toContain("--another-opencode-for-obsidian-modal-surface");
     expect(body).toContain(
       "replaceRootVariables(root, theme.variables, appliedThemeVariableNames)"
     );
@@ -606,8 +613,10 @@ describe("ProxyInjection", () => {
     expect(body).toContain(
       '"--surface-raised-base":"color-mix(in srgb, #222222 64%, transparent)"'
     );
-    expect(body).toContain('"--opencode-obsidian-page-background":"rgba(0, 0, 0, 0.25)"');
-    expect(body).not.toContain('"--opencode-obsidian-editor-background-image"');
+    expect(body).toContain(
+      '"--another-opencode-for-obsidian-page-background":"rgba(0, 0, 0, 0.25)"'
+    );
+    expect(body).not.toContain('"--another-opencode-for-obsidian-editor-background-image"');
     expect(body).toContain(`type: ${JSON.stringify(BRIDGE_MESSAGES.themeDiagnostics)}`);
     expect(body).toContain("visibleBackgrounds: collectVisibleBackgrounds()");
     expect(body).toContain("largeElementSamples: collectLargeElementSamples()");

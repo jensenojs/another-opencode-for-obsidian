@@ -32,24 +32,36 @@ describe("createOpenCodeWebViewTheme", () => {
     });
 
     expect(theme.colorScheme).toBe("dark");
-    expect(theme.variables["--opencode-obsidian-page-background"]).toBe("rgba(0, 0, 0, 0.25)");
-    expect(theme.variables["--opencode-obsidian-background-primary"]).toBe("#000000");
-    expect(theme.variables["--opencode-obsidian-background-primary-alt"]).toBe("rgb(38, 38, 39)");
-    expect(theme.variables["--opencode-obsidian-pane-background"]).toBeUndefined();
-    expect(theme.variables["--opencode-obsidian-page-background"]).not.toBe(
-      theme.variables["--opencode-obsidian-background-primary"]
+    expect(theme.variables["--another-opencode-for-obsidian-page-background"]).toBe(
+      "rgba(0, 0, 0, 0.25)"
     );
-    expect(theme.variables["--opencode-obsidian-editor-background-image"]).toBeUndefined();
-    expect(theme.variables["--opencode-obsidian-editor-background-opacity"]).toBeUndefined();
-    expect(theme.variables["--opencode-obsidian-editor-background-position"]).toBeUndefined();
-    expect(theme.variables["--opencode-obsidian-editor-background-bluriness"]).toBeUndefined();
+    expect(theme.variables["--another-opencode-for-obsidian-background-primary"]).toBe("#000000");
+    expect(theme.variables["--another-opencode-for-obsidian-background-primary-alt"]).toBe(
+      "rgb(38, 38, 39)"
+    );
+    expect(theme.variables["--another-opencode-for-obsidian-pane-background"]).toBeUndefined();
+    expect(theme.variables["--another-opencode-for-obsidian-page-background"]).not.toBe(
+      theme.variables["--another-opencode-for-obsidian-background-primary"]
+    );
+    expect(
+      theme.variables["--another-opencode-for-obsidian-editor-background-image"]
+    ).toBeUndefined();
+    expect(
+      theme.variables["--another-opencode-for-obsidian-editor-background-opacity"]
+    ).toBeUndefined();
+    expect(
+      theme.variables["--another-opencode-for-obsidian-editor-background-position"]
+    ).toBeUndefined();
+    expect(
+      theme.variables["--another-opencode-for-obsidian-editor-background-bluriness"]
+    ).toBeUndefined();
     expect(theme.variables["--obsidian-editor-background-image"]).toBe(
       'url("https://example.test/bg.jpg")'
     );
     expect(theme.variables["--obsidian-editor-background-opacity"]).toBe("0.3");
     expect(theme.variables["--obsidian-editor-background-bluriness"]).toBe("blur(5px)");
     expect(theme.variables["--obsidian-editor-background-position"]).toBe("center");
-    expect(theme.variables["--opencode-obsidian-modal-surface"]).toBeUndefined();
+    expect(theme.variables["--another-opencode-for-obsidian-modal-surface"]).toBeUndefined();
     expect(theme.variables["--background-base"]).toBe("var(--v2-background-bg-base)");
     expect(theme.variables["--background-strong"]).toBe("transparent");
     expect(theme.variables["--background-weak"]).toBe("var(--v2-background-bg-layer-01)");
@@ -63,53 +75,53 @@ describe("createOpenCodeWebViewTheme", () => {
     expect(theme.variables["--text-link-base"]).toBe("var(--v2-text-text-accent)");
     expect(theme.variables["--text-base"]).toBe("var(--v2-text-text-base)");
     expect(theme.variables["--v2-text-text-muted"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-text-muted) 68%, var(--opencode-obsidian-text-normal))"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-text-muted) 68%, var(--another-opencode-for-obsidian-text-normal))"
     );
     expect(theme.variables["--v2-text-text-faint"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-text-faint) 62%, var(--opencode-obsidian-text-normal))"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-text-faint) 62%, var(--another-opencode-for-obsidian-text-normal))"
     );
     expect(theme.variables["--v2-border-border-base"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-border) 64%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-border) 64%, transparent)"
     );
     expect(theme.variables["--v2-text-text-accent"]).toBe(
-      "color-mix(in srgb, #d79921 72%, var(--opencode-obsidian-text-normal))"
+      "color-mix(in srgb, #d79921 72%, var(--another-opencode-for-obsidian-text-normal))"
     );
     expect(theme.variables["--v2-background-bg-accent"]).toBe(
-      "color-mix(in srgb, #d79921 36%, var(--opencode-obsidian-background-secondary))"
+      "color-mix(in srgb, #d79921 36%, var(--another-opencode-for-obsidian-background-secondary))"
     );
     expect(theme.variables["--v2-border-border-focus"]).toBe(
-      "color-mix(in srgb, #d79921 52%, var(--opencode-obsidian-border))"
+      "color-mix(in srgb, #d79921 52%, var(--another-opencode-for-obsidian-border))"
     );
     expect(theme.variables["--syntax-string"]).toBe(
-      "color-mix(in srgb, #98971a 42%, var(--opencode-obsidian-text-normal))"
+      "color-mix(in srgb, #98971a 42%, var(--another-opencode-for-obsidian-text-normal))"
     );
     expect(theme.variables["--syntax-keyword"]).toBe(
-      "color-mix(in srgb, #d79921 56%, var(--opencode-obsidian-text-normal))"
+      "color-mix(in srgb, #d79921 56%, var(--another-opencode-for-obsidian-text-normal))"
     );
     expect(theme.variables["--markdown-code"]).toBe("var(--v2-text-text-muted)");
     expect(theme.variables["--markdown-link"]).toBe("var(--v2-text-text-accent)");
     expect(theme.variables["--v2-background-bg-base"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 28%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) 28%, transparent)"
     );
     expect(theme.variables["--v2-background-bg-deep"]).toBe("transparent");
     expect(theme.variables["--v2-background-bg-layer-01"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 36%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) 36%, transparent)"
     );
     expect(theme.variables["--v2-background-bg-layer-03"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 58%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) 58%, transparent)"
     );
     expect(theme.variables["--v2-background-bg-layer-04"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 68%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) 68%, transparent)"
     );
     expect(theme.variables["--v2-overlay-simple-overlay-scrim"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-background-primary) 70%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-background-primary) 70%, transparent)"
     );
     expect(theme.variables["--background-bg-base"]).toBe("var(--v2-background-bg-base)");
     expect(theme.variables["--background-bg-layer-01"]).toBe("var(--v2-background-bg-layer-01)");
     expect(theme.variables["--text-text-base"]).toBe("var(--v2-text-text-base)");
     expect(theme.variables["--border-border-base"]).toBe("var(--v2-border-border-base)");
     expect(theme.variables["--v2-elevation-button-neutral"]).toContain(
-      "var(--opencode-obsidian-background-primary)"
+      "var(--another-opencode-for-obsidian-background-primary)"
     );
     expect(theme.variables["--elevation-button-neutral"]).toBe(
       "var(--v2-elevation-button-neutral)"
@@ -126,7 +138,7 @@ describe("createOpenCodeWebViewTheme", () => {
     const legacyEntries = Object.entries(theme.variables).filter(
       ([name]) =>
         !name.startsWith("--v2-") &&
-        !name.startsWith("--opencode-obsidian-") &&
+        !name.startsWith("--another-opencode-for-obsidian-") &&
         !name.startsWith("--obsidian-editor-background-") &&
         !name.startsWith("--obsidian-workspace-background-") &&
         !name.startsWith("--font-")
@@ -176,19 +188,23 @@ describe("createOpenCodeWebViewTheme", () => {
       workspaceBackgroundBorder: "transparent",
     });
 
-    expect(theme.variables["--opencode-obsidian-workspace-background-state"]).toBe("enabled");
-    expect(theme.variables["--opencode-obsidian-workspace-background-filter"]).toBe("blur(5px)");
+    expect(theme.variables["--another-opencode-for-obsidian-workspace-background-state"]).toBe(
+      "enabled"
+    );
+    expect(theme.variables["--another-opencode-for-obsidian-workspace-background-filter"]).toBe(
+      "blur(5px)"
+    );
     expect(theme.variables["--v2-background-bg-base"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 40%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) 40%, transparent)"
     );
     expect(theme.variables["--v2-background-bg-layer-01"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 50%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) 50%, transparent)"
     );
     expect(theme.variables["--v2-background-bg-layer-02"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 60%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) 60%, transparent)"
     );
     expect(theme.variables["--v2-background-bg-layer-04"]).toBe(
-      "color-mix(in srgb, var(--opencode-obsidian-background-secondary) 80%, transparent)"
+      "color-mix(in srgb, var(--another-opencode-for-obsidian-background-secondary) 80%, transparent)"
     );
     expect(theme.variables["--v2-background-bg-deep"]).toBe("transparent");
     expect(theme.variables["--background-stronger"]).toBe("transparent");
@@ -230,7 +246,9 @@ describe("createOpenCodeWebViewTheme", () => {
     });
 
     expect(theme.variables["--obsidian-workspace-background-filter"]).toBe("blur(low)");
-    expect(theme.variables["--opencode-obsidian-workspace-background-filter"]).toBe("blur(5px)");
+    expect(theme.variables["--another-opencode-for-obsidian-workspace-background-filter"]).toBe(
+      "blur(5px)"
+    );
   });
 });
 
@@ -276,15 +294,21 @@ describe("captureObsidianWebViewTheme", () => {
 
       const theme = captureObsidianWebViewTheme(window.document.body as unknown as HTMLElement);
 
-      expect(theme.variables["--opencode-obsidian-page-background"]).toBe("rgb(29, 32, 33)");
-      expect(theme.variables["--opencode-obsidian-background-primary"]).toBe("#000");
-      expect(theme.variables["--opencode-obsidian-background-primary-alt"]).toBe("rgb(38, 38, 39)");
-      expect(theme.variables["--opencode-obsidian-pane-background"]).toBeUndefined();
-      expect(theme.variables["--opencode-obsidian-editor-background-image"]).toBeUndefined();
+      expect(theme.variables["--another-opencode-for-obsidian-page-background"]).toBe(
+        "rgb(29, 32, 33)"
+      );
+      expect(theme.variables["--another-opencode-for-obsidian-background-primary"]).toBe("#000");
+      expect(theme.variables["--another-opencode-for-obsidian-background-primary-alt"]).toBe(
+        "rgb(38, 38, 39)"
+      );
+      expect(theme.variables["--another-opencode-for-obsidian-pane-background"]).toBeUndefined();
+      expect(
+        theme.variables["--another-opencode-for-obsidian-editor-background-image"]
+      ).toBeUndefined();
       expect(theme.variables["--obsidian-editor-background-image"]).toBe("none");
       expect(theme.variables["--obsidian-editor-background-opacity"]).toBe("0");
-      expect(theme.variables["--opencode-obsidian-success"]).toBe("rgb(84, 182, 122)");
-      expect(theme.variables["--opencode-obsidian-info"]).toBe("rgb(95, 163, 231)");
+      expect(theme.variables["--another-opencode-for-obsidian-success"]).toBe("rgb(84, 182, 122)");
+      expect(theme.variables["--another-opencode-for-obsidian-info"]).toBe("rgb(95, 163, 231)");
     } finally {
       globalThis.getComputedStyle = previousGetComputedStyle;
       globalThis.HTMLElement = previousHTMLElement;
@@ -342,13 +366,27 @@ describe("captureObsidianWebViewTheme", () => {
 
       expect(view.classList.contains("markdown-source-view")).toBe(true);
       expect(theme.colorScheme).toBe("dark");
-      expect(theme.variables["--opencode-obsidian-page-background"]).toBe("rgb(29, 32, 33)");
-      expect(theme.variables["--opencode-obsidian-background-primary"]).toBe("rgb(40, 40, 40)");
-      expect(theme.variables["--opencode-obsidian-background-primary-alt"]).toBe("rgb(48, 46, 44)");
-      expect(theme.variables["--opencode-obsidian-background-secondary"]).toBe("rgb(50, 48, 47)");
-      expect(theme.variables["--opencode-obsidian-editor-background-image"]).toBeUndefined();
-      expect(theme.variables["--opencode-obsidian-editor-background-opacity"]).toBeUndefined();
-      expect(theme.variables["--opencode-obsidian-editor-background-position"]).toBeUndefined();
+      expect(theme.variables["--another-opencode-for-obsidian-page-background"]).toBe(
+        "rgb(29, 32, 33)"
+      );
+      expect(theme.variables["--another-opencode-for-obsidian-background-primary"]).toBe(
+        "rgb(40, 40, 40)"
+      );
+      expect(theme.variables["--another-opencode-for-obsidian-background-primary-alt"]).toBe(
+        "rgb(48, 46, 44)"
+      );
+      expect(theme.variables["--another-opencode-for-obsidian-background-secondary"]).toBe(
+        "rgb(50, 48, 47)"
+      );
+      expect(
+        theme.variables["--another-opencode-for-obsidian-editor-background-image"]
+      ).toBeUndefined();
+      expect(
+        theme.variables["--another-opencode-for-obsidian-editor-background-opacity"]
+      ).toBeUndefined();
+      expect(
+        theme.variables["--another-opencode-for-obsidian-editor-background-position"]
+      ).toBeUndefined();
       expect(theme.variables["--obsidian-editor-background-image"]).toBe(
         "url('https://example.test/bg.jpg')"
       );
@@ -416,10 +454,18 @@ describe("captureObsidianWebViewTheme", () => {
 
       const theme = captureObsidianWebViewTheme(view, { paneSource: pane });
 
-      expect(theme.variables["--opencode-obsidian-page-background"]).toBe("rgb(38, 33, 28)");
-      expect(theme.variables["--opencode-obsidian-background-primary"]).toBe("rgb(46, 38, 31)");
-      expect(theme.variables["--opencode-obsidian-background-secondary"]).toBe("rgb(38, 33, 28)");
-      expect(theme.variables["--opencode-obsidian-text-normal"]).toBe("rgb(235, 219, 178)");
+      expect(theme.variables["--another-opencode-for-obsidian-page-background"]).toBe(
+        "rgb(38, 33, 28)"
+      );
+      expect(theme.variables["--another-opencode-for-obsidian-background-primary"]).toBe(
+        "rgb(46, 38, 31)"
+      );
+      expect(theme.variables["--another-opencode-for-obsidian-background-secondary"]).toBe(
+        "rgb(38, 33, 28)"
+      );
+      expect(theme.variables["--another-opencode-for-obsidian-text-normal"]).toBe(
+        "rgb(235, 219, 178)"
+      );
     } finally {
       globalThis.getComputedStyle = previousGetComputedStyle;
       globalThis.HTMLElement = previousHTMLElement;
@@ -473,11 +519,21 @@ describe("captureObsidianWebViewTheme", () => {
       const theme = captureObsidianWebViewTheme(view);
 
       expect(view.classList.contains("markdown-source-view")).toBe(true);
-      expect(theme.variables["--opencode-obsidian-background-primary"]).toBe("rgb(40, 40, 40)");
-      expect(theme.variables["--opencode-obsidian-background-primary-alt"]).toBe("rgb(48, 46, 44)");
-      expect(theme.variables["--opencode-obsidian-editor-background-image"]).toBeUndefined();
-      expect(theme.variables["--opencode-obsidian-editor-background-opacity"]).toBeUndefined();
-      expect(theme.variables["--opencode-obsidian-editor-background-position"]).toBeUndefined();
+      expect(theme.variables["--another-opencode-for-obsidian-background-primary"]).toBe(
+        "rgb(40, 40, 40)"
+      );
+      expect(theme.variables["--another-opencode-for-obsidian-background-primary-alt"]).toBe(
+        "rgb(48, 46, 44)"
+      );
+      expect(
+        theme.variables["--another-opencode-for-obsidian-editor-background-image"]
+      ).toBeUndefined();
+      expect(
+        theme.variables["--another-opencode-for-obsidian-editor-background-opacity"]
+      ).toBeUndefined();
+      expect(
+        theme.variables["--another-opencode-for-obsidian-editor-background-position"]
+      ).toBeUndefined();
       expect(theme.variables["--obsidian-editor-background-image"]).toBe(
         "url('https://example.test/editor-bg.jpg')"
       );

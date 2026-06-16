@@ -13,10 +13,10 @@
 - 宿主 `.opencode-appearance-obsidian` 不画 `::before` / `::after` 背景；
 - iframe 内只有 `body::before` 可以画 workspace/background 图片；
 - `sourceBoundary.contract` 是 `obsidian-workspace-background-v1`；
-- Background 图片有效时，iframe `body::before` 使用 `--opencode-obsidian-workspace-background-*` paint variables 画单图层；
+- Background 图片有效时，iframe `body::before` 使用 `--another-opencode-for-obsidian-workspace-background-*` paint variables 画单图层；
 - 不做 active editor projection；
 - 不根据 editor rect、iframe rect 或图片 natural size 追求跨 pane 连续背景；
-- 不恢复旧 `--opencode-obsidian-editor-background-*` / `--opencode-obsidian-iframe-*` 变量。
+- 不恢复旧 `--another-opencode-for-obsidian-editor-background-*` / `--another-opencode-for-obsidian-iframe-*` 变量。
 
 当前视觉 baseline：
 
@@ -141,7 +141,7 @@
 - `opacity: var(--obsidian-editor-background-opacity)`
 - `filter: var(--obsidian-editor-background-bluriness)`
 
-Background 插件没有提供稳定的全窗口图片平面。它源码里注释掉的 whole-app background 方案也说明了一个边界：用正 z-index 做全 app 背景会干扰交互。因此 `opencode-obsidian` 不应该恢复宿主层或全窗口伪层。
+Background 插件没有提供稳定的全窗口图片平面。它源码里注释掉的 whole-app background 方案也说明了一个边界：用正 z-index 做全 app 背景会干扰交互。因此 `another-opencode-for-obsidian` 不应该恢复宿主层或全窗口伪层。
 
 当前 OpenCode 插件链路：
 
@@ -222,7 +222,7 @@ iframe 内部 diagnostics 和父窗口 diagnostics 还出现了不一致：
 
 第二，Background 图片启用时，OpenCode 打开后仍然要让这张图有意义。这也是真需求。OpenCode 如果变成不透明原生黑 pane，就破坏了用户的视觉环境。
 
-第三，`.cm-line.cm-active`、selection、table row、metadata input、`hr.workspace-leaf-resize-handle.tappable` 这些层会同时出现。它们是真观察，但不属于本插件的修复对象。它们来自 Obsidian、CodeMirror、当前主题、workspace chrome 或 Background 插件的 editor surface。`opencode-obsidian` 如果 patch 这些 selector，就是把 diagnostics 变成补偿代码。
+第三，`.cm-line.cm-active`、selection、table row、metadata input、`hr.workspace-leaf-resize-handle.tappable` 这些层会同时出现。它们是真观察，但不属于本插件的修复对象。它们来自 Obsidian、CodeMirror、当前主题、workspace chrome 或 Background 插件的 editor surface。`another-opencode-for-obsidian` 如果 patch 这些 selector，就是把 diagnostics 变成补偿代码。
 
 因此修复入口收窄为：
 
@@ -261,7 +261,7 @@ Blast Radius 级别：BR2。
 | `src/theme/EditorBackdrop.ts` | projection helpers | 删除 | 不再维护 editor/iframe 几何桥接 | 源码中没有 active projection 状态和 helper |
 | `src/ui/OpenCodeView.ts` | `syncThemeToIframe()` | iframe rect 为 0 时跳过会改变 paint variables 的 postMessage | 防止 hidden iframe 写入错误 paint update | theme sync history 中 zero rect + posted image paint update 判失败 |
 | `src/ui/OpenCodeView.ts` | iframe diagnostics | 增加 parent-only `syncVisibility` / skip reason，不把 hidden 写成 iframe paint state | 解决 hidden 状态和“不发送 update”的冲突 | diagnostics 能同时显示 iframe 内 last applied state 和父窗口 zero rect skip |
-| `src/proxy/ProxyInjection.ts` | `createObsidianAppearanceStyle()` | `body::before` 只消费 `--opencode-obsidian-backdrop-*` paint variables | raw source variable 不能直接绘制图片 | proxy test 断言不存在 `var(--obsidian-editor-background-image, none)` fallback |
+| `src/proxy/ProxyInjection.ts` | `createObsidianAppearanceStyle()` | `body::before` 只消费 `--another-opencode-for-obsidian-backdrop-*` paint variables | raw source variable 不能直接绘制图片 | proxy test 断言不存在 `var(--obsidian-editor-background-image, none)` fallback |
 | `src/proxy/ProxyInjection.ts` | `replaceTheme()` / `applyTheme()` | 首帧和后续 update 都通过同一个 replacement path，删除 stale bridge variables | 防止旧 paint variables 残留 | proxy test 覆盖 replacement cleanup |
 | `src/proxy/ProxyInjection.ts` | `applyOpenCodeV2Aliases()` | 追踪并清理 bridge 写入的 alias，或每轮先删后重建 | 防止 alias 生命周期不清 | proxy test 覆盖 alias cleanup 不删除非 bridge 变量 |
 | `src/proxy/ProxyInjection.ts` | `sourceBoundary()` | 输出 `obsidian-pane-background-v1` | iframe diagnostics 描述当前 D 模型 | harness 覆盖 state 与实际 paint layer 不一致时失败 |
@@ -372,36 +372,36 @@ iframe-hidden
 
 这些变量是 Background 插件给出的事实。它们可以被捕获、记录、作为算法输入。
 
-新增由 `opencode-obsidian` 拥有的显式 paint variables：
+新增由 `another-opencode-for-obsidian` 拥有的显式 paint variables：
 
-- `--opencode-obsidian-backdrop-state`
-- `--opencode-obsidian-backdrop-reason`
-- `--opencode-obsidian-backdrop-background-image`
-- `--opencode-obsidian-backdrop-background-opacity`
-- `--opencode-obsidian-backdrop-background-filter`
-- `--opencode-obsidian-backdrop-background-position`
-- `--opencode-obsidian-backdrop-background-size`
+- `--another-opencode-for-obsidian-backdrop-state`
+- `--another-opencode-for-obsidian-backdrop-reason`
+- `--another-opencode-for-obsidian-backdrop-background-image`
+- `--another-opencode-for-obsidian-backdrop-background-opacity`
+- `--another-opencode-for-obsidian-backdrop-background-filter`
+- `--another-opencode-for-obsidian-backdrop-background-position`
+- `--another-opencode-for-obsidian-backdrop-background-size`
 
 `ProxyInjection` 里的 `body::before` 只消费 paint variables：
 
 ```css
 body::before {
-  background-image: var(--opencode-obsidian-backdrop-background-image, none);
-  background-position: var(--opencode-obsidian-backdrop-background-position, center);
-  background-size: var(--opencode-obsidian-backdrop-background-size, cover);
-  opacity: var(--opencode-obsidian-backdrop-background-opacity, 0);
-  filter: var(--opencode-obsidian-backdrop-background-filter, none);
+  background-image: var(--another-opencode-for-obsidian-backdrop-background-image, none);
+  background-position: var(--another-opencode-for-obsidian-backdrop-background-position, center);
+  background-size: var(--another-opencode-for-obsidian-backdrop-background-size, cover);
+  opacity: var(--another-opencode-for-obsidian-backdrop-background-opacity, 0);
+  filter: var(--another-opencode-for-obsidian-backdrop-background-filter, none);
 }
 ```
 
-paint 层不能 fallback 到 `--obsidian-editor-background-image`。只有 `EditorBackdrop.createIframeBackdrop()` 产出的 `--opencode-obsidian-backdrop-*` paint variables 能驱动 iframe 背景。
+paint 层不能 fallback 到 `--obsidian-editor-background-image`。只有 `EditorBackdrop.createIframeBackdrop()` 产出的 `--another-opencode-for-obsidian-backdrop-*` paint variables 能驱动 iframe 背景。
 
 继续禁止旧变量名：
 
-- `--opencode-obsidian-editor-background-*`
-- `--opencode-obsidian-iframe-*`
+- `--another-opencode-for-obsidian-editor-background-*`
+- `--another-opencode-for-obsidian-iframe-*`
 
-新的 `--opencode-obsidian-backdrop-*` 变量不是旧变量的别名。它们是 iframe 内唯一 `body::before` 背景层的显式绘制命令。
+新的 `--another-opencode-for-obsidian-backdrop-*` 变量不是旧变量的别名。它们是 iframe 内唯一 `body::before` 背景层的显式绘制命令。
 
 ### 状态变量矩阵
 
@@ -410,27 +410,27 @@ paint 层不能 fallback 到 `--obsidian-editor-background-image`。只有 `Edit
 `none`：
 
 - 必须发送：
-  - `--opencode-obsidian-backdrop-state: none`
-  - `--opencode-obsidian-backdrop-reason: <具体原因>`
+  - `--another-opencode-for-obsidian-backdrop-state: none`
+  - `--another-opencode-for-obsidian-backdrop-reason: <具体原因>`
 - 必须不存在：
-  - `--opencode-obsidian-backdrop-background-image`
-  - `--opencode-obsidian-backdrop-background-opacity`
-  - `--opencode-obsidian-backdrop-background-filter`
-  - `--opencode-obsidian-backdrop-background-position`
-  - `--opencode-obsidian-backdrop-background-size`
+  - `--another-opencode-for-obsidian-backdrop-background-image`
+  - `--another-opencode-for-obsidian-backdrop-background-opacity`
+  - `--another-opencode-for-obsidian-backdrop-background-filter`
+  - `--another-opencode-for-obsidian-backdrop-background-position`
+  - `--another-opencode-for-obsidian-backdrop-background-size`
 - CSS fallback 负责让 `body::before` 不画图。
 
 `body-css-background`：
 
 - 必须发送：
-  - `--opencode-obsidian-backdrop-state: body-css-background`
-  - `--opencode-obsidian-backdrop-background-image`
-  - `--opencode-obsidian-backdrop-background-opacity`
-  - `--opencode-obsidian-backdrop-background-filter`
-  - `--opencode-obsidian-backdrop-background-position`
-  - `--opencode-obsidian-backdrop-background-size: cover`
+  - `--another-opencode-for-obsidian-backdrop-state: body-css-background`
+  - `--another-opencode-for-obsidian-backdrop-background-image`
+  - `--another-opencode-for-obsidian-backdrop-background-opacity`
+  - `--another-opencode-for-obsidian-backdrop-background-filter`
+  - `--another-opencode-for-obsidian-backdrop-background-position`
+  - `--another-opencode-for-obsidian-backdrop-background-size: cover`
 - 必须不存在：
-  - `--opencode-obsidian-backdrop-reason`
+  - `--another-opencode-for-obsidian-backdrop-reason`
 
 `iframe-hidden`：
 
@@ -560,7 +560,7 @@ themeSync: {
 }
 ```
 
-iframe 内 diagnostics 从显式 `--opencode-obsidian-backdrop-*` 变量读取 last applied paint state。
+iframe 内 diagnostics 从显式 `--another-opencode-for-obsidian-backdrop-*` 变量读取 last applied paint state。
 
 `sourceBoundary` 保留：
 
@@ -609,7 +609,7 @@ editor-local 层只作为 advisory diagnostics：
 
 - state 是 `body-css-background`；
 - `body::before` 使用单图层；
-- 图片来自 `--opencode-obsidian-backdrop-background-image`；
+- 图片来自 `--another-opencode-for-obsidian-backdrop-background-image`；
 - `background-size` 是 `cover`；
 - `background-position` 来自 Background 插件变量，缺省为 `center`；
 - raw source variable 不直接绘制 pseudo element；
@@ -638,8 +638,8 @@ image load failure：
 `webViewAppearance` 从 `obsidian` 切到 `opencode`：
 
 - 当前运行中的 iframe 必须 reload 或清理到非 Obsidian injection 状态；
-- 不得保留 `data-opencode-obsidian-appearance`；
-- 不得保留 bridge 写入的 `--opencode-obsidian-backdrop-*` inline variables；
+- 不得保留 `data-another-opencode-for-obsidian-appearance`；
+- 不得保留 bridge 写入的 `--another-opencode-for-obsidian-backdrop-*` inline variables；
 - runtime status 不能把旧 Obsidian theme diagnostics 当作当前 opencode 模式成功证据。
 
 禁止：
@@ -648,8 +648,8 @@ image load failure：
 - iframe 设置 `allowtransparency="true"`；
 - 用透明 iframe 合成作为视觉模型；
 - iframe `body::before` fallback 到 raw `--obsidian-editor-background-image`；
-- 旧 `--opencode-obsidian-editor-background-*` 变量；
-- 旧 `--opencode-obsidian-iframe-*` 变量；
+- 旧 `--another-opencode-for-obsidian-editor-background-*` 变量；
+- 旧 `--another-opencode-for-obsidian-iframe-*` 变量；
 - iframe 多图片层；
 - 背景图 repeat；
 - patch CodeMirror active line、selection、table、split handle selector。
@@ -665,7 +665,7 @@ image load failure：
   - `body-css-background` 只消费 Background 插件 body variables，不读 editor/iframe 几何。
 
 - `src/proxy/ProxyInjection.ts`
-  - `body::before` 只消费 `--opencode-obsidian-backdrop-*` paint variables。
+  - `body::before` 只消费 `--another-opencode-for-obsidian-backdrop-*` paint variables。
   - 删除 raw Background image fallback。
   - 首帧 `applyTheme()` 和后续 `replaceTheme()` 走同一个 replacement path。
   - 跟踪上一轮变量并删除 stale 变量。
@@ -907,7 +907,7 @@ C 是理论上最接近“连续背景图”的方向，但在当前约束下不
 
 如果选择 A：
 
-- `createIframeBackdrop()` 永远不输出 `--opencode-obsidian-backdrop-background-image`。
+- `createIframeBackdrop()` 永远不输出 `--another-opencode-for-obsidian-backdrop-background-image`。
 - proxy HTML 不安装 iframe `body::before` 背景图层。
 - harness 检查 iframe 没有 editor image paint variables。
 - 只允许调整 OpenCode v2 / legacy surface token 的 alpha。

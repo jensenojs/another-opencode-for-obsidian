@@ -314,21 +314,21 @@ opencode 入站事件如果要打开 vault evidence，必须进入 safe navigato
 
 ```typescript
 // 消息的 type 字段使用命名空间前缀，避免与未来 opencode 自身的 postMessage 冲突
-// 格式：opencode-obsidian:<action>
+// 格式：another-opencode-for-obsidian:<action>
 type ObsidianPostMessage =
-  | { type: 'opencode-obsidian:proxy-loaded' }
-  | { type: 'opencode-obsidian:toggle' }
+  | { type: 'another-opencode-for-obsidian:proxy-loaded' }
+  | { type: 'another-opencode-for-obsidian:toggle' }
   // Phase 2 预留：
-  | { type: 'opencode-obsidian:session-changed', payload: { sessionId: string } }
-  | { type: 'opencode-obsidian:notification', payload: { level: 'info'|'warn'|'error', message: string } }
+  | { type: 'another-opencode-for-obsidian:session-changed', payload: { sessionId: string } }
+  | { type: 'another-opencode-for-obsidian:notification', payload: { level: 'info'|'warn'|'error', message: string } }
   // 通用事件转发通道：
-  | { type: 'opencode-obsidian:event', payload: { name: string, data: unknown } };
+  | { type: 'another-opencode-for-obsidian:event', payload: { name: string, data: unknown } };
 ```
 
 **理由**：
 - 当前 `opencode-toggle` / `opencode-proxy-loaded` 的扁平命名在扩展时会混乱
 - 命名空间前缀避免与 opencode 自身的 postMessage（如果未来有的话）冲突
-- `opencode-obsidian:event` 作为通用转发通道，避免为每种 opencode SSE 事件类型都定义一个 postMessage type
+- `another-opencode-for-obsidian:event` 作为通用转发通道，避免为每种 opencode SSE 事件类型都定义一个 postMessage type
 - 不影响 Phase 1 功能，只是重命名现有字符串
 
 **改动量**：`OpenCodeWebUiProxy.ts` 注入脚本中的两处字符串 + `main.ts` 中的两处字符串比较。

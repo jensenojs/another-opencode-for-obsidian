@@ -2,7 +2,7 @@
 
 Date: 2026-06-14
 
-Repo: `/Users/oujinsai/Projects/opencode-obsidian`
+Repo: `/Users/oujinsai/Projects/another-opencode-for-obsidian`
 
 Related repo: `/Users/oujinsai/Projects/obsidian-editor-background`
 
@@ -40,7 +40,7 @@ The attempts produced these results:
 - C, active editor projection: closer to image continuity, but still exposes parent workspace/editor layers and tends toward compensation code.
 - D, iframe-owned body CSS background: best subjective transparency, but left and right panes crop the same image differently, so the boundary remains visible.
 
-Under the current constraints, there is no clean solution inside `opencode-obsidian` that satisfies all goals:
+Under the current constraints, there is no clean solution inside `another-opencode-for-obsidian` that satisfies all goals:
 
 - do not modify the user vault;
 - do not patch `/Users/oujinsai/Projects/obsidian-editor-background`;
@@ -54,9 +54,9 @@ The clean architectural direction is to move the background owner upward:
 
 The background image should be drawn once behind the whole Obsidian workspace/window. Editor, side panes, and OpenCode should all be semi-transparent material above that single background. OpenCode should not copy or project the image.
 
-That experiment belongs in the Background plugin or in a dedicated workspace-level background integration. It does not belong in `opencode-obsidian`.
+That experiment belongs in the Background plugin or in a dedicated workspace-level background integration. It does not belong in `another-opencode-for-obsidian`.
 
-The immediate recommendation for `opencode-obsidian`:
+The immediate recommendation for `another-opencode-for-obsidian`:
 
 - Stop trying to make C the production model.
 - Delete active-editor projection logic from production.
@@ -447,7 +447,7 @@ That is the correct class of problem for a global background owner:
 
 This is a Background plugin problem, not an OpenCode iframe problem.
 
-## Current opencode-obsidian Theme Path
+## Current another-opencode-for-obsidian Theme Path
 
 Relevant local files:
 
@@ -684,7 +684,7 @@ C only synchronizes the image layer. It cannot synchronize:
 - workspace chrome;
 - parent-window theme overlay layers.
 
-Trying to hide those layers inside `opencode-obsidian` becomes selector compensation.
+Trying to hide those layers inside `another-opencode-for-obsidian` becomes selector compensation.
 
 ### D: Iframe-owned body CSS background
 
@@ -929,7 +929,7 @@ The hard part is the stacking position:
 
 This is why the commented Background plugin code said z-index disrupted interactions.
 
-## What Should Happen to opencode-obsidian Code
+## What Should Happen to another-opencode-for-obsidian Code
 
 There are two possible product decisions.
 
@@ -1001,7 +1001,7 @@ The chrome-color attempt can inform A's material palette, but it does not solve 
 
 It should not be documented as a separate solution.
 
-## Suggested Cleanup Plan for opencode-obsidian
+## Suggested Cleanup Plan for another-opencode-for-obsidian
 
 This plan assumes the immediate goal is to stop the bleeding.
 
@@ -1157,7 +1157,7 @@ Useful facts:
 - diagnostics prove the current A/chrome-color path has no image painting; the remaining block is iframe base color.
 - Background plugin source proves the current image owner is editor-level.
 
-The mistake was continuing to search for the answer inside `opencode-obsidian` after the failure mode had moved to parent workspace/background ownership.
+The mistake was continuing to search for the answer inside `another-opencode-for-obsidian` after the failure mode had moved to parent workspace/background ownership.
 
 ## How to Read Future Screenshots
 
@@ -1190,7 +1190,7 @@ If yes:
 If yes:
 
 - active line, selection, metadata, tabs, or split layers are involved;
-- do not patch selectors in `opencode-obsidian`;
+- do not patch selectors in `another-opencode-for-obsidian`;
 - diagnose as parent UI layer.
 
 ### Question 4: Does clicking iframe change brightness?
@@ -1223,7 +1223,7 @@ If yes:
 
 There are only two honest next paths.
 
-### Path 1: Stop at opencode-obsidian
+### Path 1: Stop at another-opencode-for-obsidian
 
 Choose A or D.
 
@@ -1254,7 +1254,7 @@ Do not commit it as-is.
 Recommended sequence:
 
 1. Save this document.
-2. Decide whether `opencode-obsidian` should keep A or D as its local stance.
+2. Decide whether `another-opencode-for-obsidian` should keep A or D as its local stance.
 3. Revert or delete the other experimental paths.
 4. Make harness match the selected stance.
 5. Commit the clean stance.
@@ -1266,11 +1266,11 @@ Local source files:
 
 - `/Users/oujinsai/Projects/obsidian-editor-background/src/Plugin.ts`
 - `/Users/oujinsai/Projects/obsidian-editor-background/styles.css`
-- `/Users/oujinsai/Projects/opencode-obsidian/src/theme/WebViewTheme.ts`
-- `/Users/oujinsai/Projects/opencode-obsidian/src/theme/EditorBackdrop.ts`
-- `/Users/oujinsai/Projects/opencode-obsidian/src/proxy/ProxyInjection.ts`
-- `/Users/oujinsai/Projects/opencode-obsidian/src/ui/OpenCodeView.ts`
-- `/Users/oujinsai/Projects/opencode-obsidian/scripts/harness/themeReport.ts`
+- `/Users/oujinsai/Projects/another-opencode-for-obsidian/src/theme/WebViewTheme.ts`
+- `/Users/oujinsai/Projects/another-opencode-for-obsidian/src/theme/EditorBackdrop.ts`
+- `/Users/oujinsai/Projects/another-opencode-for-obsidian/src/proxy/ProxyInjection.ts`
+- `/Users/oujinsai/Projects/another-opencode-for-obsidian/src/ui/OpenCodeView.ts`
+- `/Users/oujinsai/Projects/another-opencode-for-obsidian/scripts/harness/themeReport.ts`
 
 External references:
 
@@ -1288,7 +1288,7 @@ The observed problem is not one selector.
 
 The current Background plugin paints editor-local background images. OpenCode is an iframe in a different surface. Attempts to copy the image into OpenCode either lose the image, crop it differently, or expose parent local layers. A clean solution requires a workspace-level background owner or an explicit product compromise.
 
-If the task is to clean `opencode-obsidian`, choose A or D and delete C.
+If the task is to clean `another-opencode-for-obsidian`, choose A or D and delete C.
 
 If the task is to satisfy the original visual goal, prototype workspace-level background ownership in `obsidian-editor-background`.
 
@@ -1308,7 +1308,7 @@ If the task is to satisfy the original visual goal, prototype workspace-level ba
 
 第一，解释你看到的现象。
 
-第二，解释为什么我前面在 `opencode-obsidian` 里反复试 A、C、D，都没有得到一个干净结果。
+第二，解释为什么我前面在 `another-opencode-for-obsidian` 里反复试 A、C、D，都没有得到一个干净结果。
 
 第三，给后续代码处理一个边界：哪些代码应该删，哪些诊断可以留，真正值得继续试验的位置在哪里。
 
@@ -1750,12 +1750,12 @@ UpdateBackground(doc: Document = activeDocument) {
 
 这正是我现在认为应该转去 Background 插件验证的地方。
 
-## 4. 当前 opencode-obsidian 做了什么
+## 4. 当前 another-opencode-for-obsidian 做了什么
 
 相关仓库：
 
 ```text
-/Users/oujinsai/Projects/opencode-obsidian
+/Users/oujinsai/Projects/another-opencode-for-obsidian
 ```
 
 OpenCode Web UI 通过 iframe 接入 Obsidian。
@@ -1896,7 +1896,7 @@ src/ui/OpenCodeView.ts
 
 如果我们采样到 `.cm-line.cm-active`，这说明左侧 active line 正在画局部背景。
 
-它不说明 `opencode-obsidian` 应该覆盖 `.cm-line.cm-active`。
+它不说明 `another-opencode-for-obsidian` 应该覆盖 `.cm-line.cm-active`。
 
 ### 4.5 `themeReport.ts`
 
@@ -2394,11 +2394,11 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-repeat: no-repeat;
-  background-position: var(--opencode-obsidian-backdrop-background-position, center);
-  background-size: var(--opencode-obsidian-backdrop-background-size, cover);
-  background-image: var(--opencode-obsidian-backdrop-background-image, none);
-  opacity: var(--opencode-obsidian-backdrop-background-opacity, 0);
-  filter: var(--opencode-obsidian-backdrop-background-filter, none);
+  background-position: var(--another-opencode-for-obsidian-backdrop-background-position, center);
+  background-size: var(--another-opencode-for-obsidian-backdrop-background-size, cover);
+  background-image: var(--another-opencode-for-obsidian-backdrop-background-image, none);
+  opacity: var(--another-opencode-for-obsidian-backdrop-background-opacity, 0);
+  filter: var(--another-opencode-for-obsidian-backdrop-background-filter, none);
   z-index: 0;
 }
 ```
@@ -2406,12 +2406,12 @@ body::before {
 theme variables：
 
 ```text
---opencode-obsidian-backdrop-state: body-css-background
---opencode-obsidian-backdrop-background-image: var from Background plugin
---opencode-obsidian-backdrop-background-opacity: var from Background plugin
---opencode-obsidian-backdrop-background-filter: var from Background plugin
---opencode-obsidian-backdrop-background-position: var from Background plugin
---opencode-obsidian-backdrop-background-size: cover
+--another-opencode-for-obsidian-backdrop-state: body-css-background
+--another-opencode-for-obsidian-backdrop-background-image: var from Background plugin
+--another-opencode-for-obsidian-backdrop-background-opacity: var from Background plugin
+--another-opencode-for-obsidian-backdrop-background-filter: var from Background plugin
+--another-opencode-for-obsidian-backdrop-background-position: var from Background plugin
+--another-opencode-for-obsidian-backdrop-background-size: cover
 ```
 
 优点：
@@ -2671,7 +2671,7 @@ body
 
 不要把 C 作为主线。
 
-如果要继续在 `opencode-obsidian` 做，只能选择 A 或 D。
+如果要继续在 `another-opencode-for-obsidian` 做，只能选择 A 或 D。
 
 如果要满足原始视觉目标，去 Background 插件做 workspace-level owner 实验。
 
@@ -2825,7 +2825,7 @@ OpenCode 吃 Obsidian CSS 变量只能解决：
 
 它明确显示图片画在 `.markdown-reading-view::before` 和 `.cm-editor::before`。
 
-第二，`opencode-obsidian` runtime diagnostics。
+第二，`another-opencode-for-obsidian` runtime diagnostics。
 
 它明确显示 iframe 是否画图、iframe roots 背景是什么、大元素背景是什么。
 
@@ -2848,7 +2848,7 @@ OpenCode 吃 Obsidian CSS 变量只能解决：
 短期：
 
 ```text
-停止在 opencode-obsidian 里追 C。
+停止在 another-opencode-for-obsidian 里追 C。
 不要继续写 selector 补偿。
 清理实验代码。
 选择 A 或 D 作为明确产品妥协。
@@ -2941,7 +2941,7 @@ D 的失败边界：
 ```text
 1. 保存本文档。
 2. 停止把当前脏树当可提交实现。
-3. 决定 opencode-obsidian 短期保 A 还是 D。
+3. 决定 another-opencode-for-obsidian 短期保 A 还是 D。
 4. 删除 C。
 5. 删除 chrome-color 试验。
 6. 修 harness 到所选 stance。
@@ -3044,7 +3044,7 @@ parent layer sampling
 
 OpenCode iframe 不能在不补偿、不透明合成、不修改 Background 插件的前提下，干净模拟 workspace-global background。
 
-所以继续只改 `opencode-obsidian`，会继续烧成本。
+所以继续只改 `another-opencode-for-obsidian`，会继续烧成本。
 
 下一步要么接受 A/D 的产品妥协。
 
@@ -3215,7 +3215,7 @@ payload 的结构：
 {
   colorScheme: "dark",
   variables: {
-    "--opencode-obsidian-background-primary": "...",
+    "--another-opencode-for-obsidian-background-primary": "...",
     "--v2-background-bg-base": "...",
     "--background-base": "var(--v2-background-bg-base)",
     ...
@@ -3554,7 +3554,7 @@ hr.workspace-leaf-resize-handle
 被注释的 horizontal-main-container 方案是什么
 ```
 
-不要先读 `opencode-obsidian`。
+不要先读 `another-opencode-for-obsidian`。
 
 因为如果不知道背景 owner 是 editor-local，就会误以为 OpenCode 可以简单继承背景。
 
@@ -3861,13 +3861,13 @@ selector patch：用户不接受。
 结论：
 
 ```text
-当前约束下，opencode-obsidian 没有干净解。
+当前约束下，another-opencode-for-obsidian 没有干净解。
 ```
 
 下一步：
 
 ```text
-opencode-obsidian 选 A 或 D 作为产品妥协。
+another-opencode-for-obsidian 选 A 或 D 作为产品妥协。
 真正目标去 Background 插件做 workspace-level background owner 实验。
 ```
 
@@ -5096,10 +5096,10 @@ projectedBackgroundSize
 missing-image-dimensions
 imageDimensionsStatus as paint dependency
 editor rect to iframe rect projection
---opencode-obsidian-iframe-backdrop-left
---opencode-obsidian-iframe-backdrop-top
---opencode-obsidian-iframe-backdrop-width
---opencode-obsidian-iframe-backdrop-height
+--another-opencode-for-obsidian-iframe-backdrop-left
+--another-opencode-for-obsidian-iframe-backdrop-top
+--another-opencode-for-obsidian-iframe-backdrop-width
+--another-opencode-for-obsidian-iframe-backdrop-height
 ```
 
 如果这些词只出现在历史文档或失败测试 fixture，可以保留。
@@ -5112,9 +5112,9 @@ editor rect to iframe rect projection
 
 ```text
 body::before image paint
---opencode-obsidian-backdrop-background-image used by CSS
-background-image: var(--opencode-obsidian-backdrop-background-image
-background-size: var(--opencode-obsidian-backdrop-background-size
+--another-opencode-for-obsidian-backdrop-background-image used by CSS
+background-image: var(--another-opencode-for-obsidian-backdrop-background-image
+background-size: var(--another-opencode-for-obsidian-backdrop-background-size
 ```
 
 sourceVariables 可以保留。
@@ -5522,7 +5522,7 @@ diagnostics 字段
 ```text
 不要再证明 C。
 不要再 patch selector。
-先把 opencode-obsidian 收成 A 或 D。
+先把 another-opencode-for-obsidian 收成 A 或 D。
 如果用户仍要完整背景图意义，去 Background 插件做 workspace-level owner。
 ```
 

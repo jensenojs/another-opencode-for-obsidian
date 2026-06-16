@@ -10,9 +10,11 @@ describe("Obsidian appearance compositor layers", () => {
     expect(styles).not.toContain(".opencode-appearance-obsidian::after");
     expect(styles).toContain("background-color: transparent;");
     expect(styles).toContain("content: none;");
-    expect(styles).not.toContain("background-color: var(--opencode-obsidian-pane-background");
     expect(styles).not.toContain(
-      "background-image: var(--opencode-obsidian-editor-background-image"
+      "background-color: var(--another-opencode-for-obsidian-pane-background"
+    );
+    expect(styles).not.toContain(
+      "background-image: var(--another-opencode-for-obsidian-editor-background-image"
     );
     expect(styles).not.toContain(".opencode-appearance-obsidian.opencode-view-running::before");
     expect(styles).not.toContain(".opencode-iframe::before");

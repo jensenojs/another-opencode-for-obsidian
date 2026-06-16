@@ -94,7 +94,7 @@ attached. Releases from this fork are published for that installation path.
 Download these files from the latest release and place them in:
 
 ```text
-<vault>/.obsidian/plugins/opencode-obsidian/
+<vault>/.obsidian/plugins/another-opencode-for-obsidian/
 ```
 
 Required files:
@@ -232,14 +232,14 @@ Restored context is treated carefully:
 Runtime logs and status live under the XDG state directory:
 
 ```bash
-$XDG_STATE_HOME/opencode-obsidian/opencode-obsidian.log
-$XDG_STATE_HOME/opencode-obsidian/status.json
+$XDG_STATE_HOME/another-opencode-for-obsidian/another-opencode-for-obsidian.log
+$XDG_STATE_HOME/another-opencode-for-obsidian/status.json
 ```
 
 If `XDG_STATE_HOME` is unset, the plugin uses:
 
 ```text
-~/.local/state/opencode-obsidian/
+~/.local/state/another-opencode-for-obsidian/
 ```
 
 Useful commands:

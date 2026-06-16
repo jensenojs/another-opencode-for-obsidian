@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, unlinkSync
 import { homedir } from "os";
 import { join, resolve, sep } from "path";
 
-export const pluginId = "opencode-obsidian";
+export const pluginId = "another-opencode-for-obsidian";
 
 export interface CheckResult {
   path: string;
@@ -11,7 +11,7 @@ export interface CheckResult {
 }
 
 export function defaultVaultPath(env: NodeJS.ProcessEnv = process.env): string {
-  return resolveHarnessPath(env.OPENCODE_OBSIDIAN_VAULT ?? "~/obsidian");
+  return resolveHarnessPath(env.ANOTHER_OPENCODE_FOR_OBSIDIAN_VAULT ?? "~/obsidian");
 }
 
 export function defaultOpenCodeSourcePath(env: NodeJS.ProcessEnv = process.env): string {

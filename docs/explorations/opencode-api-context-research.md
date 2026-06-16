@@ -2,7 +2,7 @@
 
 ## 概述
 
-本报告调研 opencode server 的 HTTP API、Web UI / TUI 界面中上下文（context）的呈现方式，以及消息（message）和 part 的渲染机制。调研基于 opencode v0.0.55 源码（anomalyco/opencode）、官方文档（opencode.ai/docs）以及 obsidian-opencode 插件中的实际 API 调用模式。
+本报告调研 opencode server 的 HTTP API、Web UI / TUI 界面中上下文（context）的呈现方式，以及消息（message）和 part 的渲染机制。调研基于 opencode v0.0.55 源码（anomalyco/opencode）、官方文档（opencode.ai/docs）以及 another-opencode-for-obsidian 插件中的实际 API 调用模式。
 
 2026-06-16 更新：本文记录的 `ignorePreviousPart()` / `ignored: true`
 策略已经被当前 context lifecycle 合同取代。当前插件写入带 `<!-- oc-ctx
@@ -246,7 +246,7 @@ AssistantMessage 组件:
 
 ---
 
-## 总结：对 obsidian-opencode 插件的启示
+## 总结：对 another-opencode-for-obsidian 插件的启示
 
 1. **上下文不可见问题**：当前 `noReply: true` 注入的上下文在 opencode UI 中不可见。用户不知道 AI 收到了哪些 Obsidian 上下文。这是 AGENTS.md 中「已知限制」中描述的问题。
 

@@ -20,7 +20,7 @@ export async function fetchFixtureThemeHtml(): Promise<
   } & FetchTextResult
 > {
   const previousXdgStateHome = process.env.XDG_STATE_HOME;
-  const fixtureStateHome = mkdtempSync(join(tmpdir(), "opencode-obsidian-theme-"));
+  const fixtureStateHome = mkdtempSync(join(tmpdir(), "another-opencode-for-obsidian-theme-"));
   process.env.XDG_STATE_HOME = fixtureStateHome;
   const backend = createServer((_, res) => {
     res.writeHead(200, {
@@ -173,9 +173,12 @@ function executeInlineScript(window: Window, source: string): void {
     JSON,
     String,
   });
-  new Script(source, { filename: "opencode-obsidian-theme-fixture.js" }).runInContext(context, {
-    timeout: 1000,
-  });
+  new Script(source, { filename: "another-opencode-for-obsidian-theme-fixture.js" }).runInContext(
+    context,
+    {
+      timeout: 1000,
+    }
+  );
 }
 
 function listenOnRandomPort(server: ReturnType<typeof createServer>): Promise<number> {

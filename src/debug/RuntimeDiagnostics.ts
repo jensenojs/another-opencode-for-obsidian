@@ -57,11 +57,11 @@ const LOG_PREFIX = "[OpenCode]";
 
 export function getRuntimePaths(env: NodeJS.ProcessEnv = process.env): RuntimePaths {
   const stateHome = env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state");
-  const stateDir = join(stateHome, "opencode-obsidian");
+  const stateDir = join(stateHome, "another-opencode-for-obsidian");
 
   return {
     stateDir,
-    logFile: join(stateDir, "opencode-obsidian.log"),
+    logFile: join(stateDir, "another-opencode-for-obsidian.log"),
     statusFile: join(stateDir, "status.json"),
   };
 }

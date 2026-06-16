@@ -2,7 +2,7 @@
 
 ## Context
 
-The obsidian-opencode plugin is currently in early development (v0.1.0). The repository contains `main.js` which is a build artifact, while `styles.css` is a static source file. Users must manually clone/build to install. This creates friction for beta testers and doesn't scale.
+The another-opencode-for-obsidian plugin is currently in early development (v0.1.0). The repository contains `main.js` which is a build artifact, while `styles.css` is a static source file. Users must manually clone/build to install. This creates friction for beta testers and doesn't scale.
 
 BRAT (Beta Reviewer's Auto-update Tool) is the community standard for beta plugin distribution. It works by monitoring GitHub releases and downloading `manifest.json`, `main.js`, and `styles.css` from release assets.
 

@@ -13,7 +13,7 @@
 在以下组合下出现：
 
 - Obsidian 桌面版（Electron/Chromium 内核）。
-- 安装了本插件 `opencode-obsidian`，并且 `webViewAppearance` 设为 `obsidian`。
+- 安装了本插件 `another-opencode-for-obsidian`，并且 `webViewAppearance` 设为 `obsidian`。
 - 安装了 editor background 类社区插件，给 Obsidian 主窗口加了背景图。
 - 右侧 OpenCode 侧边栏处于运行状态。
 
@@ -230,9 +230,9 @@ OpenCode 的滚动容器 `.scroll-view__viewport` 隐藏原生滚动条，使用
 代码：
 
 ```css
-html[data-opencode-obsidian-appearance="obsidian"] *,
-html[data-opencode-obsidian-appearance="obsidian"] *::before,
-html[data-opencode-obsidian-appearance="obsidian"] *::after {
+html[data-another-opencode-for-obsidian-appearance="obsidian"] *,
+html[data-another-opencode-for-obsidian-appearance="obsidian"] *::before,
+html[data-another-opencode-for-obsidian-appearance="obsidian"] *::after {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
@@ -305,15 +305,15 @@ html[data-opencode-obsidian-appearance="obsidian"] *::after {
 当前生产契约只在高风险组合里禁止 iframe 内部真实毛玻璃采样：
 
 - `webViewAppearance: "obsidian"`；
-- Background/workspace 图片有效，`--opencode-obsidian-workspace-background-state: enabled`；
+- Background/workspace 图片有效，`--another-opencode-for-obsidian-workspace-background-state: enabled`；
 - iframe document 自己通过 `body::before` 画 workspace 背景图。
 
 对应规则在 `src/proxy/ProxyInjection.ts`：
 
 ```css
-html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *,
-html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *::before,
-html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] *::after {
+html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *,
+html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *::before,
+html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] *::after {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
@@ -344,7 +344,7 @@ html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-worksp
 
 AGENTS.md 里的视觉异常诊断纪律明确禁止这种方向：
 
-> `.cm-line.cm-active` 是光标所在行高亮，属于 Obsidian/CodeMirror 编辑器状态，不属于 OpenCode Web UI。不要在 `opencode-obsidian` 里 patch `.cm-editor`、`.markdown-reading-view` 或用户 vault 的 background 插件文件。
+> `.cm-line.cm-active` 是光标所在行高亮，属于 Obsidian/CodeMirror 编辑器状态，不属于 OpenCode Web UI。不要在 `another-opencode-for-obsidian` 里 patch `.cm-editor`、`.markdown-reading-view` 或用户 vault 的 background 插件文件。
 
 因为 trace 已经证明 `.cm-line.cm-active` 没有变化，去 patch 它就是破坏案发现场、引入本体负担。
 
@@ -387,17 +387,17 @@ obsidian dev:cdp method=Input.dispatchMouseEvent \
 
 ```css
 /* 实验 1：在 Background 启用时禁用 backdrop-filter */
-html[data-opencode-obsidian-appearance="obsidian"][data-opencode-obsidian-workspace-background="enabled"] * {
+html[data-another-opencode-for-obsidian-appearance="obsidian"][data-another-opencode-for-obsidian-workspace-background="enabled"] * {
   backdrop-filter: none !important;
 }
 
 /* 实验 2：禁用所有 box-shadow */
-html[data-opencode-obsidian-appearance="obsidian"] * {
+html[data-another-opencode-for-obsidian-appearance="obsidian"] * {
   box-shadow: none !important;
 }
 
 /* 实验 3：禁用所有 opacity 动画 */
-html[data-opencode-obsidian-appearance="obsidian"] * {
+html[data-another-opencode-for-obsidian-appearance="obsidian"] * {
   transition: none !important;
 }
 ```

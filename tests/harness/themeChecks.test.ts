@@ -32,36 +32,36 @@ describe("themeDiagnosticsResolvedChecks", () => {
           "--border-border-base": "color-mix(in srgb, rgb(60, 56, 54) 64%, transparent)",
           "--v2-state-bg-success": "color-mix(in srgb, #689d6a 20%, transparent)",
           "--v2-state-fg-success":
-            "color-mix(in srgb, #689d6a 68%, var(--opencode-obsidian-text-normal))",
+            "color-mix(in srgb, #689d6a 68%, var(--another-opencode-for-obsidian-text-normal))",
           "--v2-state-border-success":
-            "color-mix(in srgb, #689d6a 52%, var(--opencode-obsidian-border))",
+            "color-mix(in srgb, #689d6a 52%, var(--another-opencode-for-obsidian-border))",
           "--v2-state-bg-warning": "color-mix(in srgb, #d79921 20%, transparent)",
           "--v2-state-fg-warning":
-            "color-mix(in srgb, #d79921 68%, var(--opencode-obsidian-text-normal))",
+            "color-mix(in srgb, #d79921 68%, var(--another-opencode-for-obsidian-text-normal))",
           "--v2-state-border-warning":
-            "color-mix(in srgb, #d79921 52%, var(--opencode-obsidian-border))",
+            "color-mix(in srgb, #d79921 52%, var(--another-opencode-for-obsidian-border))",
           "--v2-state-bg-danger": "color-mix(in srgb, #cc241d 20%, transparent)",
           "--v2-state-fg-danger":
-            "color-mix(in srgb, #cc241d 68%, var(--opencode-obsidian-text-normal))",
+            "color-mix(in srgb, #cc241d 68%, var(--another-opencode-for-obsidian-text-normal))",
           "--v2-state-border-danger":
-            "color-mix(in srgb, #cc241d 52%, var(--opencode-obsidian-border))",
+            "color-mix(in srgb, #cc241d 52%, var(--another-opencode-for-obsidian-border))",
           "--v2-state-bg-info": "color-mix(in srgb, #458588 20%, transparent)",
           "--v2-state-fg-info":
-            "color-mix(in srgb, #458588 68%, var(--opencode-obsidian-text-normal))",
+            "color-mix(in srgb, #458588 68%, var(--another-opencode-for-obsidian-text-normal))",
           "--v2-state-border-info":
-            "color-mix(in srgb, #458588 52%, var(--opencode-obsidian-border))",
+            "color-mix(in srgb, #458588 52%, var(--another-opencode-for-obsidian-border))",
         },
       },
       {
-        "--opencode-obsidian-page-background": "rgba(0, 0, 0, 0.25)",
-        "--opencode-obsidian-background-primary": "#000",
-        "--opencode-obsidian-background-secondary": "rgb(29, 32, 33)",
-        "--opencode-obsidian-text-normal": "#f1f1f1",
-        "--opencode-obsidian-border": "rgb(60, 56, 54)",
-        "--opencode-obsidian-success": "rgb(84, 182, 122)",
-        "--opencode-obsidian-warning": "rgb(215, 166, 66)",
-        "--opencode-obsidian-danger": "rgb(219, 92, 92)",
-        "--opencode-obsidian-info": "rgb(95, 163, 231)",
+        "--another-opencode-for-obsidian-page-background": "rgba(0, 0, 0, 0.25)",
+        "--another-opencode-for-obsidian-background-primary": "#000",
+        "--another-opencode-for-obsidian-background-secondary": "rgb(29, 32, 33)",
+        "--another-opencode-for-obsidian-text-normal": "#f1f1f1",
+        "--another-opencode-for-obsidian-border": "rgb(60, 56, 54)",
+        "--another-opencode-for-obsidian-success": "rgb(84, 182, 122)",
+        "--another-opencode-for-obsidian-warning": "rgb(215, 166, 66)",
+        "--another-opencode-for-obsidian-danger": "rgb(219, 92, 92)",
+        "--another-opencode-for-obsidian-info": "rgb(95, 163, 231)",
       }
     );
 

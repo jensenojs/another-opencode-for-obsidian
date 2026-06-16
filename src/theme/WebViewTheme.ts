@@ -338,20 +338,20 @@ function createObsidianSourceVariables(obsidian: ObsidianThemeValues): ThemeVari
   const workspace = resolveWorkspaceBackgroundValues(obsidian);
   const workspaceBackgroundEnabled = isWorkspaceBackgroundEnabled(workspace);
   return {
-    "--opencode-obsidian-background-primary": obsidian.backgroundPrimary,
-    "--opencode-obsidian-background-primary-alt": obsidian.backgroundPrimaryAlt,
-    "--opencode-obsidian-page-background": obsidian.pageBackground,
-    "--opencode-obsidian-background-secondary": obsidian.backgroundSecondary,
-    "--opencode-obsidian-border": obsidian.backgroundModifierBorder,
-    "--opencode-obsidian-hover": obsidian.backgroundModifierHover,
-    "--opencode-obsidian-text-normal": obsidian.textNormal,
-    "--opencode-obsidian-text-muted": obsidian.textMuted,
-    "--opencode-obsidian-text-faint": obsidian.textFaint,
-    "--opencode-obsidian-accent": obsidian.interactiveAccent,
-    "--opencode-obsidian-success": obsidian.success,
-    "--opencode-obsidian-warning": obsidian.warning,
-    "--opencode-obsidian-danger": obsidian.danger,
-    "--opencode-obsidian-info": obsidian.info,
+    "--another-opencode-for-obsidian-background-primary": obsidian.backgroundPrimary,
+    "--another-opencode-for-obsidian-background-primary-alt": obsidian.backgroundPrimaryAlt,
+    "--another-opencode-for-obsidian-page-background": obsidian.pageBackground,
+    "--another-opencode-for-obsidian-background-secondary": obsidian.backgroundSecondary,
+    "--another-opencode-for-obsidian-border": obsidian.backgroundModifierBorder,
+    "--another-opencode-for-obsidian-hover": obsidian.backgroundModifierHover,
+    "--another-opencode-for-obsidian-text-normal": obsidian.textNormal,
+    "--another-opencode-for-obsidian-text-muted": obsidian.textMuted,
+    "--another-opencode-for-obsidian-text-faint": obsidian.textFaint,
+    "--another-opencode-for-obsidian-accent": obsidian.interactiveAccent,
+    "--another-opencode-for-obsidian-success": obsidian.success,
+    "--another-opencode-for-obsidian-warning": obsidian.warning,
+    "--another-opencode-for-obsidian-danger": obsidian.danger,
+    "--another-opencode-for-obsidian-info": obsidian.info,
     "--font-family-sans": obsidian.fontInterface,
     "--font-sans": obsidian.fontInterface,
     "--obsidian-editor-background-image": obsidian.editorBackgroundImage,
@@ -369,18 +369,26 @@ function createObsidianSourceVariables(obsidian: ObsidianThemeValues): ThemeVari
     "--obsidian-workspace-background-surface": workspace.workspaceBackgroundSurface,
     "--obsidian-workspace-background-chrome": workspace.workspaceBackgroundChrome,
     "--obsidian-workspace-background-border": workspace.workspaceBackgroundBorder,
-    "--opencode-obsidian-workspace-background-state": workspaceBackgroundEnabled
+    "--another-opencode-for-obsidian-workspace-background-state": workspaceBackgroundEnabled
       ? "enabled"
       : "disabled",
-    "--opencode-obsidian-workspace-background-contract": workspace.workspaceBackgroundContract,
-    "--opencode-obsidian-workspace-background-image": workspace.workspaceBackgroundImage,
-    "--opencode-obsidian-workspace-background-opacity": workspace.workspaceBackgroundOpacity,
-    "--opencode-obsidian-workspace-background-filter": resolveWorkspaceBackgroundFilter(workspace),
-    "--opencode-obsidian-workspace-background-position": workspace.workspaceBackgroundPosition,
-    "--opencode-obsidian-workspace-background-size": workspace.workspaceBackgroundSize,
-    "--opencode-obsidian-workspace-background-repeat": workspace.workspaceBackgroundRepeat,
-    "--opencode-obsidian-workspace-background-blend-mode": workspace.workspaceBackgroundBlendMode,
-    "--opencode-obsidian-workspace-background-surface": workspace.workspaceBackgroundSurface,
+    "--another-opencode-for-obsidian-workspace-background-contract":
+      workspace.workspaceBackgroundContract,
+    "--another-opencode-for-obsidian-workspace-background-image":
+      workspace.workspaceBackgroundImage,
+    "--another-opencode-for-obsidian-workspace-background-opacity":
+      workspace.workspaceBackgroundOpacity,
+    "--another-opencode-for-obsidian-workspace-background-filter":
+      resolveWorkspaceBackgroundFilter(workspace),
+    "--another-opencode-for-obsidian-workspace-background-position":
+      workspace.workspaceBackgroundPosition,
+    "--another-opencode-for-obsidian-workspace-background-size": workspace.workspaceBackgroundSize,
+    "--another-opencode-for-obsidian-workspace-background-repeat":
+      workspace.workspaceBackgroundRepeat,
+    "--another-opencode-for-obsidian-workspace-background-blend-mode":
+      workspace.workspaceBackgroundBlendMode,
+    "--another-opencode-for-obsidian-workspace-background-surface":
+      workspace.workspaceBackgroundSurface,
   };
 }
 
@@ -397,16 +405,16 @@ function createV2ObsidianVariables(obsidian: ObsidianThemeValues): ThemeVariable
     "--v2-background-bg-layer-02": panelLayer(materialAlpha.layer02),
     "--v2-background-bg-layer-03": panelLayer(materialAlpha.layer03),
     "--v2-background-bg-layer-04": panelLayer(materialAlpha.layer04),
-    "--v2-background-bg-inverse": "var(--opencode-obsidian-text-normal)",
+    "--v2-background-bg-inverse": "var(--another-opencode-for-obsidian-text-normal)",
     "--v2-background-bg-contrast": textNormalMix(materialAlpha.contrast),
     "--v2-background-bg-button-neutral": "var(--v2-background-bg-layer-02)",
     "--v2-background-bg-accent": accentSurfaceMix(OBSIDIAN_ACCENT_ALPHA.surface),
 
-    "--v2-text-text-base": "var(--opencode-obsidian-text-normal)",
+    "--v2-text-text-base": "var(--another-opencode-for-obsidian-text-normal)",
     "--v2-text-text-muted": readableTextMix("text-muted", OBSIDIAN_TEXT_MIX_ALPHA.muted),
     "--v2-text-text-faint": readableTextMix("text-faint", OBSIDIAN_TEXT_MIX_ALPHA.faint),
-    "--v2-text-text-inverse": "var(--opencode-obsidian-background-primary)",
-    "--v2-text-text-contrast": "var(--opencode-obsidian-background-primary)",
+    "--v2-text-text-inverse": "var(--another-opencode-for-obsidian-background-primary)",
+    "--v2-text-text-contrast": "var(--another-opencode-for-obsidian-background-primary)",
     "--v2-text-text-accent": accentTextMix(OBSIDIAN_ACCENT_ALPHA.text),
     "--v2-text-text-accent-hover": accentTextMix(OBSIDIAN_ACCENT_ALPHA.textHover),
 
@@ -661,7 +669,7 @@ function addUnprefixedV2Aliases(variables: ThemeVariables, names: string[]): voi
 
 function elevationShadow(y: string, blur: string, alphaPercent: number): string {
   return [
-    `0px ${y} ${blur} 0px color-mix(in srgb, var(--opencode-obsidian-background-primary) ${alphaPercent}%, transparent)`,
+    `0px ${y} ${blur} 0px color-mix(in srgb, var(--another-opencode-for-obsidian-background-primary) ${alphaPercent}%, transparent)`,
     "0px 0px 0px 0.5px var(--v2-border-border-muted)",
   ].join(", ");
 }
@@ -679,23 +687,23 @@ function textNormalMix(percent: number): string {
 }
 
 function accentTextMix(percent: number): string {
-  return `color-mix(in srgb, ${GRUVBOX_DARK_MEDIUM.accent} ${percent}%, var(--opencode-obsidian-text-normal))`;
+  return `color-mix(in srgb, ${GRUVBOX_DARK_MEDIUM.accent} ${percent}%, var(--another-opencode-for-obsidian-text-normal))`;
 }
 
 function accentSurfaceMix(percent: number): string {
-  return `color-mix(in srgb, ${GRUVBOX_DARK_MEDIUM.accent} ${percent}%, var(--opencode-obsidian-background-secondary))`;
+  return `color-mix(in srgb, ${GRUVBOX_DARK_MEDIUM.accent} ${percent}%, var(--another-opencode-for-obsidian-background-secondary))`;
 }
 
 function accentBorderMix(percent: number): string {
-  return `color-mix(in srgb, ${GRUVBOX_DARK_MEDIUM.accent} ${percent}%, var(--opencode-obsidian-border))`;
+  return `color-mix(in srgb, ${GRUVBOX_DARK_MEDIUM.accent} ${percent}%, var(--another-opencode-for-obsidian-border))`;
 }
 
 function syntaxTextMix(color: string, percent: number): string {
-  return `color-mix(in srgb, ${color} ${percent}%, var(--opencode-obsidian-text-normal))`;
+  return `color-mix(in srgb, ${color} ${percent}%, var(--another-opencode-for-obsidian-text-normal))`;
 }
 
 function readableTextMix(source: "text-muted" | "text-faint", percent: number): string {
-  return `color-mix(in srgb, var(--opencode-obsidian-${source}) ${percent}%, var(--opencode-obsidian-text-normal))`;
+  return `color-mix(in srgb, var(--another-opencode-for-obsidian-${source}) ${percent}%, var(--another-opencode-for-obsidian-text-normal))`;
 }
 
 function borderMix(percent: number): string {
@@ -706,7 +714,7 @@ function obsidianMix(
   source: "background-primary" | "background-secondary" | "border" | "text-normal",
   percent: number
 ): string {
-  return `color-mix(in srgb, var(--opencode-obsidian-${source}) ${percent}%, transparent)`;
+  return `color-mix(in srgb, var(--another-opencode-for-obsidian-${source}) ${percent}%, transparent)`;
 }
 
 function scrimLayer(colorScheme: ObsidianThemeValues["colorScheme"]): string {
@@ -732,11 +740,11 @@ function stateBackground(state: "success" | "warning" | "danger" | "info"): stri
 }
 
 function stateForeground(state: "success" | "warning" | "danger" | "info"): string {
-  return `color-mix(in srgb, ${gruvboxStateColor(state)} ${OBSIDIAN_STATE_ALPHA.foreground}%, var(--opencode-obsidian-text-normal))`;
+  return `color-mix(in srgb, ${gruvboxStateColor(state)} ${OBSIDIAN_STATE_ALPHA.foreground}%, var(--another-opencode-for-obsidian-text-normal))`;
 }
 
 function stateBorder(state: "success" | "warning" | "danger" | "info"): string {
-  return `color-mix(in srgb, ${gruvboxStateColor(state)} ${OBSIDIAN_STATE_ALPHA.border}%, var(--opencode-obsidian-border))`;
+  return `color-mix(in srgb, ${gruvboxStateColor(state)} ${OBSIDIAN_STATE_ALPHA.border}%, var(--another-opencode-for-obsidian-border))`;
 }
 
 function gruvboxStateColor(state: "success" | "warning" | "danger" | "info"): string {
@@ -744,7 +752,7 @@ function gruvboxStateColor(state: "success" | "warning" | "danger" | "info"): st
 }
 
 function strongBorderMix(percent: number): string {
-  return `color-mix(in srgb, var(--v2-text-text-base) ${percent}%, var(--opencode-obsidian-border))`;
+  return `color-mix(in srgb, var(--v2-text-text-base) ${percent}%, var(--another-opencode-for-obsidian-border))`;
 }
 
 function cssVar(styles: CSSStyleDeclaration, name: string, fallback: string): string {

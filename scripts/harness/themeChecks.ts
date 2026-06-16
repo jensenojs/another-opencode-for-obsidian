@@ -47,10 +47,11 @@ export function themeDiagnosticsResolvedChecks(
       ? ((diagnostics as any).variables as Record<string, unknown>)
       : {};
   const rootBackground = "transparent";
-  const backgroundSecondary = injectedVariables["--opencode-obsidian-background-secondary"];
-  const backgroundPrimary = injectedVariables["--opencode-obsidian-background-primary"];
-  const textNormal = injectedVariables["--opencode-obsidian-text-normal"];
-  const border = injectedVariables["--opencode-obsidian-border"];
+  const backgroundSecondary =
+    injectedVariables["--another-opencode-for-obsidian-background-secondary"];
+  const backgroundPrimary = injectedVariables["--another-opencode-for-obsidian-background-primary"];
+  const textNormal = injectedVariables["--another-opencode-for-obsidian-text-normal"];
+  const border = injectedVariables["--another-opencode-for-obsidian-border"];
   const backgroundNames = [
     "--background-strong",
     "--v2-background-bg-deep",
@@ -566,7 +567,7 @@ function usesObsidianPanelColor(value: unknown, backgroundSecondary: string): bo
   return (
     typeof value === "string" &&
     (value.includes(backgroundSecondary) ||
-      value.includes("var(--opencode-obsidian-background-secondary)"))
+      value.includes("var(--another-opencode-for-obsidian-background-secondary)"))
   );
 }
 
@@ -574,7 +575,7 @@ function usesObsidianBackgroundColor(value: unknown, backgroundPrimary: string):
   return (
     typeof value === "string" &&
     (value.includes(backgroundPrimary) ||
-      value.includes("var(--opencode-obsidian-background-primary)"))
+      value.includes("var(--another-opencode-for-obsidian-background-primary)"))
   );
 }
 

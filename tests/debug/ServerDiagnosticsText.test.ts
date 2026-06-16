@@ -43,8 +43,9 @@ function diagnostics(
     },
     lastResolvedExecutable: null,
     hint: "Custom command exited with 127. Check the executable path visible to Obsidian.",
-    logFile: "/Users/alice/.local/state/opencode-obsidian/opencode-obsidian.log",
-    statusFile: "/Users/alice/.local/state/opencode-obsidian/status.json",
+    logFile:
+      "/Users/alice/.local/state/another-opencode-for-obsidian/another-opencode-for-obsidian.log",
+    statusFile: "/Users/alice/.local/state/another-opencode-for-obsidian/status.json",
     ...overrides,
   };
 }
@@ -65,9 +66,11 @@ describe("ServerDiagnosticsText", () => {
     expect(payload.processEnvironment.secretLikeEnvKeys).toEqual(["OPENAI_API_KEY"]);
     expect(JSON.stringify(payload)).not.toContain("sk-");
     expect(payload.logFile).toBe(
-      "/Users/alice/.local/state/opencode-obsidian/opencode-obsidian.log"
+      "/Users/alice/.local/state/another-opencode-for-obsidian/another-opencode-for-obsidian.log"
     );
-    expect(payload.statusFile).toBe("/Users/alice/.local/state/opencode-obsidian/status.json");
+    expect(payload.statusFile).toBe(
+      "/Users/alice/.local/state/another-opencode-for-obsidian/status.json"
+    );
   });
 
   test("makes start failure notices point to the diagnostics command and XDG log", () => {
@@ -75,6 +78,8 @@ describe("ServerDiagnosticsText", () => {
 
     expect(notice).toContain("OpenCode failed to start");
     expect(notice).toContain("Copy OpenCode diagnostics");
-    expect(notice).toContain("/Users/alice/.local/state/opencode-obsidian/opencode-obsidian.log");
+    expect(notice).toContain(
+      "/Users/alice/.local/state/another-opencode-for-obsidian/another-opencode-for-obsidian.log"
+    );
   });
 });

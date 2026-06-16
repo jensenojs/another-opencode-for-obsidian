@@ -40,4 +40,4 @@ theme:
 	bun run harness theme --vault $(VAULT)
 
 reload:
-	obsidian plugin:reload id=opencode-obsidian
+	obsidian plugin:reload id=another-opencode-for-obsidian

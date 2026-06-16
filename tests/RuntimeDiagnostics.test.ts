@@ -4,13 +4,17 @@ import { getRuntimePaths } from "../src/debug/RuntimeDiagnostics";
 describe("RuntimeDiagnostics", () => {
   test("uses XDG_STATE_HOME as the runtime state root", () => {
     const paths = getRuntimePaths({
-      XDG_STATE_HOME: "/tmp/opencode-obsidian-state",
+      XDG_STATE_HOME: "/tmp/another-opencode-for-obsidian-state",
     });
 
-    expect(paths.stateDir).toBe("/tmp/opencode-obsidian-state/opencode-obsidian");
-    expect(paths.logFile).toBe(
-      "/tmp/opencode-obsidian-state/opencode-obsidian/opencode-obsidian.log"
+    expect(paths.stateDir).toBe(
+      "/tmp/another-opencode-for-obsidian-state/another-opencode-for-obsidian"
     );
-    expect(paths.statusFile).toBe("/tmp/opencode-obsidian-state/opencode-obsidian/status.json");
+    expect(paths.logFile).toBe(
+      "/tmp/another-opencode-for-obsidian-state/another-opencode-for-obsidian/another-opencode-for-obsidian.log"
+    );
+    expect(paths.statusFile).toBe(
+      "/tmp/another-opencode-for-obsidian-state/another-opencode-for-obsidian/status.json"
+    );
   });
 });

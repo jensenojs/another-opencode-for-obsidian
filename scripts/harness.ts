@@ -154,7 +154,7 @@ Commands:
   theme                 Check the current proxy theme injection
 
 Options:
-  --vault <path>        Vault path. Defaults to OPENCODE_OBSIDIAN_VAULT or ~/obsidian
+  --vault <path>        Vault path. Defaults to ANOTHER_OPENCODE_FOR_OBSIDIAN_VAULT or ~/obsidian
   --opencode <path>     OpenCode source path. Defaults to OPENCODE_SOURCE or ~/Projects/ai-cli/opencode
   --lines <n>           Log lines for logs/status. Default 80
   --force               Replace existing symlinks during install

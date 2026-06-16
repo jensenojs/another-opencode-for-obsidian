@@ -45,12 +45,15 @@ describe("ServerManager", () => {
 
   test("returns UI and health URLs from the configured endpoint", () => {
     const settings = createTestSettings(15123);
-    const manager = new ServerManager(settings, "/Users/oujinsai/Projects/opencode-obsidian");
+    const manager = new ServerManager(
+      settings,
+      "/Users/oujinsai/Projects/another-opencode-for-obsidian"
+    );
 
     expect(manager.getUrl()).toBe(
-      `http://127.0.0.1:15123/${Buffer.from("/Users/oujinsai/Projects/opencode-obsidian").toString(
-        "base64"
-      )}`
+      `http://127.0.0.1:15123/${Buffer.from(
+        "/Users/oujinsai/Projects/another-opencode-for-obsidian"
+      ).toString("base64")}`
     );
     expect(manager.getHealthUrl()).toBe("http://127.0.0.1:15123/global/health");
   });
