@@ -18,19 +18,25 @@ _This is a third-party plugin. It is not affiliated with OpenCode or Obsidian._
 ## What This Plugin Does Differently
 
 Many Obsidian integrations stop at embedding a Web UI in a side pane. This
-plugin treats the Web UI as one surface inside a larger Obsidian workflow.
+plugin treats the Web UI as one surface inside a larger Obsidian workflow. The
+proxy is not only a port forwarder. It is the boundary where iframe-local
+OpenCode UI facts become Obsidian-side facts that can be validated against the
+vault, the workspace, and the plugin's own runtime diagnostics.
 
-The practical difference is navigation and evidence. When OpenCode shows a vault
-file, diff row, wikilink, heading, block, footnote, or markdown path, the plugin
-can route that click back to the existing Obsidian note. Hover feedback uses the
-same detection path as click handling, so the UI only hints when the same element
-can actually request navigation. Missing targets fail silently and never create
-new files.
+The first visible result is navigation. When OpenCode shows a vault file, diff
+row, wikilink, heading, block, footnote, or markdown path, the plugin can route
+that click back to the existing Obsidian note. Hover feedback uses the same
+detection path as click handling, so the UI only hints when the same element can
+actually request navigation. Missing targets fail silently and never create new
+files.
 
-Context is also tracked as Obsidian evidence. Sent context keeps provenance,
-restore state, source metadata, and safe navigation targets. The status bar is
-there to inspect and control those facts, while the OpenCode Web UI remains the
-normal conversation surface.
+The same bridge shape is meant to carry more than navigation. Context is tracked
+as Obsidian evidence with provenance, restore state, source metadata, and safe
+navigation targets. OpenCode events are consumed as read-only diagnostics before
+they become UI controls. Future hooks, permission surfaces, TUI coexistence, and
+GraphRAG-derived suggestions should follow the same rule: OpenCode exposes what
+happened, Obsidian resolves it against vault facts, and the plugin presents the
+smallest native control surface needed for the user to inspect or act.
 
 ## Current Status
 
