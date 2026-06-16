@@ -7,6 +7,7 @@ import {
   type GraphSubpathKind,
 } from "./GraphIndex";
 
+// Obsidian API adapter: connects MetadataCache/Vault resolution to GraphIndex facts.
 export function createObsidianGraphIndex(app: App): GraphIndex {
   return new GraphIndex({
     getMarkdownFiles: () => app.vault.getMarkdownFiles(),

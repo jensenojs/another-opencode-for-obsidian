@@ -227,7 +227,7 @@ conversation text by default.
 
 - parse wikilinks;
 - consume `MetadataCache` directly;
-- call `workspace.openLinkText()`;
+- call `workspace.openLinkText()` as an evidence-navigation shortcut;
 - call OpenCode HTTP APIs;
 - maintain graph indexes;
 - decide GraphRAG ranking or candidate generation.

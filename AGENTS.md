@@ -127,6 +127,7 @@ scripts/
 - 转发请求到 opencode 服务器，同时在响应中:
   1. **剥离 Content-Security-Policy 头**——否则注入的脚本会被浏览器阻止执行
   2. **注入键盘监听脚本**——拦截 iframe 内的 `Cmd+L` / `Ctrl+L`，通过 `BridgeProtocol.ts` 定义的 `postMessage` 协议发送到父窗口
+  3. **注入文件点击监听脚本**——只从 OpenCode iframe DOM 中提取用户点击的 vault path 字符串，并发送 `vault-file:open` 本地 bridge message；proxy 不解析 wikilink，不判断文件是否存在
 - `webViewAppearance === "obsidian"` 时读取 Obsidian 当前 CSS 变量，并在 proxied HTML 里覆盖 OpenCode 的设计 token
 - Obsidian 外观的 theme payload 必须在 proxy 注入 HTML 时读取当前 CSS 变量。不要在插件 `onload()` 早期缓存 theme 快照；Obsidian layout、社区主题和 CSS snippets 可能还没把变量写到最终容器上，早期快照会让重启后的首次 iframe 使用陈旧背景。proxy 初始注入只是首帧快照；`OpenCodeView` 必须在 iframe 创建、iframe load、`proxy:loaded` 后通过本地 `theme:update` bridge 把父窗口当前 `WebViewTheme` 推给 iframe。冷启动验收以这个运行态同步后的 diagnostics 为准。
 - Obsidian 外观模式的 theme source 优先当前 active Markdown/editor view，其次才回退到 OpenCode ItemView 和 `body`。Obsidian 主题和社区插件常把最终颜色写到编辑器容器上；从 OpenCode pane 或 `body` 早读会拿到不匹配的背景。
@@ -171,6 +172,7 @@ scripts/
 - 监听 `window` 的 `message` 事件，处理来自 iframe 的 postMessage:
   - `view:toggle`: 触发视图切换
   - `proxy:loaded`: iframe 初始化确认
+  - `vault-file:open`: 对来自 Web UI 的文件点击请求走 `ContextItemNavigator.openSource()`；解析失败静默记录 diagnostics，不弹 Notice，不创建文件
 
 ### `ViewManager.ts` — 视图切换逻辑
 
@@ -208,14 +210,30 @@ scripts/
 - restore 时有有效 provenance 才输出 `provenanceStatus: "known"`；缺失或无效 provenance 必须输出 `provenanceStatus: "uncertain"`
 - diagnostics 可以显示 `textLength` 和 `provenanceStatus`，不能复制完整 context text
 
+### Obsidian resolution contract
+
+- Obsidian 已提供解析能力时，本项目优先消费 Obsidian API，不手写第二套 wikilink、heading、block、footnote resolver。
+- GraphIndex 是 Obsidian Vault + MetadataCache 的事实层。GraphRAG 是它之上的派生层，只能消费 GraphIndex facts，不能替代 Obsidian resolver。
+- UI surface、StatusBar、OpenCodeBridge、Web UI proxy 和 iframe bridge 不解析 wikilink，不维护独立 resolver，不从渲染文本里倒推 vault path。
+- 解析和导航的生产路径是：Obsidian metadata/link API → GraphIndex facts → `ContextItemNavigator` → 已解析到的 `TFile` → `WorkspaceLeaf.openFile()`。
+- API 面必须优先使用：
+  - [`MetadataCache`](https://docs.obsidian.md/Reference/TypeScript+API/MetadataCache)
+  - [`MetadataCache.getFirstLinkpathDest()`](https://docs.obsidian.md/Reference/TypeScript+API/MetadataCache/getFirstLinkpathDest)
+  - [`parseLinktext()`](https://docs.obsidian.md/Reference/TypeScript+API/parseLinktext)
+  - [`getLinkpath()`](https://docs.obsidian.md/Reference/TypeScript+API/getLinkpath)
+  - [`resolveSubpath()`](https://docs.obsidian.md/Reference/TypeScript+API/resolveSubpath)
+  - `Vault.getFileByPath()`
+  - [`WorkspaceLeaf.openFile()`](https://docs.obsidian.md/Reference/TypeScript+API/WorkspaceLeaf/openFile)
+- [`Workspace.openLinkText()`](https://docs.obsidian.md/Reference/TypeScript+API/Workspace/openLinkText) 表达 Obsidian link-open 语义；本项目 evidence navigation 的生产入口需要更窄的合同：先解析到已有 `TFile`，再打开。
+
 ### `ContextItemNavigator.ts` — context source opening
 
 - 这是 context source opening 的唯一生产入口
 - 只打开已有 vault file：使用 Obsidian `Vault.getFileByPath()` / `WorkspaceLeaf.openFile()`
-- 禁止用 `workspace.openLinkText()` 打开 context source，因为 missing path 会进入 Obsidian link 语义并可能创建文件
+- 禁止用 `workspace.openLinkText()` 作为 context source 的生产打开入口；它是 link-open API，不提供“已解析到既有 `TFile` 后再打开”的窄合同
 - missing path、folder、URL、workspace synthetic source、restored uncertain source、unresolved heading/block subpath 都返回明确 unresolved reason
-- 第一阶段不解析 heading/block subpath；后续 GraphIndex 接入时替换这里的解析来源，但生产入口仍保持单一
-- GraphIndex 接入后，合法引用点击应打开已有目标 file/heading/block/footnote；非法引用点击应打开写出该坏引用的已有 source Markdown occurrence。永远不要尝试打开或创建 missing target。
+- 当前代码已通过 GraphIndex-backed resolution 解析 linkpath 和 heading/block/footnote subpath；生产入口仍保持单一
+- 合法引用点击应打开已有目标 file/heading/block/footnote；非法引用点击应打开写出该坏引用的已有 source Markdown occurrence。永远不要尝试打开或创建 missing target。
 
 ### `ContextStatusBar.ts` — 轻量状态面
 
@@ -373,6 +391,7 @@ iframe 与 Obsidian 插件之间通过 `window.postMessage` 通信：
 
 - `{ns:'opencode-obsidian', version:1, type:'view:toggle'}`: iframe 通知父窗口切换视图
 - `{ns:'opencode-obsidian', version:1, type:'proxy:loaded'}`: 代理注入的脚本初始化完成，通知父窗口可以开始通信
+- `{ns:'opencode-obsidian', version:1, type:'vault-file:open', payload:{path}}`: iframe 通知父窗口用户点击了一个文件路径；父窗口必须先用 Obsidian/GraphIndex 解析到已有 `TFile`，再 `WorkspaceLeaf.openFile()`
 - 父窗口通过 `window.addEventListener('message', ...)` 监听
 
 ### 5. Bridge 开发纪律

@@ -15,6 +15,23 @@ larger GraphRAG features are still research and design work.
 
 _This is a third-party plugin. It is not affiliated with OpenCode or Obsidian._
 
+## What This Plugin Does Differently
+
+Many Obsidian integrations stop at embedding a Web UI in a side pane. This
+plugin treats the Web UI as one surface inside a larger Obsidian workflow.
+
+The practical difference is navigation and evidence. When OpenCode shows a vault
+file, diff row, wikilink, heading, block, footnote, or markdown path, the plugin
+can route that click back to the existing Obsidian note. Hover feedback uses the
+same detection path as click handling, so the UI only hints when the same element
+can actually request navigation. Missing targets fail silently and never create
+new files.
+
+Context is also tracked as Obsidian evidence. Sent context keeps provenance,
+restore state, source metadata, and safe navigation targets. The status bar is
+there to inspect and control those facts, while the OpenCode Web UI remains the
+normal conversation surface.
+
 ## Current Status
 
 Works today:
@@ -114,6 +131,27 @@ terminal. If OpenCode or local MCP tools cannot be found, prefer an absolute
 The plugin does not create missing vault files when navigating context sources.
 If a source cannot be resolved, it is reported as unresolved instead of using
 Obsidian's link-open behavior.
+
+## Vault Navigation And Link Resolution
+
+Vault navigation opens existing Obsidian evidence only. The plugin resolves
+vault paths, wikilinks, headings, blocks, and footnotes through Obsidian APIs and
+the GraphIndex fact layer, then opens the resolved `TFile` with
+`WorkspaceLeaf.openFile()`.
+
+This keeps one resolver contract for current context navigation and future
+GraphRAG work. GraphRAG can rank or explain relationships above GraphIndex, but
+it should consume the same vault facts instead of building another link parser.
+
+Relevant Obsidian API references:
+
+- [MetadataCache](https://docs.obsidian.md/Reference/TypeScript+API/MetadataCache)
+- [MetadataCache.getFirstLinkpathDest](https://docs.obsidian.md/Reference/TypeScript+API/MetadataCache/getFirstLinkpathDest)
+- [parseLinktext](https://docs.obsidian.md/Reference/TypeScript+API/parseLinktext)
+- [getLinkpath](https://docs.obsidian.md/Reference/TypeScript+API/getLinkpath)
+- [resolveSubpath](https://docs.obsidian.md/Reference/TypeScript+API/resolveSubpath)
+- [WorkspaceLeaf.openFile](https://docs.obsidian.md/Reference/TypeScript+API/WorkspaceLeaf/openFile)
+- [Workspace.openLinkText](https://docs.obsidian.md/Reference/TypeScript+API/Workspace/openLinkText) is a link-open reference, not this plugin's evidence-navigation entry point.
 
 ## Settings
 

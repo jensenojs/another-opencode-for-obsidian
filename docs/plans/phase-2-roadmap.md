@@ -39,4 +39,5 @@ opencode SSE 入站         →  SSE 监听器                 →  ContextManag
 - 监听 opencode SSE → `postMessage` → Obsidian Notice
 
 **openCode 改文件 → 打开笔记**
-- SSE 监听器 + `app.workspace.openLinkText()`
+- SSE 监听器 + safe navigator + `WorkspaceLeaf.openFile()`
+- 早期 `workspace.openLinkText()` 草案已被当前 navigation contract 取代；入站事件也必须先解析到已有 vault evidence

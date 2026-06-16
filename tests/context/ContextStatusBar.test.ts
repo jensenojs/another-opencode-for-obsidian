@@ -8,9 +8,20 @@ import type { ContextItem } from "../../src/types";
 
 mock.module("obsidian", () => ({
   addIcon: () => {},
+  getLinkpath: (linktext: string) => linktext.split("#", 1)[0],
   ItemView: class ItemView {},
   MarkdownView: class MarkdownView {},
   Notice: class Notice {},
+  parseLinktext: (linktext: string) => {
+    const subpathIndex = linktext.indexOf("#");
+    if (subpathIndex === -1) {
+      return { path: linktext, subpath: "" };
+    }
+    return {
+      path: linktext.slice(0, subpathIndex),
+      subpath: linktext.slice(subpathIndex + 1),
+    };
+  },
   TFile: class TFile {},
   TFolder: class TFolder {},
 }));

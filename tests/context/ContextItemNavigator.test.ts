@@ -19,6 +19,17 @@ class FakeTFolder {
 
 mock.module("obsidian", () => ({
   Notice: class Notice {},
+  getLinkpath: (linktext: string) => linktext.split("#", 1)[0],
+  parseLinktext: (linktext: string) => {
+    const subpathIndex = linktext.indexOf("#");
+    if (subpathIndex === -1) {
+      return { path: linktext, subpath: "" };
+    }
+    return {
+      path: linktext.slice(0, subpathIndex),
+      subpath: linktext.slice(subpathIndex + 1),
+    };
+  },
 }));
 
 let ContextItemNavigator: typeof ContextItemNavigatorClass;
@@ -154,6 +165,45 @@ describe("ContextItemNavigator", () => {
       line: 3,
     });
     expect(opened).toEqual([]);
+  });
+
+  test("opens a bridge-provided vault path through the same safe navigator", async () => {
+    const file = new FakeTFile("target.md");
+    const { app, opened } = createApp({ "target.md": file });
+    const navigator = new ContextItemNavigator(app, createGraphIndex());
+
+    await expect(navigator.openSource("target#Target heading")).resolves.toEqual({
+      status: "opened",
+      path: "target.md",
+      line: 6,
+    });
+    expect(opened).toEqual([{ file, openState: { active: true, eState: { line: 6 } } }]);
+  });
+
+  test("opens a bridge-provided Obsidian wikilink with alias through the same safe navigator", async () => {
+    const file = new FakeTFile("target.md");
+    const { app, opened } = createApp({ "target.md": file });
+    const navigator = new ContextItemNavigator(app, createGraphIndex());
+
+    await expect(navigator.openSource("[[target#Target heading|Alias]]")).resolves.toEqual({
+      status: "opened",
+      path: "target.md",
+      line: 6,
+    });
+    expect(opened).toEqual([{ file, openState: { active: true, eState: { line: 6 } } }]);
+  });
+
+  test("opens a bridge-provided vault path at a clicked line", async () => {
+    const file = new FakeTFile("target.md");
+    const { app, opened } = createApp({ "target.md": file });
+    const navigator = new ContextItemNavigator(app, createGraphIndex());
+
+    await expect(navigator.openSource("target.md", 159)).resolves.toEqual({
+      status: "opened",
+      path: "target.md",
+      line: 158,
+    });
+    expect(opened).toEqual([{ file, openState: { active: true, eState: { line: 158 } } }]);
   });
 
   test("returns missing-file without opening absent sources", async () => {

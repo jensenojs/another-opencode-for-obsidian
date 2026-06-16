@@ -1,4 +1,4 @@
-import { Notice, type App, type OpenViewState } from "obsidian";
+import { Notice, getLinkpath, parseLinktext, type App, type OpenViewState } from "obsidian";
 import type { GraphIndex, GraphReference, GraphSubpathKind } from "../graph/GraphIndex";
 import type { ContextItem } from "../types";
 
@@ -28,6 +28,7 @@ export type ContextNavigationResolution =
 
 const SYNTHETIC_CONTEXT_SOURCES = new Set(["Obsidian workspace", "OpenCode session"]);
 
+// Production entry for Obsidian evidence navigation. It only opens resolved TFiles.
 export class ContextItemNavigator {
   constructor(
     private app: App,
@@ -36,6 +37,10 @@ export class ContextItemNavigator {
 
   resolve(item: ContextItem): ContextNavigationResolution {
     const sourceFile = item.navigationSourceFile ?? item.sourceFile;
+    return this.resolveSource(sourceFile, item.startLine);
+  }
+
+  resolveSource(sourceFile: string, startLine?: number): ContextNavigationResolution {
     const target = resolveSourceTarget(sourceFile);
     if (!target) {
       return unresolved("empty-source", sourceFile);
@@ -66,7 +71,7 @@ export class ContextItemNavigator {
       };
     }
 
-    const line = toEditorLine(item.startLine);
+    const line = toEditorLine(startLine);
     return {
       status: "resolved",
       path: file.path,
@@ -101,6 +106,11 @@ export class ContextItemNavigator {
   async open(item: ContextItem): Promise<ContextNavigationResult> {
     const resolution = this.resolve(item);
     return this.openResolution(resolution, item.navigationSourceFile ?? item.sourceFile);
+  }
+
+  async openSource(sourceFile: string, startLine?: number): Promise<ContextNavigationResult> {
+    const resolution = this.resolveSource(sourceFile, startLine);
+    return this.openResolution(resolution, sourceFile);
   }
 
   async openReference(reference: GraphReference): Promise<ContextNavigationResult> {
@@ -191,20 +201,32 @@ function resolveSourceTarget(
   if (!trimmed) {
     return null;
   }
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+  const linktext = normalizeObsidianLinktext(trimmed);
+  if (!linktext) {
+    return null;
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(linktext)) {
     return { kind: "external-url" };
   }
 
-  const subpathIndex = trimmed.indexOf("#");
-  if (subpathIndex === -1) {
-    return { kind: "vault-path", path: trimmed };
+  const parsed = parseLinktext(linktext);
+  const path = parsed.path || getLinkpath(linktext);
+  if (!path) {
+    return null;
   }
+  const subpath = normalizeParsedSubpath(parsed.subpath);
+  return subpath ? { kind: "vault-path", path, subpath } : { kind: "vault-path", path };
+}
 
-  return {
-    kind: "vault-path",
-    path: trimmed.slice(0, subpathIndex),
-    subpath: trimmed.slice(subpathIndex + 1),
-  };
+function normalizeObsidianLinktext(sourceFile: string): string {
+  const wikilink = sourceFile.match(/^!?\[\[([\s\S]+)\]\]$/);
+  const linktext = wikilink ? wikilink[1].trim() : sourceFile;
+  const aliasIndex = linktext.indexOf("|");
+  return aliasIndex === -1 ? linktext : linktext.slice(0, aliasIndex).trim();
+}
+
+function normalizeParsedSubpath(subpath: string): string {
+  return subpath.replace(/^#/, "").trim();
 }
 
 function unresolved(

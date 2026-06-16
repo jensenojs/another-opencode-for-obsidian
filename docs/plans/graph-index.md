@@ -2,6 +2,32 @@
 
 GraphIndex is an in-memory read model over Obsidian Vault and MetadataCache. Its truth source is the current vault files plus Obsidian metadata, not a persisted plugin database.
 
+## Obsidian API source of truth
+
+GraphIndex consumes Obsidian's resolver surface before adding its own structure.
+The adapter should use Obsidian APIs for link and subpath semantics:
+
+- [`MetadataCache`](https://docs.obsidian.md/Reference/TypeScript+API/MetadataCache)
+- [`MetadataCache.getFirstLinkpathDest()`](https://docs.obsidian.md/Reference/TypeScript+API/MetadataCache/getFirstLinkpathDest)
+- [`parseLinktext()`](https://docs.obsidian.md/Reference/TypeScript+API/parseLinktext)
+- [`getLinkpath()`](https://docs.obsidian.md/Reference/TypeScript+API/getLinkpath)
+- [`resolveSubpath()`](https://docs.obsidian.md/Reference/TypeScript+API/resolveSubpath)
+- `Vault.getFileByPath()`
+- [`WorkspaceLeaf.openFile()`](https://docs.obsidian.md/Reference/TypeScript+API/WorkspaceLeaf/openFile)
+
+The allowed GraphIndex-owned logic is narrow:
+
+- structure Obsidian metadata into nodes, edges, references, and snapshots;
+- preserve occurrence evidence from Obsidian metadata positions;
+- return resolution status and unresolved reasons;
+- expose stable read queries for UI, diagnostics, and later GraphRAG.
+
+GraphIndex does not read note body text, hand-roll heading slugs, rewrite the
+wikilink parser, or replace Obsidian's resolver. It can normalize the shape of
+Obsidian facts, but it should not invent a parallel interpretation of links.
+
+[`Workspace.openLinkText()`](https://docs.obsidian.md/Reference/TypeScript+API/Workspace/openLinkText) is useful as a reference for Obsidian link-open behavior. It is not the production evidence-navigation entry point in this plugin. Navigation resolves to an existing `TFile` first and then calls `WorkspaceLeaf.openFile()`.
+
 ## Data model
 
 Paths inside graph nodes, references, and edges use vault-relative `TFile.path` values. Diagnostics or cache code may carry vault name or vault root separately, but graph identity does not require an absolute filesystem path.
@@ -52,7 +78,10 @@ The API does not return recommendation, score, should-add-to-context, or vault w
 
 ## Boundary for ContextItemNavigator
 
-`ContextItemNavigator` remains the production source-opening entry point. A later task can switch its file and subpath resolution to `GraphIndex.resolveLinkpath()` and `GraphIndex.resolveSubpath()`. The navigation surface should not introduce another resolver.
+`ContextItemNavigator` remains the production source-opening entry point. Current
+navigation resolves files and subpaths through `GraphIndex.resolveLinkpath()`
+and `GraphIndex.resolveSubpath()`. The navigation surface should not introduce
+another resolver.
 
 GraphIndex-backed navigation must also preserve reference occurrence evidence.
 For a legal reference, navigation can open the existing target file, heading,

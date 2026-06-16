@@ -198,6 +198,7 @@ Current bridge messages are local plugin messages:
 
 - `proxy:loaded`;
 - `view:toggle`;
+- `vault-file:open`;
 - `theme:diagnostics`;
 - `theme:update`.
 

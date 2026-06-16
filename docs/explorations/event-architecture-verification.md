@@ -213,7 +213,12 @@ window.parent.postMessage({
 
 #### 场景 A：AI 修改文件 → Obsidian 自动打开对应笔记
 
-**需求路径**：opencode SSE `message.part.updated`（检测到 `write` / `edit` 工具调用） → Obsidian `app.workspace.openLinkText(file, line)`
+**当前导航契约**：本节保留早期探索价值。早期草案里直接调用
+`workspace.openLinkText()` 的做法已经被当前 navigation contract 取代。
+opencode 入站事件如果要打开 vault evidence，必须进入 safe navigator，先解析到已有
+`TFile`，再调用 `WorkspaceLeaf.openFile()`。
+
+**需求路径**：opencode SSE `message.part.updated`（检测到 `write` / `edit` 工具调用） → safe navigator → Obsidian `WorkspaceLeaf.openFile()`
 
 **当前架构承接情况**：❌ **不可承接**
 
@@ -224,7 +229,7 @@ window.parent.postMessage({
 **需要的模块**：一个 `OpenCodeEventListener`（或者叫 `InboundEventBridge`），类似于 `ContextSyncer` 但方向相反：
   - 通过 Node.js `http` 订阅 `GET /event` SSE 流
   - 解析事件，按类型分发
-  - 调用 Obsidian API 执行操作（打开文件、弹出通知等）
+  - 通过 safe navigator 调用 Obsidian API 执行操作（打开已解析文件、弹出通知等）
 
 **对架构的影响**：
 - `ContextRegistry` 无需改动——它的职责是持有上下文条目状态，不涉及文件操作

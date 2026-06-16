@@ -32,7 +32,7 @@ import {
   formatServerDiagnosticsForClipboard,
   formatStartFailureNotice,
 } from "./debug/ServerDiagnosticsText";
-import { BRIDGE_MESSAGES, isBridgeMessage } from "./bridge/BridgeProtocol";
+import { BRIDGE_MESSAGES, isBridgeMessage, isVaultFileOpenPayload } from "./bridge/BridgeProtocol";
 import { captureObsidianWebViewTheme, findObsidianWebViewThemeSource } from "./theme/WebViewTheme";
 
 export default class OpenCodePlugin extends Plugin {
@@ -104,6 +104,9 @@ export default class OpenCodePlugin extends Plugin {
       }
       if (event.data.type === BRIDGE_MESSAGES.viewToggle) {
         void this.viewManager.toggleView();
+      }
+      if (event.data.type === BRIDGE_MESSAGES.vaultFileOpen) {
+        void this.openVaultFileFromBridge(event.data.payload);
       }
     });
 
@@ -530,6 +533,21 @@ export default class OpenCodePlugin extends Plugin {
     this.runtimeDiagnostics.iframe = payload;
     this.logger.info("iframe diagnostics", summarizeDiagnosticPayload(payload));
     this.writeStatus("iframe-diagnostics");
+  }
+
+  private async openVaultFileFromBridge(payload: unknown): Promise<void> {
+    if (!isVaultFileOpenPayload(payload)) {
+      this.logger.warn(
+        "ignored invalid vault file open payload",
+        summarizeDiagnosticPayload(payload)
+      );
+      this.writeStatus("vault-file-open-invalid");
+      return;
+    }
+
+    const result = await this.contextItemNavigator.openSource(payload.path, payload.line);
+    this.logger.info("vault file open requested from web ui", result);
+    this.writeStatus(result.status === "opened" ? "vault-file-opened" : "vault-file-unresolved");
   }
 
   private scheduleEventStatusWrite(): void {

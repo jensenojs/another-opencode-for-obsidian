@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as http from "http";
+import type { AddressInfo } from "net";
 import {
   OpenCodeEventSource,
   buildEventEndpoint,
@@ -8,7 +9,6 @@ import {
 } from "../../src/client/OpenCodeEventSource";
 
 const servers: http.Server[] = [];
-let nextPort = 18100;
 
 afterEach(async () => {
   await Promise.all(
@@ -161,10 +161,11 @@ describe("OpenCodeEventSource", () => {
 
 async function listen(handler: http.RequestListener): Promise<http.Server & { url: string }> {
   const server = http.createServer(handler) as http.Server & { url: string };
-  const port = nextPort++;
   await new Promise<void>((resolve) => {
-    server.listen(port, "127.0.0.1", resolve);
+    server.listen(0, "127.0.0.1", resolve);
   });
+  const address = server.address() as AddressInfo;
+  const port = address.port;
   server.url = `http://127.0.0.1:${port}`;
   servers.push(server);
   return server;
