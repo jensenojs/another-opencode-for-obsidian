@@ -56,10 +56,16 @@ export class ContextStatusBar {
   render(items: ContextItem[] = this.deps.getItems(), candidates = this.getCandidates()): void {
     const text = getText();
     const total = items.length + candidates.length;
+    const includedCandidates = candidates.filter((candidate) => candidate.included).length;
+    const statusCount = candidates.length > 0 ? includedCandidates : items.length;
     this.statusEl.empty();
     this.statusEl.toggleClass("is-active", total > 0);
-    this.renderStatusLabel(text.context.statusText(items.length, candidates.length));
-    this.statusEl.title = text.context.statusTitle(items.length, candidates.length, total);
+    this.renderStatusLabel(text.context.statusText(statusCount));
+    this.statusEl.title = text.context.statusTitle(
+      includedCandidates,
+      candidates.length,
+      items.length
+    );
     if (this.popoverEl) {
       this.renderPopover(items, candidates);
     }
@@ -351,9 +357,6 @@ export class ContextStatusBar {
   private async openItem(item: ContextStatusBarSource): Promise<void> {
     const result = await this.deps.openItem(item);
     noticeContextNavigationResult(result);
-    if (result.status === "opened") {
-      this.hidePopover();
-    }
   }
 
   private toggleRowExpansion(

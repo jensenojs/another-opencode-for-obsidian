@@ -139,6 +139,7 @@ describe("OpenCodeSettingTab i18n", () => {
       expect(visibleText).toContain("服务器配置");
       expect(visibleText).toContain("自定义命令");
       expect(visibleText).toContain("项目目录");
+      expect(visibleText).toContain("主点击打开 vault 文件");
       expect(visibleText).toContain("上下文辅助");
       expect(visibleText).toContain("服务器状态");
 

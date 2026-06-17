@@ -515,6 +515,9 @@ export default class OpenCodePlugin extends Plugin {
     const theme =
       this.settings.webViewAppearance === "obsidian" ? () => this.getWebViewTheme() : null;
     this.openCodeWebUiProxy.updateAppearance(this.settings.webViewAppearance, theme);
+    this.openCodeWebUiProxy.updateBridgeOptions({
+      webUiVaultNavigationPrimaryClick: this.settings.webUiVaultNavigationPrimaryClick,
+    });
   }
 
   private installPromptContextHook(): void {

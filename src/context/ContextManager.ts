@@ -43,6 +43,8 @@ export class ContextManager {
 
   private contextEventRefs: EventRef[] = [];
   private contextRefreshTimer: number | null = null;
+  private selectionPollTimer: number | null = null;
+  private removeSelectionPollListeners: (() => void) | null = null;
   private registry = new ContextRegistry();
   private candidateRegistry = new CandidateRegistry();
   private promptInjector = new PromptContextInjector(this.candidateRegistry);
@@ -79,6 +81,7 @@ export class ContextManager {
   }
 
   private updateListeners(): void {
+    this.updateSelectionPollListeners();
     if (!this.isWorkspaceSourceEnabled() && !this.isSelectionSourceEnabled()) {
       this.clearListeners();
       return;
@@ -144,7 +147,43 @@ export class ContextManager {
       window.clearTimeout(this.contextRefreshTimer);
       this.contextRefreshTimer = null;
     }
+    if (this.selectionPollTimer !== null) {
+      window.clearTimeout(this.selectionPollTimer);
+      this.selectionPollTimer = null;
+    }
+    this.removeSelectionPollListeners?.();
+    this.removeSelectionPollListeners = null;
     this.autoSources.reset();
+  }
+
+  private updateSelectionPollListeners(): void {
+    if (!this.isSelectionSourceEnabled()) {
+      this.removeSelectionPollListeners?.();
+      this.removeSelectionPollListeners = null;
+      if (this.selectionPollTimer !== null) {
+        window.clearTimeout(this.selectionPollTimer);
+        this.selectionPollTimer = null;
+      }
+      return;
+    }
+
+    if (
+      this.removeSelectionPollListeners ||
+      typeof document === "undefined" ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+
+    const schedule = (): void => this.scheduleSelectionPoll();
+    document.addEventListener("selectionchange", schedule);
+    document.addEventListener("mouseup", schedule, true);
+    window.addEventListener("keyup", schedule, true);
+    this.removeSelectionPollListeners = () => {
+      document.removeEventListener("selectionchange", schedule);
+      document.removeEventListener("mouseup", schedule, true);
+      window.removeEventListener("keyup", schedule, true);
+    };
   }
 
   private scheduleRefresh(delayMs: number = 300): void {
@@ -161,6 +200,40 @@ export class ContextManager {
       this.contextRefreshTimer = null;
       void this.refreshContext(leaf);
     }, delayMs);
+  }
+
+  private scheduleSelectionPoll(delayMs: number = 120): void {
+    if (!this.isSelectionSourceEnabled()) {
+      return;
+    }
+
+    if (this.selectionPollTimer !== null) {
+      window.clearTimeout(this.selectionPollTimer);
+    }
+
+    this.selectionPollTimer = window.setTimeout(() => {
+      this.selectionPollTimer = null;
+      void this.refreshSelectionFromActiveMarkdown();
+    }, delayMs);
+  }
+
+  private async refreshSelectionFromActiveMarkdown(): Promise<void> {
+    if (!this.isSelectionSourceEnabled()) {
+      return;
+    }
+
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!(view instanceof MarkdownView)) {
+      return;
+    }
+
+    const selection = this.workspaceContext.trackViewSelection(view);
+    await this.handleAutoSourceResults(
+      this.autoSources.handleEditorChanged({
+        filePath: view.file?.path ?? null,
+        selection,
+      })
+    );
   }
 
   private getLeafForRefresh(): WorkspaceLeaf | null {

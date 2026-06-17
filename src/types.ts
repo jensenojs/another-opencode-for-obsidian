@@ -88,6 +88,7 @@ export interface OpenCodeSettings {
   customCommand: string;
   useCustomCommand: boolean;
   webViewAppearance: WebViewAppearance;
+  webUiVaultNavigationPrimaryClick: boolean;
   lastSessionUrl: string;
 }
 
@@ -118,6 +119,7 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
   customCommand: "",
   useCustomCommand: false,
   webViewAppearance: "obsidian",
+  webUiVaultNavigationPrimaryClick: true,
   lastSessionUrl: "",
 };
 

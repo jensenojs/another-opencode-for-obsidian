@@ -72,6 +72,9 @@ const EN_TEXT = {
     webViewAppearance: "Web view appearance",
     webViewAppearanceDesc:
       "Use Obsidian to inherit the active vault theme, or switch to OpenCode to keep the web UI's native styling.",
+    webUiVaultNavigationPrimaryClick: "Open vault files with primary click",
+    webUiVaultNavigationPrimaryClickDesc:
+      "When on, primary click opens matching vault files in Obsidian and secondary click is left to OpenCode. Turn off to reverse them.",
     contextAssist: "Context assist",
     contextAssistPageDesc: "Control which Obsidian context is included with the next prompt.",
     enabled: "On",
@@ -136,16 +139,19 @@ const EN_TEXT = {
     diagnosticStatus: "Status",
   },
   context: {
-    statusText: (committed: number, candidates: number) =>
-      candidates === 0 ? `${committed}` : `${committed}+${candidates}`,
-    statusTitle: (committed: number, candidates: number, total: number) =>
-      `${committed} committed, ${candidates} candidate OpenCode context item${total === 1 ? "" : "s"}`,
+    statusText: (count: number) => `${count}`,
+    statusTitle: (includedCandidates: number, totalCandidates: number, committed: number) =>
+      totalCandidates > 0
+        ? `${includedCandidates} context candidate${includedCandidates === 1 ? "" : "s"} will be sent with the next OpenCode message`
+        : committed > 0
+          ? `${committed} committed OpenCode context item${committed === 1 ? "" : "s"}`
+          : "No Obsidian context queued for the next OpenCode message",
     popoverTitle: (_committed: number, _candidates: number) => "Context",
     copyDiagnostics: "Copy diagnostics",
     candidates: "Candidates",
     nextMessageIncludes: "Next message",
     skip: "Skip",
-    skipOnce: "Skip once",
+    skipOnce: "Skip next",
     include: "Include",
     toggleCandidateTitle: "Toggle this local candidate for the next message",
     currentSessionContext: "Committed",
@@ -244,6 +250,9 @@ const ZH_CN_TEXT: PluginText = {
     webViewAppearance: "Web view 外观",
     webViewAppearanceDesc:
       "选择 Obsidian 时继承当前 vault 主题；选择 OpenCode 时保留 web UI 原生样式。",
+    webUiVaultNavigationPrimaryClick: "主点击打开 vault 文件",
+    webUiVaultNavigationPrimaryClickDesc:
+      "开启时，左键在 Obsidian 打开匹配的 vault 文件，右键交还给 OpenCode。关闭后两者反过来。",
     contextAssist: "上下文辅助",
     contextAssistPageDesc: "控制哪些 Obsidian 上下文会随下一条消息发送。",
     enabled: "开",
@@ -304,16 +313,19 @@ const ZH_CN_TEXT: PluginText = {
     diagnosticStatus: "状态",
   },
   context: {
-    statusText: (committed: number, candidates: number) =>
-      candidates === 0 ? `${committed}` : `${committed}+${candidates}`,
-    statusTitle: (committed: number, candidates: number) =>
-      `${committed} 个已提交上下文，${candidates} 个候选上下文`,
+    statusText: (count: number) => `${count}`,
+    statusTitle: (includedCandidates: number, totalCandidates: number, committed: number) =>
+      totalCandidates > 0
+        ? `下一条 OpenCode 消息将包含 ${includedCandidates} 个上下文候选`
+        : committed > 0
+          ? `${committed} 个已提交到当前 session 的上下文`
+          : "下一条 OpenCode 消息没有待发送的 Obsidian 上下文",
     popoverTitle: (_committed: number, _candidates: number) => "上下文",
     copyDiagnostics: "复制诊断",
     candidates: "候选",
     nextMessageIncludes: "下一条消息",
     skip: "跳过",
-    skipOnce: "跳过一次",
+    skipOnce: "本条不带",
     include: "包含",
     toggleCandidateTitle: "切换这个本地候选是否进入下一条消息",
     currentSessionContext: "已提交",

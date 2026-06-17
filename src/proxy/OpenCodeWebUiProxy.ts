@@ -2,6 +2,7 @@ import * as http from "http";
 import { EventEmitter } from "events";
 import { createLogger } from "../debug/RuntimeDiagnostics";
 import { injectOpenCodeWebUiProxyHtml } from "./ProxyInjection";
+import type { BridgeInjectionOptions } from "./BridgeInjection";
 import type { WebViewAppearance, WebViewTheme } from "../types";
 
 type WebViewThemeProvider = () => WebViewTheme | null;
@@ -35,6 +36,7 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   private targetPort: number;
   private appearance: WebViewAppearance;
   private theme: WebViewThemeSource;
+  private bridgeOptions: BridgeInjectionOptions = {};
   private effectivePort: number = 0;
   private logger = createLogger("proxy");
   private promptRequestHook: PromptRequestHook | null = null;
@@ -71,6 +73,10 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   updateAppearance(appearance: WebViewAppearance, theme: WebViewThemeSource = null): void {
     this.appearance = appearance;
     this.theme = theme;
+  }
+
+  updateBridgeOptions(options: BridgeInjectionOptions): void {
+    this.bridgeOptions = options;
   }
 
   updatePromptRequestHook(
@@ -330,7 +336,12 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   }
 
   private injectScript(body: string): string {
-    return injectOpenCodeWebUiProxyHtml(body, this.appearance, this.resolveTheme());
+    return injectOpenCodeWebUiProxyHtml(
+      body,
+      this.appearance,
+      this.resolveTheme(),
+      this.bridgeOptions
+    );
   }
 
   private resolveTheme(): WebViewTheme | null {

@@ -168,7 +168,7 @@ describe("ContextStatusBar", () => {
 
     expect(statusEl.text).toBe("1");
     expect(statusEl.classes.has("is-active")).toBe(true);
-    expect(statusEl.title).toBe("1 committed, 0 candidate OpenCode context item");
+    expect(statusEl.title).toBe("1 committed OpenCode context item");
 
     statusBar.destroy();
 
@@ -394,7 +394,7 @@ describe("ContextStatusBar", () => {
         removeItem: async () => true,
       });
 
-      expect(statusEl.textContent).toBe("1+1");
+      expect(statusEl.textContent).toBe("1");
 
       statusEl.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -484,7 +484,7 @@ describe("ContextStatusBar", () => {
         removeItem: async () => true,
       });
 
-      expect(statusEl.textContent).toBe("1+1");
+      expect(statusEl.textContent).toBe("1");
 
       statusEl.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -637,6 +637,7 @@ describe("ContextStatusBar", () => {
       await new Promise((resolve) => setTimeout(resolve, 220));
 
       expect(opened).toEqual(["msg_1:prt_1"]);
+      expect(window.document.querySelector(".opencode-ctx-popover")).toBeTruthy();
 
       statusBar.destroy();
     });

@@ -1,12 +1,18 @@
 import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../bridge/BridgeProtocol";
 
-export function createBridgeScript(): string {
+export interface BridgeInjectionOptions {
+  webUiVaultNavigationPrimaryClick?: boolean;
+}
+
+export function createBridgeScript(options: BridgeInjectionOptions = {}): string {
+  const webUiVaultNavigationPrimaryClick = options.webUiVaultNavigationPrimaryClick !== false;
   return `
 <script data-another-opencode-for-obsidian-bridge>
 (function() {
   var ns = ${JSON.stringify(BRIDGE_NAMESPACE)};
   var version = ${JSON.stringify(BRIDGE_VERSION)};
   var messages = ${JSON.stringify(BRIDGE_MESSAGES)};
+  var vaultNavigationPrimaryClick = ${JSON.stringify(webUiVaultNavigationPrimaryClick)};
   var vaultHoverInsetX = 3;
   var vaultHoverInsetY = 2;
   var vaultHoverRadius = 5;
@@ -304,8 +310,9 @@ export function createBridgeScript(): string {
     return hoverIndicator;
   }
   function setPointerCursor(value) {
-    document.documentElement.style.cursor = value ? 'pointer' : '';
-    if (document.body) document.body.style.cursor = value ? 'pointer' : '';
+    var cursor = value ? (vaultNavigationPrimaryClick ? 'pointer' : 'context-menu') : '';
+    document.documentElement.style.cursor = cursor;
+    if (document.body) document.body.style.cursor = cursor;
   }
   function showHoverIndicator(rect) {
     setPointerCursor(true);
@@ -336,8 +343,15 @@ export function createBridgeScript(): string {
     }
     showHoverIndicator(hover.rect);
   }
+  function shouldNavigateVaultFileForEvent(e) {
+    if (e.defaultPrevented) return false;
+    if (vaultNavigationPrimaryClick) {
+      return e.type === 'click' && e.button === 0;
+    }
+    return e.type === 'contextmenu';
+  }
   function vaultFileClickHandler(e) {
-    if (e.defaultPrevented || e.button !== 0) return;
+    if (!shouldNavigateVaultFileForEvent(e)) return;
     var click = vaultFileClickFromEvent(e);
     if (!click) return;
     e.preventDefault();
@@ -358,6 +372,7 @@ export function createBridgeScript(): string {
   document.addEventListener('pointermove', vaultFileHoverHandler, true);
   document.addEventListener('pointerleave', hideHoverIndicator, true);
   document.addEventListener('click', vaultFileClickHandler, true);
+  document.addEventListener('contextmenu', vaultFileClickHandler, true);
   window.addEventListener('keydown', toggleHandler, true);
   document.addEventListener('keydown', toggleHandler, true);
 })();

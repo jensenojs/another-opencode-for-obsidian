@@ -24,6 +24,7 @@ type SettingsKey =
   | "autoStart"
   | "defaultViewLocation"
   | "webViewAppearance"
+  | "webUiVaultNavigationPrimaryClick"
   | "contextAssist.enabled"
   | "contextAssist.workspace.enabled"
   | "contextAssist.workspace.maxOpenNotes"
@@ -186,6 +187,15 @@ export class OpenCodeSettingTab extends PluginSettingTab {
               defaultValue: "obsidian",
             },
           },
+          {
+            name: text.settings.webUiVaultNavigationPrimaryClick,
+            desc: text.settings.webUiVaultNavigationPrimaryClickDesc,
+            control: {
+              type: "toggle",
+              key: "webUiVaultNavigationPrimaryClick",
+              defaultValue: true,
+            },
+          },
         ],
       },
       {
@@ -342,6 +352,8 @@ export class OpenCodeSettingTab extends PluginSettingTab {
         return this.settings.defaultViewLocation;
       case "webViewAppearance":
         return this.settings.webViewAppearance;
+      case "webUiVaultNavigationPrimaryClick":
+        return this.settings.webUiVaultNavigationPrimaryClick;
       case "contextAssist.enabled":
         return this.settings.contextAssist.enabled;
       case "contextAssist.workspace.enabled":
@@ -395,6 +407,11 @@ export class OpenCodeSettingTab extends PluginSettingTab {
         return;
       case "webViewAppearance":
         this.settings.webViewAppearance = expectWebViewAppearance(key, value);
+        await this.onSettingsChange();
+        this.refreshOpenCodeViews();
+        return;
+      case "webUiVaultNavigationPrimaryClick":
+        this.settings.webUiVaultNavigationPrimaryClick = expectBoolean(key, value);
         await this.onSettingsChange();
         this.refreshOpenCodeViews();
         return;

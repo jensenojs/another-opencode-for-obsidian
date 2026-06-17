@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE } from "../../src/bridge/BridgeProtocol";
 import { injectOpenCodeWebUiProxyHtml } from "../../src/proxy/ProxyInjection";
+import type { BridgeInjectionOptions } from "../../src/proxy/BridgeInjection";
 
 const html = "<html><head></head><body>OpenCode</body></html>";
 type PostedBridgeMessage = {
@@ -11,12 +12,15 @@ type PostedBridgeMessage = {
   payload?: unknown;
 };
 
-function runInjectedBridge(bodyMarkup: string): {
+function runInjectedBridge(
+  bodyMarkup: string,
+  bridgeOptions: BridgeInjectionOptions = {}
+): {
   document: any;
   messages: PostedBridgeMessage[];
   window: Window;
 } {
-  const injected = injectOpenCodeWebUiProxyHtml(html, "opencode", null);
+  const injected = injectOpenCodeWebUiProxyHtml(html, "opencode", null, bridgeOptions);
   const script = extractBridgeScript(injected);
   const window = new Window({ url: "http://127.0.0.1:4097" });
   const messages: PostedBridgeMessage[] = [];
@@ -94,6 +98,22 @@ function click(window: Window, element: any): void {
       cancelable: true,
       composed: true,
       button: 0,
+    })
+  );
+}
+
+function dispatchMouse(
+  window: Window,
+  element: any,
+  type: "click" | "contextmenu",
+  button: number
+): boolean {
+  return element.dispatchEvent(
+    new window.MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      button,
     })
   );
 }
@@ -194,6 +214,55 @@ describe("ProxyInjection", () => {
 
     click(window, document.getElementById("target")!);
 
+    expect(lastMessage(messages)).toEqual({
+      ns: BRIDGE_NAMESPACE,
+      version: 1,
+      type: BRIDGE_MESSAGES.vaultFileOpen,
+      payload: { path: "0-理论/计算机体系结构/A.md" },
+    });
+  });
+
+  test("leaves secondary click to OpenCode when primary click opens Obsidian", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
+        <div id="target" data-slot="session-review-trigger-content">A.md</div>
+      </div>
+    `);
+
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "contextmenu",
+      2
+    );
+
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
+  });
+
+  test("can reverse vault navigation to secondary click and leave primary click to OpenCode", () => {
+    const { document, messages, window } = runInjectedBridge(
+      `
+        <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
+          <div id="target" data-slot="session-review-trigger-content">A.md</div>
+        </div>
+      `,
+      { webUiVaultNavigationPrimaryClick: false }
+    );
+    const target = document.getElementById("target")!;
+
+    const primaryWasNotPrevented = dispatchMouse(window, target, "click", 0);
+    const secondaryWasNotPrevented = dispatchMouse(window, target, "contextmenu", 2);
+
+    expect(primaryWasNotPrevented).toBe(true);
+    expect(secondaryWasNotPrevented).toBe(false);
     expect(lastMessage(messages)).toEqual({
       ns: BRIDGE_NAMESPACE,
       version: 1,
@@ -486,6 +555,32 @@ describe("ProxyInjection", () => {
 
     expect(document.documentElement.style.cursor).toBe("");
     expect(document.body.style.cursor).toBe("");
+  });
+
+  test("marks vault navigation hover as context-menu when secondary click opens Obsidian", () => {
+    const { document, messages, window } = runInjectedBridge(
+      `
+          <div data-component="markdown">
+            <p id="target">• 0-理论/计算机体系结构/向量-SIMD和GPU体系结构中的数据并行.md: primary file being edited</p>
+          </div>
+        `,
+      { webUiVaultNavigationPrimaryClick: false }
+    );
+    const text = document.getElementById("target")!.firstChild as Text;
+    const offset = text.textContent!.indexOf("向量-SIMD");
+
+    pointerMoveTextOffset(window, text, offset);
+
+    expect(document.documentElement.style.cursor).toBe("context-menu");
+    expect(document.body.style.cursor).toBe("context-menu");
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
   });
 
   test("does not post a bare path message when the clicked offset is outside the path token", () => {

@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test";
+import { Window } from "happy-dom";
 import type { App } from "obsidian";
 import type { OpenCodeClient } from "../../src/client/OpenCodeClient";
 import type { ContextManager as ContextManagerClass } from "../../src/context/ContextManager";
@@ -87,6 +88,50 @@ describe("ContextManager", () => {
         included: true,
       },
     ]);
+  });
+
+  test("document selection changes poll the active Markdown selection", async () => {
+    await withContextManagerDom(async (window) => {
+      const activeView = createMarkdownView("active.md", "selected from editor", 4, 6);
+      const { app } = createAppWithEvents({ activeMarkdownView: activeView });
+      const settings = createSettings();
+      const manager = createManager({ app, settings });
+      manager.updateSettings(settings);
+
+      document.dispatchEvent(new window.Event("selectionchange") as unknown as Event);
+      await delay(160);
+
+      expect(manager.getCandidates()).toMatchObject([
+        {
+          sourceId: "selection",
+          sourceKind: "selection",
+          label: "Selection: active.md:4-6",
+          text: "selected from editor",
+          lifetime: "one-shot",
+          included: true,
+        },
+      ]);
+
+      const disabled = createSettings();
+      disabled.contextAssist.selection.enabled = false;
+      manager.updateSettings(disabled);
+    });
+  });
+
+  test("selection polling stops when the selection source is disabled", async () => {
+    await withContextManagerDom(async (window) => {
+      const activeView = createMarkdownView("active.md", "selected from editor", 4, 6);
+      const { app } = createAppWithEvents({ activeMarkdownView: activeView });
+      const settings = createSettings();
+      settings.contextAssist.selection.enabled = false;
+      const manager = createManager({ app, settings });
+      manager.updateSettings(settings);
+
+      document.dispatchEvent(new window.Event("selectionchange") as unknown as Event);
+      await delay(160);
+
+      expect(manager.getCandidates()).toEqual([]);
+    });
   });
 
   test("workspace refresh creates a dynamic candidate with active location", async () => {
@@ -249,12 +294,12 @@ function createApp(
   } as unknown as App;
 }
 
-function createAppWithEvents(): {
+function createAppWithEvents(params: Parameters<typeof createApp>[0] = {}): {
   app: App;
   handlers: Record<string, (...args: unknown[]) => void>;
 } {
   const handlers: Record<string, (...args: unknown[]) => void> = {};
-  const app = createApp();
+  const app = createApp(params);
   (app.workspace as any).on = (event: string, handler: (...args: unknown[]) => void) => {
     handlers[event] = handler;
     return {};
@@ -291,4 +336,23 @@ function createOpenCodeLeaf(): any {
 async function tick(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withContextManagerDom(run: (window: Window) => Promise<void>): Promise<void> {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const window = new Window();
+  globalThis.window = window as any;
+  globalThis.document = window.document as unknown as Document;
+
+  try {
+    await run(window);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+  }
 }
