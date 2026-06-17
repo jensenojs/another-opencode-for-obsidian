@@ -45,11 +45,12 @@ Works today:
 - Start or attach to an OpenCode server from Obsidian.
 - Open the OpenCode Web UI in an Obsidian pane.
 - Use either OpenCode's native appearance or an Obsidian-derived appearance.
-- Add Obsidian note, selection, workspace, backlink, and cursor context to the
-  current OpenCode session.
-- Keep plugin context hidden from the visible OpenCode transcript by sending it
-  as synthetic OpenCode text parts.
-- Show active context items in an Obsidian status bar surface.
+- Send included Obsidian workspace and selection candidates with the same
+  OpenCode prompt as synthetic text parts.
+- Keep automatic context out of the visible OpenCode transcript while avoiding
+  separate empty context messages.
+- Show next-message context candidates in an Obsidian status bar surface, with
+  local include, skip, and remove controls.
 - Navigate context items back to existing vault content without creating missing
   files.
 - Restore plugin context after session reload with `known` or `uncertain`
@@ -203,29 +204,33 @@ Relevant upstream surfaces:
 - [OpenCode v2 theme tokens](https://github.com/sst/opencode/blob/dev/packages/ui/src/v2/styles/theme.css)
 - [OpenCode Tailwind color entry](https://github.com/sst/opencode/blob/dev/packages/ui/src/styles/tailwind/colors.css)
 
-### Context
+### Context Assist
 
-The plugin can send explicit and automatic context into the current OpenCode
-session.
+Automatic context is prompt-coupled. Sources produce local candidates inside the
+Obsidian plugin. The status bar shows what the next OpenCode message will
+include. When the user sends a prompt, included candidates are appended to that
+same OpenCode message as `synthetic` text parts.
 
-Supported context sources:
+First-phase sources:
 
-- current note
-- current selection
-- currently open workspace notes
-- active note backlinks
-- cursor position
+- workspace clues: currently open notes and optional active location;
+- selected text: recent selections, kept as one-shot candidates and removed
+  after a successful send.
 
-Each context item records metadata such as type, label, source file, optional
-navigation source, line range, text length, message ID, part ID, creation time,
-and provenance status.
+The automatic path does not create a separate context message and does not use
+`noReply`. Missing or failed context injection does not block the user's prompt;
+the candidate remains visible with a failure reason.
 
-Restored context is treated carefully:
+Legacy/manual context messages can still be restored and removed. Restored
+context is treated carefully:
 
 - valid plugin provenance restores as `known`;
 - old or invalid context restores as `uncertain`;
 - uncertain context is shown as coming from the OpenCode session, not from a
   trusted vault file.
+
+Future GraphRAG, backlink, block-reference, and summary sources should use the
+same candidate lifecycle instead of writing directly to the OpenCode session.
 
 ## Diagnostics
 

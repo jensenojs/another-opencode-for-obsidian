@@ -1,4 +1,12 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, unlinkSync } from "fs";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+} from "fs";
 import { homedir } from "os";
 import { join, resolve, sep } from "path";
 
@@ -74,6 +82,15 @@ export function linkFile(target: string, linkPath: string, force: boolean): Chec
 
   symlinkSync(target, linkPath);
   return { path: linkPath, ok: true, action: `linked -> ${target}` };
+}
+
+export function copyFile(target: string, destination: string): CheckResult {
+  if (!existsSync(target)) {
+    return { path: destination, ok: false, action: `missing target ${target}` };
+  }
+
+  copyFileSync(target, destination);
+  return { path: destination, ok: true, action: `copied <- ${target}` };
 }
 
 export function describePath(path: string): unknown {

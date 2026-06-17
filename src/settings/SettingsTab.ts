@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice } from "obsidian";
+import { App, Plugin, PluginSettingTab, SettingDefinitionItem, Notice } from "obsidian";
 import { existsSync, statSync } from "fs";
 import { homedir } from "os";
 import {
@@ -12,6 +12,25 @@ import { ServerManager } from "../server/ServerManager";
 import { ExecutableResolver } from "../server/ExecutableResolver";
 import { getRuntimePaths } from "../debug/RuntimeDiagnostics";
 import { OpenCodeView } from "../ui/OpenCodeView";
+import { getText } from "../i18n";
+
+type SettingsKey =
+  | "port"
+  | "hostname"
+  | "useCustomCommand"
+  | "customCommand"
+  | "opencodePath"
+  | "projectDirectory"
+  | "autoStart"
+  | "defaultViewLocation"
+  | "webViewAppearance"
+  | "contextAssist.enabled"
+  | "contextAssist.workspace.enabled"
+  | "contextAssist.workspace.maxOpenNotes"
+  | "contextAssist.workspace.includeActiveLocation"
+  | "contextAssist.selection.enabled"
+  | "contextAssist.selection.maxSnippets"
+  | "contextAssist.selection.maxCharsPerSnippet";
 
 function expandTilde(path: string): string {
   if (path === "~") {
@@ -24,8 +43,6 @@ function expandTilde(path: string): string {
 }
 
 export class OpenCodeSettingTab extends PluginSettingTab {
-  private validateTimeout: ReturnType<typeof setTimeout> | null = null;
-
   constructor(
     app: App,
     plugin: Plugin,
@@ -36,293 +53,457 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.createEl("h2", { text: "Another OpenCode Settings" });
-    containerEl.createEl("h3", { text: "Server Configuration" });
-
-    new Setting(containerEl)
-      .setName("Port")
-      .setDesc("Port number for the OpenCode web server")
-      .addText((text) =>
-        text
-          .setPlaceholder("14096")
-          .setValue(this.settings.port.toString())
-          .onChange(async (value) => {
-            const port = parseInt(value, 10);
-            if (!isNaN(port) && port > 0 && port < 65536) {
-              this.settings.port = port;
-              await this.onSettingsChange();
-            }
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Hostname")
-      .setDesc("Hostname to bind the server to (usually 127.0.0.1)")
-      .addText((text) =>
-        text
-          .setPlaceholder("127.0.0.1")
-          .setValue(this.settings.hostname)
-          .onChange(async (value) => {
-            this.settings.hostname = value || "127.0.0.1";
-            await this.onSettingsChange();
-          })
-      );
-
-    const customCmdSetting = new Setting(containerEl)
-      .setName("Use custom command")
-      .setDesc("Use a shell command template instead of the executable path")
-      .addToggle((toggle) =>
-        toggle.setValue(this.settings.useCustomCommand).onChange(async (value) => {
-          this.settings.useCustomCommand = value;
-          await this.onSettingsChange();
-          this.display();
-        })
-      );
-
-    const descEl = customCmdSetting.descEl;
-    descEl.createEl("br");
-    const linkEl = descEl.createEl("a", {
-      text: "Learn more",
-      href: "https://github.com/jensenojs/another-opencode-for-obsidian#custom-command-mode",
-    });
-    linkEl.addEventListener("click", (e) => {
-      e.preventDefault();
-      window.open(linkEl.href, "_blank");
-    });
-
-    if (this.settings.useCustomCommand) {
-      new Setting(containerEl)
-        .setName("Custom command")
-        .setDesc(
-          "Leave empty to use OpenCode executable path mode. Non-empty commands run through the system shell and must include {hostname} and {port}. Optional variables: {cors}, {projectDirectory}."
-        )
-        .addTextArea((text) => {
-          text
-            .setPlaceholder(CUSTOM_COMMAND_EXAMPLE)
-            .setValue(this.settings.customCommand)
-            .onChange(async (value) => {
-              this.settings.customCommand = value;
-              await this.onSettingsChange();
-            });
-          text.inputEl.rows = 3;
-          text.inputEl.style.width = "100%";
-          return text;
-        });
-    } else {
-      const pathSetting = new Setting(containerEl)
-        .setName("OpenCode executable path")
-        .addText((text) =>
-          text
-            .setPlaceholder("opencode")
-            .setValue(this.settings.opencodePath)
-            .onChange(async (value) => {
-              this.settings.opencodePath = value;
-              await this.onSettingsChange();
-            })
-        );
-
-      pathSetting.addButton((button) => {
-        button.setButtonText("Autodetect").onClick(async () => {
-          const detectedPath = ExecutableResolver.resolve("opencode");
-          if (detectedPath && detectedPath !== "opencode") {
-            this.settings.opencodePath = detectedPath;
-            await this.onSettingsChange();
-            this.display();
-            new Notice(`OpenCode executable found at ${detectedPath}`);
-          } else {
-            new Notice("Could not find opencode. Please check your installation.");
-          }
-        });
-      });
-    }
-
-    new Setting(containerEl)
-      .setName("Project directory")
-      .setDesc("Override the starting directory for OpenCode. Leave empty to use the vault root.")
-      .addText((text) =>
-        text
-          .setPlaceholder("/path/to/project or ~/project")
-          .setValue(this.settings.projectDirectory)
-          .onChange((value) => {
-            if (this.validateTimeout) {
-              clearTimeout(this.validateTimeout);
-            }
-            this.validateTimeout = setTimeout(async () => {
-              await this.validateAndSetProjectDirectory(value);
-            }, 500);
-          })
-      );
-
-    containerEl.createEl("h3", { text: "Behavior" });
-
-    new Setting(containerEl)
-      .setName("Auto-start server")
-      .setDesc(
-        "Automatically start the OpenCode server when Obsidian opens (not recommended for faster startup)"
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.settings.autoStart).onChange(async (value) => {
-          this.settings.autoStart = value;
-          await this.onSettingsChange();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName("Default view location")
-      .setDesc(
-        "Where to open the OpenCode panel: sidebar opens in the right panel, main opens as a tab in the editor area"
-      )
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("sidebar", "Sidebar")
-          .addOption("main", "Main window")
-          .setValue(this.settings.defaultViewLocation)
-          .onChange(async (value) => {
-            this.settings.defaultViewLocation = value as ViewLocation;
-            await this.onSettingsChange();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Web view appearance")
-      .setDesc(
-        "Use Obsidian to inherit the active vault theme, or switch to OpenCode to keep the web UI's native styling."
-      )
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("opencode", "OpenCode")
-          .addOption("obsidian", "Obsidian")
-          .setValue(this.settings.webViewAppearance)
-          .onChange(async (value) => {
-            this.settings.webViewAppearance = value as WebViewAppearance;
-            await this.onSettingsChange();
-            this.refreshOpenCodeViews();
-          })
-      );
-
-    containerEl.createEl("h3", { text: "Workspace Context" });
-
-    new Setting(containerEl)
-      .setName("Inject workspace context")
-      .setDesc("Includes open note paths and selected text in OpenCode when the view is focused")
-      .addToggle((toggle) =>
-        toggle.setValue(this.settings.injectWorkspaceContext).onChange(async (value) => {
-          this.settings.injectWorkspaceContext = value;
-          await this.onSettingsChange();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName("Auto-add selected text")
-      .setDesc("Automatically adds a changed editor selection to the active OpenCode context")
-      .addToggle((toggle) =>
-        toggle.setValue(this.settings.autoAddSelectionContext).onChange(async (value) => {
-          this.settings.autoAddSelectionContext = value;
-          await this.onSettingsChange();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName("Auto-add backlinks")
-      .setDesc("Automatically adds resolved backlinks for the active note to the OpenCode context")
-      .addToggle((toggle) =>
-        toggle.setValue(this.settings.autoAddBacklinksContext).onChange(async (value) => {
-          this.settings.autoAddBacklinksContext = value;
-          await this.onSettingsChange();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName("Auto-add cursor position")
-      .setDesc("Automatically keeps the active note cursor position in the OpenCode context")
-      .addToggle((toggle) =>
-        toggle.setValue(this.settings.autoAddCursorContext).onChange(async (value) => {
-          this.settings.autoAddCursorContext = value;
-          await this.onSettingsChange();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName("Max notes in context")
-      .setDesc("Limit how many open notes are included")
-      .addSlider((slider) =>
-        slider
-          .setLimits(1, 50, 1)
-          .setValue(this.settings.maxNotesInContext)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.settings.maxNotesInContext = value;
-            await this.onSettingsChange();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Max selection length")
-      .setDesc("Truncate selected text to avoid oversized context")
-      .addSlider((slider) =>
-        slider
-          .setLimits(500, 5000, 100)
-          .setValue(this.settings.maxSelectionLength)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.settings.maxSelectionLength = value;
-            await this.onSettingsChange();
-          })
-      );
-
-    containerEl.createEl("h3", { text: "Server Status" });
-
-    const statusContainer = containerEl.createDiv({ cls: "opencode-settings-status" });
-    this.renderServerStatus(statusContainer);
+  getSettingDefinitions(): SettingDefinitionItem<SettingsKey>[] {
+    const text = getText();
+    return [
+      {
+        type: "group",
+        heading: text.settings.serverConfiguration,
+        cls: "opencode-settings-group",
+        items: [
+          {
+            name: text.settings.port,
+            desc: text.settings.portDesc,
+            control: {
+              type: "number",
+              key: "port",
+              min: 1,
+              max: 65535,
+              step: 1,
+              defaultValue: 14096,
+            },
+          },
+          {
+            name: text.settings.hostname,
+            desc: text.settings.hostnameDesc,
+            control: {
+              type: "text",
+              key: "hostname",
+              placeholder: "127.0.0.1",
+              defaultValue: "127.0.0.1",
+            },
+          },
+          {
+            name: text.settings.useCustomCommand,
+            desc: this.customCommandModeDescription(),
+            control: {
+              type: "toggle",
+              key: "useCustomCommand",
+              defaultValue: false,
+            },
+          },
+          {
+            name: text.settings.customCommand,
+            desc: text.settings.customCommandDesc,
+            visible: () => this.settings.useCustomCommand,
+            control: {
+              type: "textarea",
+              key: "customCommand",
+              placeholder: CUSTOM_COMMAND_EXAMPLE,
+              rows: 3,
+              defaultValue: "",
+            },
+          },
+          {
+            name: text.settings.executablePath,
+            visible: () => !this.settings.useCustomCommand,
+            render: (setting) => {
+              setting
+                .addText((input) =>
+                  input
+                    .setPlaceholder("opencode")
+                    .setValue(this.settings.opencodePath)
+                    .onChange(async (value) => {
+                      this.settings.opencodePath = value;
+                      await this.onSettingsChange();
+                    })
+                )
+                .addButton((button) => {
+                  button.setButtonText(text.settings.autodetect).onClick(async () => {
+                    const detectedPath = ExecutableResolver.resolve("opencode");
+                    if (detectedPath && detectedPath !== "opencode") {
+                      this.settings.opencodePath = detectedPath;
+                      await this.onSettingsChange();
+                      this.update();
+                      new Notice(text.notices.executableFound(detectedPath));
+                    } else {
+                      new Notice(text.notices.executableNotFoundInstallation);
+                    }
+                  });
+                });
+            },
+          },
+          {
+            name: text.settings.projectDirectory,
+            desc: text.settings.projectDirectoryDesc,
+            control: {
+              type: "text",
+              key: "projectDirectory",
+              placeholder: text.settings.projectDirectoryPlaceholder,
+              defaultValue: "",
+              validate: (value) => this.validateProjectDirectoryInput(value),
+            },
+          },
+        ],
+      },
+      {
+        type: "group",
+        heading: text.settings.behavior,
+        cls: "opencode-settings-group",
+        items: [
+          {
+            name: text.settings.autoStartServer,
+            desc: text.settings.autoStartServerDesc,
+            control: {
+              type: "toggle",
+              key: "autoStart",
+              defaultValue: false,
+            },
+          },
+          {
+            name: text.settings.defaultViewLocation,
+            desc: text.settings.defaultViewLocationDesc,
+            control: {
+              type: "dropdown",
+              key: "defaultViewLocation",
+              options: {
+                sidebar: text.settings.sidebar,
+                main: text.settings.mainWindow,
+              },
+              defaultValue: "sidebar",
+            },
+          },
+          {
+            name: text.settings.webViewAppearance,
+            desc: text.settings.webViewAppearanceDesc,
+            control: {
+              type: "dropdown",
+              key: "webViewAppearance",
+              options: {
+                opencode: "OpenCode",
+                obsidian: "Obsidian",
+              },
+              defaultValue: "obsidian",
+            },
+          },
+        ],
+      },
+      {
+        type: "group",
+        heading: text.settings.contextAssist,
+        cls: "opencode-settings-group opencode-settings-level-0",
+        items: [
+          {
+            name: text.settings.enableContextAssist,
+            desc: this.settings.contextAssist.enabled
+              ? text.settings.contextAssistDesc
+              : text.settings.contextAssistDisabledDesc,
+            control: {
+              type: "toggle",
+              key: "contextAssist.enabled",
+              defaultValue: true,
+            },
+          },
+        ],
+      },
+      {
+        type: "group",
+        heading: text.settings.workspaceClues,
+        cls: "opencode-settings-group opencode-settings-level-1 opencode-settings-source-group",
+        visible: () => this.settings.contextAssist.enabled,
+        items: [
+          {
+            name: text.settings.workspaceClues,
+            desc: this.settings.contextAssist.workspace.enabled
+              ? text.settings.workspaceCluesDesc
+              : text.settings.workspaceCluesDisabledDesc,
+            visible: () => this.settings.contextAssist.enabled,
+            control: {
+              type: "toggle",
+              key: "contextAssist.workspace.enabled",
+              defaultValue: true,
+            },
+          },
+          {
+            name: text.settings.maxOpenNotes,
+            desc: text.settings.maxOpenNotesDesc,
+            visible: () =>
+              this.settings.contextAssist.enabled && this.settings.contextAssist.workspace.enabled,
+            control: {
+              type: "slider",
+              key: "contextAssist.workspace.maxOpenNotes",
+              min: 1,
+              max: 20,
+              step: 1,
+              displayFormat: (value) => value.toString(),
+              defaultValue: 3,
+            },
+          },
+          {
+            name: text.settings.includeActiveLocation,
+            desc: text.settings.includeActiveLocationDesc,
+            visible: () =>
+              this.settings.contextAssist.enabled && this.settings.contextAssist.workspace.enabled,
+            control: {
+              type: "toggle",
+              key: "contextAssist.workspace.includeActiveLocation",
+              defaultValue: true,
+            },
+          },
+        ],
+      },
+      {
+        type: "group",
+        heading: text.settings.selectionSnippets,
+        cls: "opencode-settings-group opencode-settings-level-1 opencode-settings-source-group",
+        visible: () => this.settings.contextAssist.enabled,
+        items: [
+          {
+            name: text.settings.selectionSnippets,
+            desc: this.settings.contextAssist.selection.enabled
+              ? text.settings.selectionSnippetsDesc
+              : text.settings.selectionSnippetsDisabledDesc,
+            visible: () => this.settings.contextAssist.enabled,
+            control: {
+              type: "toggle",
+              key: "contextAssist.selection.enabled",
+              defaultValue: true,
+            },
+          },
+          {
+            name: text.settings.maxSelectionSnippets,
+            desc: text.settings.maxSelectionSnippetsDesc,
+            visible: () =>
+              this.settings.contextAssist.enabled && this.settings.contextAssist.selection.enabled,
+            control: {
+              type: "slider",
+              key: "contextAssist.selection.maxSnippets",
+              min: 1,
+              max: 10,
+              step: 1,
+              displayFormat: (value) => value.toString(),
+              defaultValue: 3,
+            },
+          },
+          {
+            name: text.settings.maxCharsPerSnippet,
+            desc: text.settings.maxCharsPerSnippetDesc,
+            visible: () =>
+              this.settings.contextAssist.enabled && this.settings.contextAssist.selection.enabled,
+            control: {
+              type: "slider",
+              key: "contextAssist.selection.maxCharsPerSnippet",
+              min: 200,
+              max: 5000,
+              step: 100,
+              displayFormat: (value) => value.toString(),
+              defaultValue: 500,
+            },
+          },
+        ],
+      },
+      {
+        type: "group",
+        heading: text.settings.serverStatus,
+        cls: "opencode-settings-group opencode-settings-status-group",
+        items: [
+          {
+            name: text.settings.serverStatus,
+            desc: text.settings.serverStatusDesc,
+            searchable: false,
+            render: (setting) => {
+              this.renderServerStatus(setting.settingEl);
+            },
+          },
+        ],
+      },
+    ];
   }
 
-  private async validateAndSetProjectDirectory(value: string): Promise<void> {
+  display(): void {}
+
+  getControlValue(key: SettingsKey): unknown {
+    switch (key) {
+      case "port":
+        return this.settings.port;
+      case "hostname":
+        return this.settings.hostname;
+      case "useCustomCommand":
+        return this.settings.useCustomCommand;
+      case "customCommand":
+        return this.settings.customCommand;
+      case "opencodePath":
+        return this.settings.opencodePath;
+      case "projectDirectory":
+        return this.settings.projectDirectory;
+      case "autoStart":
+        return this.settings.autoStart;
+      case "defaultViewLocation":
+        return this.settings.defaultViewLocation;
+      case "webViewAppearance":
+        return this.settings.webViewAppearance;
+      case "contextAssist.enabled":
+        return this.settings.contextAssist.enabled;
+      case "contextAssist.workspace.enabled":
+        return this.settings.contextAssist.workspace.enabled;
+      case "contextAssist.workspace.maxOpenNotes":
+        return this.settings.contextAssist.workspace.maxOpenNotes;
+      case "contextAssist.workspace.includeActiveLocation":
+        return this.settings.contextAssist.workspace.includeActiveLocation;
+      case "contextAssist.selection.enabled":
+        return this.settings.contextAssist.selection.enabled;
+      case "contextAssist.selection.maxSnippets":
+        return this.settings.contextAssist.selection.maxSnippets;
+      case "contextAssist.selection.maxCharsPerSnippet":
+        return this.settings.contextAssist.selection.maxCharsPerSnippet;
+    }
+  }
+
+  async setControlValue(key: SettingsKey, value: unknown): Promise<void> {
+    switch (key) {
+      case "port":
+        this.settings.port = expectNumber(key, value);
+        await this.onSettingsChange();
+        return;
+      case "hostname":
+        this.settings.hostname = expectString(key, value) || "127.0.0.1";
+        await this.onSettingsChange();
+        return;
+      case "useCustomCommand":
+        this.settings.useCustomCommand = expectBoolean(key, value);
+        await this.onSettingsChange();
+        this.update();
+        return;
+      case "customCommand":
+        this.settings.customCommand = expectString(key, value);
+        await this.onSettingsChange();
+        return;
+      case "opencodePath":
+        this.settings.opencodePath = expectString(key, value);
+        await this.onSettingsChange();
+        return;
+      case "projectDirectory":
+        await this.setProjectDirectoryFromInput(expectString(key, value));
+        return;
+      case "autoStart":
+        this.settings.autoStart = expectBoolean(key, value);
+        await this.onSettingsChange();
+        return;
+      case "defaultViewLocation":
+        this.settings.defaultViewLocation = expectViewLocation(key, value);
+        await this.onSettingsChange();
+        return;
+      case "webViewAppearance":
+        this.settings.webViewAppearance = expectWebViewAppearance(key, value);
+        await this.onSettingsChange();
+        this.refreshOpenCodeViews();
+        return;
+      case "contextAssist.enabled":
+        this.settings.contextAssist.enabled = expectBoolean(key, value);
+        await this.onSettingsChange();
+        this.update();
+        return;
+      case "contextAssist.workspace.enabled":
+        this.settings.contextAssist.workspace.enabled = expectBoolean(key, value);
+        await this.onSettingsChange();
+        this.update();
+        return;
+      case "contextAssist.workspace.maxOpenNotes":
+        this.settings.contextAssist.workspace.maxOpenNotes = expectNumber(key, value);
+        await this.onSettingsChange();
+        return;
+      case "contextAssist.workspace.includeActiveLocation":
+        this.settings.contextAssist.workspace.includeActiveLocation = expectBoolean(key, value);
+        await this.onSettingsChange();
+        return;
+      case "contextAssist.selection.enabled":
+        this.settings.contextAssist.selection.enabled = expectBoolean(key, value);
+        await this.onSettingsChange();
+        this.update();
+        return;
+      case "contextAssist.selection.maxSnippets":
+        this.settings.contextAssist.selection.maxSnippets = expectNumber(key, value);
+        await this.onSettingsChange();
+        return;
+      case "contextAssist.selection.maxCharsPerSnippet":
+        this.settings.contextAssist.selection.maxCharsPerSnippet = expectNumber(key, value);
+        await this.onSettingsChange();
+        return;
+    }
+  }
+
+  private customCommandModeDescription(): DocumentFragment {
+    const text = getText();
+    const fragment = document.createDocumentFragment();
+    fragment.append(text.settings.useCustomCommandDesc);
+    fragment.append(document.createElement("br"));
+    const linkEl = document.createElement("a");
+    linkEl.textContent = text.settings.learnMore;
+    linkEl.href = "https://github.com/jensenojs/another-opencode-for-obsidian#custom-command-mode";
+    linkEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      window.open(linkEl.href, "_blank");
+    });
+    fragment.append(linkEl);
+    return fragment;
+  }
+
+  private validateProjectDirectoryInput(value: string): string | void {
+    const text = getText();
     const trimmed = value.trim();
 
     if (!trimmed) {
-      this.serverManager.updateProjectDirectory("");
-      await this.onSettingsChange();
       return;
     }
 
     if (!trimmed.startsWith("/") && !trimmed.startsWith("~") && !trimmed.match(/^[A-Za-z]:\\/)) {
-      new Notice("Project directory must be an absolute path (or start with ~)");
-      return;
+      return text.notices.projectDirectoryAbsolute;
     }
 
     const expanded = expandTilde(trimmed);
 
     try {
       if (!existsSync(expanded)) {
-        new Notice("Project directory does not exist");
-        return;
+        return text.notices.projectDirectoryMissing;
       }
       const stat = statSync(expanded);
       if (!stat.isDirectory()) {
-        new Notice("Project directory path is not a directory");
-        return;
+        return text.notices.projectDirectoryNotDirectory;
       }
     } catch (error) {
-      new Notice(`Failed to validate path: ${(error as Error).message}`);
+      return text.notices.projectDirectoryValidationFailed((error as Error).message);
+    }
+  }
+
+  private async setProjectDirectoryFromInput(value: string): Promise<void> {
+    const validationMessage = this.validateProjectDirectoryInput(value);
+    if (validationMessage) {
+      throw new Error(validationMessage);
+    }
+
+    const trimmed = value.trim();
+    this.settings.projectDirectory = trimmed;
+    if (!trimmed) {
+      this.serverManager.updateProjectDirectory("");
+      await this.onSettingsChange();
       return;
     }
 
+    const expanded = expandTilde(trimmed);
     this.serverManager.updateProjectDirectory(expanded);
     await this.onSettingsChange();
   }
 
   private renderServerStatus(container: HTMLElement): void {
+    const text = getText();
     container.empty();
 
     const state = this.serverManager.getState();
     const statusText = {
-      stopped: "Stopped",
-      starting: "Starting...",
-      running: "Running",
-      error: "Error",
+      stopped: text.settings.stopped,
+      starting: text.settings.starting,
+      running: text.settings.running,
+      error: text.settings.error,
     };
 
     const statusClass = {
@@ -333,7 +514,7 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     };
 
     const statusEl = container.createDiv({ cls: "opencode-status-line" });
-    statusEl.createSpan({ text: "Status: " });
+    statusEl.createSpan({ text: text.settings.statusLabel });
     statusEl.createSpan({
       text: statusText[state],
       cls: `opencode-status-badge ${statusClass[state]}`,
@@ -355,10 +536,10 @@ export class OpenCodeSettingTab extends PluginSettingTab {
             cls: "opencode-diagnostic-hint",
           });
         }
-        this.renderDiagnosticLine(errorEl, "Command", diagnostics.lastDisplayCommand);
-        this.renderDiagnosticLine(errorEl, "Stderr", diagnostics.lastStderr);
-        this.renderDiagnosticLine(errorEl, "Log", paths.logFile);
-        this.renderDiagnosticLine(errorEl, "Status", paths.statusFile);
+        this.renderDiagnosticLine(errorEl, text.settings.command, diagnostics.lastDisplayCommand);
+        this.renderDiagnosticLine(errorEl, text.settings.stderr, diagnostics.lastStderr);
+        this.renderDiagnosticLine(errorEl, text.settings.log, paths.logFile);
+        this.renderDiagnosticLine(errorEl, text.settings.statusFile, paths.statusFile);
       }
     }
 
@@ -380,7 +561,7 @@ export class OpenCodeSettingTab extends PluginSettingTab {
 
     if (state === "stopped" || state === "error") {
       const startButton = buttonContainer.createEl("button", {
-        text: "Start Server",
+        text: text.settings.startServer,
         cls: "mod-cta",
       });
       startButton.addEventListener("click", async () => {
@@ -391,7 +572,7 @@ export class OpenCodeSettingTab extends PluginSettingTab {
 
     if (state === "running") {
       const stopButton = buttonContainer.createEl("button", {
-        text: "Stop Server",
+        text: text.settings.stopServer,
       });
       stopButton.addEventListener("click", () => {
         this.serverManager.stop();
@@ -399,7 +580,7 @@ export class OpenCodeSettingTab extends PluginSettingTab {
       });
 
       const restartButton = buttonContainer.createEl("button", {
-        text: "Restart Server",
+        text: text.settings.restartServer,
         cls: "mod-warning",
       });
       restartButton.addEventListener("click", async () => {
@@ -411,10 +592,21 @@ export class OpenCodeSettingTab extends PluginSettingTab {
 
     if (state === "starting") {
       buttonContainer.createSpan({
-        text: "Please wait...",
+        text: text.settings.pleaseWait,
         cls: "opencode-status-waiting",
       });
     }
+  }
+
+  private serverStateText(): string {
+    const text = getText();
+    const state = this.serverManager.getState();
+    return {
+      stopped: text.settings.stopped,
+      starting: text.settings.starting,
+      running: text.settings.running,
+      error: text.settings.error,
+    }[state];
   }
 
   private renderDiagnosticLine(
@@ -438,4 +630,39 @@ export class OpenCodeSettingTab extends PluginSettingTab {
       }
     }
   }
+}
+
+function expectString(key: SettingsKey, value: unknown): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`Expected ${key} to be a string`);
+  }
+  return value;
+}
+
+function expectNumber(key: SettingsKey, value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`Expected ${key} to be a finite number`);
+  }
+  return value;
+}
+
+function expectBoolean(key: SettingsKey, value: unknown): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`Expected ${key} to be a boolean`);
+  }
+  return value;
+}
+
+function expectViewLocation(key: SettingsKey, value: unknown): ViewLocation {
+  if (value !== "sidebar" && value !== "main") {
+    throw new TypeError(`Expected ${key} to be a valid view location`);
+  }
+  return value;
+}
+
+function expectWebViewAppearance(key: SettingsKey, value: unknown): WebViewAppearance {
+  if (value !== "opencode" && value !== "obsidian") {
+    throw new TypeError(`Expected ${key} to be a valid web view appearance`);
+  }
+  return value;
 }

@@ -13,6 +13,7 @@ import {
   ensureDir,
   formatHomePath,
   linkFile,
+  copyFile,
   pluginDir,
   pluginId,
   readJson,
@@ -192,16 +193,7 @@ function install(args: Args): void {
     linkFile(join(repoRoot, "styles.css"), join(dir, "styles.css"), args.force),
   ];
 
-  const manifestPath = join(dir, "manifest.json");
-  if (!existsSync(manifestPath)) {
-    results.push(linkFile(join(repoRoot, "manifest.json"), manifestPath, args.force));
-  } else {
-    results.push({
-      path: manifestPath,
-      ok: true,
-      action: "kept existing manifest.json",
-    });
-  }
+  results.push(copyFile(join(repoRoot, "manifest.json"), join(dir, "manifest.json")));
 
   printCheckResults(results);
 }

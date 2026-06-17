@@ -1,8 +1,11 @@
 # Context control surface
 
-This document is the current source for context UI and interaction. It also
-absorbs the still-valid context lifecycle contract from the older context
-management plan.
+This document is the current source for context UI and interaction.
+
+The current oc-ctx behavior contract is
+`docs/plans/2026-06-17-oc-ctx-prompt-coupled-behavior-design.md`. This surface
+document defines how those states are rendered. It does not define source
+drivers, prompt injection, or OpenCode write semantics.
 
 ## Background
 
@@ -16,10 +19,9 @@ The surface consumes facts from context, navigation, graph, and later event
 modules. It does not parse Obsidian links, inspect iframe URLs, call OpenCode
 APIs, or maintain graph state.
 
-The original problem remains: context should not be a black box. OpenCode
-context messages are injected without asking the model to answer immediately,
-so the user needs an Obsidian-native way to inspect, navigate, include/exclude,
-and remove that evidence.
+The original problem remains: context should not be a black box. The user needs
+an Obsidian-native way to inspect, navigate, include/exclude, and remove
+evidence before it influences an OpenCode prompt.
 
 ## Goals
 
@@ -27,7 +29,8 @@ and remove that evidence.
 - Keep the default view narrow and low-noise.
 - Let single click navigate to the relevant Markdown evidence.
 - Let double click and the right-side state icon toggle candidate inclusion.
-- Keep session removal explicit and scoped to the current OpenCode session.
+- Keep legacy/manual session removal explicit and scoped to the current OpenCode
+  session.
 - Make broken links useful maintenance objects: clicking them opens the source
   Markdown position where the bad reference is written.
 - Leave room for later permission, question, event, and hook signals without
@@ -45,21 +48,32 @@ and remove that evidence.
 
 ## Context Lifecycle Contract
 
-Each active context item corresponds to an OpenCode message text part owned by
-this plugin.
+Automatic oc-ctx is prompt-coupled:
 
-- `ContextSyncer` writes context messages through `OpenCodeClient`.
-- New context message text starts with the `<!-- oc-ctx -->` marker.
-- New context message text contains an `oc-ctx-provenance` JSON comment with
-  source path, range, type, label, text length, and creation time.
-- Removing active context deletes the plugin-owned remote context message. It is
-  scoped to the current session and does not delete vault content.
+- Source drivers produce local candidates.
+- `CandidateRegistry` owns included/skipped state, source clearing, source
+  limits, and one-shot consumption.
+- `ContextStatusBar` renders candidates and delegates toggle/remove actions. It
+  does not write OpenCode messages.
+- `PromptContextInjector` reads included candidates when the user sends an
+  OpenCode prompt.
+- Included candidates are appended to the same prompt request as
+  `synthetic: true` text parts.
+- The automatic path does not create a separate context message and does not use
+  `noReply`.
+
+Legacy/manual context remains as a separate committed-message lifecycle:
+
+- `ContextSyncer` writes manual context messages through `OpenCodeClient`.
+- New committed context message text starts with the `<!-- oc-ctx -->` marker.
+- New committed context message text contains an `oc-ctx-provenance` JSON
+  comment with source path, range, type, label, text length, and creation time.
+- Removing committed context deletes the plugin-owned remote context message. It
+  is scoped to the current session and does not delete vault content.
 - Restore deletes old ignored plugin-owned `<!-- oc-ctx -->` messages when the
   whole OpenCode message contains only plugin context parts. Mixed user messages
   are not deleted.
-- `ContextManager` owns context item lifecycle and active item snapshots.
-- `ContextStatusBar` receives snapshots and renders them; it does not write
-  remote context itself.
+- `ContextManager` owns candidate and committed item snapshots.
 
 Restore rules:
 
@@ -72,18 +86,28 @@ Restore rules:
   provenance status, and navigation resolution. Diagnostics must not copy the
   full note text by default.
 
-The marker and provenance format have a single source in
-`ContextProvenance`. Do not duplicate this format in UI code.
+The marker and provenance format have a single source in `ContextProvenance`.
+Do not duplicate this format in UI code. Automatic prompt-coupled candidates do
+not use the `oc-ctx` marker because they travel inside the user's prompt
+request, not as standalone committed messages.
 
 ## Runtime Flow
 
 ```text
-Obsidian command or auto source
+Automatic source
+  -> ContextManager
+  -> CandidateRegistry
+  -> ContextStatusBar renders next-message candidates
+  -> user sends OpenCode prompt
+  -> PromptContextInjector appends synthetic parts
+  -> OpenCodeWebUiProxy forwards the modified prompt request
+
+Legacy/manual command
   -> ContextManager
   -> ContextSyncer
   -> OpenCodeClient
-  -> OpenCode session message part
-  -> ContextStatusBar renders current snapshot
+  -> OpenCode committed context message
+  -> ContextStatusBar renders committed context
 
 OpenCode session restore
   -> ContextManager
@@ -123,20 +147,27 @@ shape and render it.
 
 The surface should treat rows as evidence capsules. The row can represent:
 
-- active context already attached to the current OpenCode session;
-- candidate context that could be attached;
+- local candidate context that can influence the next OpenCode prompt;
+- legacy/manual context already committed to the current OpenCode session;
 - broken-link evidence from GraphIndex;
 - later OpenCode signals such as permission, question, event, or hook state.
 
 The same capsule visual language can serve all of them, but the action semantics
 must remain distinct.
 
-### Active Context
+Candidate rows come from local candidate state. Committed context rows come from
+legacy/manual OpenCode session context. The surface must not convert a source
+result directly into committed context.
 
-An active context capsule is already present in the OpenCode session.
+### Committed Context
+
+A committed context capsule is already present in the OpenCode session. In the
+current design this is legacy/manual context, not the automatic prompt-coupled
+path.
 
 - Single click navigates to the evidence source.
-- Double click toggles local inclusion/dim state when that state is available.
+- Double click may expand details or toggle local selection state. It must not
+  imply included/excluded control for already committed session context.
 - The right-side remove icon deletes the plugin-owned remote context message
   from the current session.
 - Removal never deletes a vault file and never claims to undo historical model
@@ -144,14 +175,16 @@ An active context capsule is already present in the OpenCode session.
 
 ### Candidate Context
 
-A candidate capsule has not been committed as active session context.
+A candidate capsule has not been sent yet. It is local state for the next
+OpenCode prompt.
 
 - Candidate capsules default to included.
 - Double click toggles included/excluded.
 - The right-side state icon performs the same toggle for discoverability.
 - Excluded candidates dim in place instead of disappearing.
-- A separate explicit add/send action decides when included candidates become
-  session context.
+- Included candidates are sent when the user sends the next OpenCode prompt.
+- Candidate inclusion changes are local UI/plugin state. They do not call
+  OpenCode APIs and do not produce message ids.
 
 ### Broken Link Evidence
 

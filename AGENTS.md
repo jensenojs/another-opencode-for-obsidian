@@ -61,16 +61,16 @@ src/
 ├── debug/
 │   └── RuntimeDiagnostics.ts # XDG 日志、status.json、运行时路径
 ├── context/
-│   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，触发上下文刷新
-│   ├── ContextSyncer.ts     # 写入、删除、恢复 OpenCode context message
+│   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，维护候选并暴露 prompt 注入入口
+│   ├── CandidateRegistry.ts # 本地候选状态：include、source clear、one-shot 消费、bounded queue
+│   ├── PromptContextInjector.ts # 发送边界：把 included candidate 追加到同一个 OpenCode prompt parts
+│   ├── ContextSyncer.ts     # legacy/manual context message 的写入、删除、恢复
 │   ├── ContextProvenance.ts # context marker + provenance 载荷格式
 │   ├── ContextItemNavigator.ts # context source 安全打开入口
 │   ├── ContextSessionResolver.ts # 当前 OpenCode session id 的唯一解析入口
-│   ├── ContextAutoSources.ts # 自动上下文编排：选区、反链、光标三个 source 的刷新入口
-│   ├── AutoSelectionContextSource.ts # 自动选区策略：去重、空选区重置、失败重试
-│   ├── BacklinkContextSource.ts # 反向链接策略：消费 resolvedLinks、生成 active note backlink context
-│   ├── CursorContextSource.ts # 光标位置策略：消费 active editor cursor snapshot、维护单个 cursor auto item
-│   └── WorkspaceContext.ts  # 收集打开的笔记路径 + 选中文本
+│   ├── ContextAutoSources.ts # 自动上下文编排：第一阶段只路由 selection source
+│   ├── AutoSelectionContextSource.ts # 自动选区策略：fingerprint 去重、截断、产出 one-shot candidate
+│   └── WorkspaceContext.ts  # 收集打开的笔记路径 + 活动位置
 ├── graph/
 │   └── GraphIndex.ts        # Obsidian Vault + MetadataCache 的内存图索引和查询 API
 ├── ui/
@@ -187,22 +187,37 @@ scripts/
 ### `ContextManager.ts` — 上下文注入
 
 - 监听 Obsidian workspace 事件（active-leaf-change、editor-change 等）
-- 防抖 2 秒后触发上下文刷新
-- 调用 `WorkspaceContext` 收集数据，通过 `OpenCodeClient` 发送到 opencode 会话
+- 防抖后刷新 workspace candidate；editor-change 也会把选中文本交给 selection source
+- 调用 `WorkspaceContext` 收集 workspace candidate 数据；自动来源不能直接通过 `OpenCodeClient` 写入 OpenCode 会话
 - 当前 session id 只从 `CurrentContextSession` 获取。`ContextManager` 不解析 iframe URL，也不维护 cached iframe URL
-- `add-selection-to-context` 和 `add-current-note-to-context` 都创建 `type: "manual"` 的 `ContextItem`，复用同一套可见、可复制诊断、可安全跳转的生命周期
-- `injectWorkspaceContext` 控制自动 workspace 摘要（打开笔记路径 + 当前选区）是否作为一个 auto item 维护
-- `autoAddSelectionContext` 控制 editor-change 后是否把变化后的选区追加为 manual item；它复用 `addSelectionForCurrentSession()`，不新增 ContextItem 身份字段或第二套状态源
-- `ContextAutoSources` 是自动源刷新编排入口，拥有当前 active markdown path，并把 selection/backlink/cursor 事件路由到对应 source
-- `autoAddBacklinksContext` 控制 active note 的反向链接是否作为 auto item 维护；`ContextManager` 只把 workspace/metadataCache 事件和普通对象交给 `ContextAutoSources`，不在这里解析 backlink 图
-- `autoAddCursorContext` 控制 active note 光标位置是否作为 auto item 维护；`ContextManager` 只消费 Obsidian `MarkdownView.editor.getCursor()`，并把 0-based `EditorPosition` 转成给模型看的 1-based 行列
-- workspace auto item 由固定 label 和 source file 表示；同一 session、label、source file 的 auto item 必须串行替换。同内容刷新不能再次 POST 到 OpenCode；内容变化时旧 context message 必须先删除成功，再写入新 message
-- backlink auto item 只表示当前 active note，切换 active note 时先删除既有 backlink auto item
-- cursor auto item 只表示当前 active editor 的一个光标位置，切换文件或移动光标时先删除既有 cursor auto item
+- `add-selection-to-context` 和 `add-current-note-to-context` 仍走 legacy/manual `ContextItem` 路径；自动 oc-ctx 主路径不能调用它们
+- `contextAssist.enabled` 是 oc-ctx 总开关；关闭时必须清空全部 candidate 并停止 source 监听
+- `contextAssist.workspace.enabled` 控制动态 workspace candidate。workspace candidate 只包含打开笔记列表和可选活动位置；活动位置属于 workspace，不再有顶层 cursor source
+- `contextAssist.selection.enabled` 控制 one-shot selection candidate。选区 source 只产候选，registry 负责最近 N 条 FIFO 队列
+- 第一阶段不维护 backlinks source，不监听 metadata resolvedLinks，不把 backlinks 当默认候选。GraphRAG、块引用、链接证据以后必须作为新的 source driver 产出 candidate
+- 关闭任一 source 时，`ContextManager.updateSettings()` 必须清掉该 source 已有候选；关闭总开关时必须清空 CandidateRegistry，避免已禁用来源随 prompt 发送
+- oc-ctx 演进必须按 source driver → CandidateRegistry → StatusBar local controls → PromptContextInjector → OpenCode prompt request parts 的链路收拢。source driver 不能直接写 OpenCode session。
+- candidate 是本地 Obsidian 插件状态，没有 `messageId` / `partId`，toggle included/excluded 时不能调用 OpenCode API。committed context 才是 `ContextItem`，只属于 legacy/manual context message 生命周期。
+- CandidateRegistry 第一阶段按当前 OpenCode session 作用域处理。`CurrentContextSession` 变化时必须清空候选，不能把旧 session 的 candidate attach 到新 session。
+- source driver 输出必须表达 `upsert`、`remove`、`clear-source`、`failed`。不要把 source 消失、刷新失败或内容未变硬塞进 `ContextManager` 的临时分支。
+- PromptContextInjector 只在 prompt 发送边界工作。它从 registry 取 included candidates，追加 `synthetic: true` text parts；2xx 后消费 one-shot，保留 dynamic；失败时保留候选并标记 failed。自动主路径不能使用 `noReply`。
+- 旧 `ContextSuggestion` 不能和 `ContextCandidate` 作为两套运行时候选模型长期并存。实现 candidate 层时必须删除、迁移或明确降级它。
+- oc-ctx 注入策略属于 `src/context`。不要把 source driver、CandidateRegistry、PromptContextInjector、GraphRAG candidate lifecycle 放进 `OpenCodeWebUiProxy` 或 `OpenCodeBridge`。proxy 只提供 HTTP 边界和 prompt request hook；bridge 只承接 OpenCode event/diagnostics。
+- 当前行为合同见 [docs/plans/2026-06-17-oc-ctx-prompt-coupled-behavior-design.md](docs/plans/2026-06-17-oc-ctx-prompt-coupled-behavior-design.md)。
 
-### `ContextSyncer.ts` / `ContextProvenance.ts` — context message 协议
+### `PromptContextInjector.ts` — 自动 oc-ctx 发送边界
 
-- `ContextSyncer` 是 Obsidian → OpenCode context message 的写入、删除、恢复入口
+- 自动 oc-ctx 主路径只在用户发送 OpenCode prompt 时注入，不提前写独立 context message
+- 输入是当前 session id 和 OpenCode prompt request body；输出是追加了 synthetic context part 的 request body
+- 只接受带 `parts: []` 的 OpenCode prompt body。无法识别 body 时返回 no-op，保留用户 prompt，并把 included candidates 标记 failed
+- 注入 part 只写 `{ type: "text", text, synthetic: true }`。主路径禁止写 `noReply`
+- `complete(planId)` 只在 proxy 收到 2xx response 后调用；它消费 one-shot candidates，并把 dynamic candidates 恢复为默认 included
+- `fail(planId, reason)` 保留候选并记录 reason。失败不能吞掉用户 prompt，也不能让 UI 误以为 context 已发送
+
+### `ContextSyncer.ts` / `ContextProvenance.ts` — legacy/manual context message 协议
+
+- `ContextSyncer` 是 legacy/manual Obsidian → OpenCode context message 的写入、删除、恢复入口
+- 自动 oc-ctx 主路径不调用 `ContextSyncer.add()`，也不依赖 `noReply`
 - `ContextProvenance` 是 `<!-- oc-ctx -->` marker 和 `oc-ctx-provenance` JSON 注释的唯一格式化/解析模块
 - 新写入的 context message 必须持久化 source path、range、type、label、textLength、createdAt
 - `sourceFile` 是用户可见来源标签；`navigationSourceFile` 是可选 vault path 跳转目标。Workspace context 这类聚合来源必须保留 `sourceFile: "Obsidian workspace"`，有单一明确目标时才写 `navigationSourceFile`，禁止从 formatted context text 里解析 `- note.md` 来推导跳转
@@ -272,9 +287,9 @@ scripts/
 
 ### `ContextAutoSources.ts` — 自动上下文编排
 
-- 组合 `AutoSelectionContextSource`、`BacklinkContextSource`、`CursorContextSource`
-- 只接收普通对象：active markdown path、选区 snapshot、cursor snapshot、`resolvedLinks`
-- 不 import Obsidian，不调用 OpenCodeClient，不持有 ContextItem[]；新增自动源时先确认它是否只是现有三类事件的局部扩展
+- 第一阶段只组合 `AutoSelectionContextSource`
+- 只接收普通对象：file path 和选区 snapshot
+- 不 import Obsidian，不调用 OpenCodeClient，不持有 ContextItem[]；新增自动源时先确认它是否必须存在，且必须产出 `ContextSourceResult`
 - `ContextManager` 是唯一 Obsidian 事件监听入口；`ContextAutoSources` 是这些事件进入自动源策略前的唯一编排入口
 
 ### `ContextSessionResolver.ts` — 当前 session 解析
@@ -297,29 +312,16 @@ scripts/
 
 ### `AutoSelectionContextSource.ts` — 自动选区策略
 
-- 只处理自动选区策略：开关判断、fingerprint 去重、空选区重置、失败后允许同一选区重试
+- 只处理自动选区策略：开关判断、fingerprint 去重、长度截断、产出 one-shot candidate
+- 空选区不清空 selection queue。关闭 selection source 时由 `ContextManager` 通过 registry clear source
 - 不持有 ContextItem[]，不调用 OpenCodeClient，不读取 Obsidian workspace
-- 自动选区只在成功创建 ContextItem 后记录 fingerprint。没有 active session 或 OpenCode 拒收时，后续相同选区仍可重试
-
-### `BacklinkContextSource.ts` — 反向链接策略
-
-- 只处理反向链接策略：开关判断、从 `resolvedLinks` 反查 source notes、fingerprint 去重、无 backlink 时删除 stale auto item
-- 消费的稳定面是本地 `node_modules/obsidian/obsidian.d.ts` 暴露的 `MetadataCache.resolvedLinks: Record<string, Record<string, number>>`
-- `changed` 和 `resolve` 事件只作为刷新触发器；反向链接事实来自 `resolvedLinks`
-- 不 import Obsidian，不调用 OpenCodeClient，不持有 ContextItem[]。新增 backlink 文本格式时先改这里的纯函数和测试
-
-### `CursorContextSource.ts` — 光标位置策略
-
-- 只处理光标位置策略：开关判断、fingerprint 去重、无 active cursor 时删除 stale auto item、失败后允许同一位置重试
-- 消费的稳定面是本地 `node_modules/obsidian/obsidian.d.ts` 暴露的 `Editor.getCursor()` 和 `EditorPosition { line, ch }`
-- source module 只接收普通对象 `{ sourcePath, line, column }`。这里的 `line` 和 `column` 已经是 1-based，转换只允许发生在 `ContextManager.getCursorSnapshot()`
-- 不 import Obsidian，不调用 OpenCodeClient，不持有 ContextItem[]。新增 cursor 文本格式时先改这里的纯函数和测试
+- registry 负责 bounded queue。不要在 source 内维护“最近 N 条”的第二套队列
 
 ### `WorkspaceContext.ts` — 上下文收集
 
 - 获取当前打开的笔记文件路径列表
-- 获取当前编辑器中的选中文本
-- 序列化为 opencode 可接收的上下文格式
+- 获取当前活动位置，转换为给模型看的 1-based 行号
+- 不读取正文，不收集选中文本。选中文本属于 selection source
 
 ### `SettingsTab.ts` — 设置面板
 
@@ -327,8 +329,8 @@ scripts/
 - `customCommand`: 非空时是 shell command template，必须包含 `{hostname}` 和 `{port}`
 - textarea 显示真实配置值；示例命令只作为 placeholder。空字符串必须保持为空，因为它表示 path 模式
 - `webViewAppearance`: 默认 `obsidian`，让 Web UI 继承 Obsidian pane 背景并使用半透明局部 surface；`opencode` 保留 OpenCode Web UI 原生风格
-- `autoAddSelectionContext`: 默认关闭。开启后，编辑器选区变化会自动追加到当前 OpenCode session；关闭后只能通过命令手动添加选区
-- `autoAddCursorContext`: 默认关闭。开启后，active note 的当前光标位置会作为单个 auto item 维护
+- `contextAssist` 是自动 oc-ctx 的运行时真相源。旧 `candidateSources`、`contextCommitMode`、`maxNotesInContext`、`maxSelectionLength`、`injectWorkspaceContext`、`autoAddSelectionContext`、`autoAddBacklinksContext`、`autoAddCursorContext` 加载时直接丢弃，不迁移、不保存回去
+- 设置页只显示：上下文辅助、工作区线索、选中文本，以及各自必要的上限选项。不要恢复 backlinks、cursor、manual attach UI
 
 ### `RuntimeDiagnostics.ts` — 运行时观测
 

@@ -7,72 +7,45 @@ export interface SelectedTextContext {
 
 export interface WorkspaceContextSnapshot {
   openNotePaths: string[];
-  selection: SelectedTextContext | null;
+  activeLocation: WorkspaceActiveLocation | null;
+}
+
+export interface WorkspaceActiveLocation {
+  sourcePath: string;
+  line: number;
 }
 
 export interface WorkspaceContextFormatOptions {
-  maxNotes: number;
-  maxSelectionLength: number;
+  maxOpenNotes: number;
+  includeActiveLocation: boolean;
 }
 
 export function formatWorkspaceContext(
   snapshot: WorkspaceContextSnapshot,
   options: WorkspaceContextFormatOptions
 ): string | null {
-  const openNotePaths = snapshot.openNotePaths.slice(0, Math.max(0, options.maxNotes));
-  const selection = truncateSelection(snapshot.selection, options.maxSelectionLength);
+  const openNotePaths = snapshot.openNotePaths.slice(0, Math.max(0, options.maxOpenNotes));
+  const activeLocation = options.includeActiveLocation ? snapshot.activeLocation : null;
 
-  if (openNotePaths.length === 0 && !selection) {
+  if (openNotePaths.length === 0 && !activeLocation) {
     return null;
   }
 
-  const lines: string[] = ["<obsidian-context>"];
+  const lines: string[] = ["Obsidian workspace:"];
+
+  if (activeLocation) {
+    lines.push(`Active: ${activeLocation.sourcePath}:L${activeLocation.line}`);
+  }
 
   if (openNotePaths.length > 0) {
-    lines.push("Currently open notes in Obsidian:");
+    if (activeLocation) {
+      lines.push("");
+    }
+    lines.push("Open notes:");
     for (const path of openNotePaths) {
       lines.push(`- ${path}`);
     }
   }
 
-  if (selection) {
-    lines.push("");
-    lines.push(`Selected text (from ${formatSelectionSource(selection)}):`);
-    lines.push('"""');
-    lines.push(selection.text);
-    lines.push('"""');
-  }
-
-  lines.push("</obsidian-context>");
   return lines.join("\n");
-}
-
-function formatSelectionSource(selection: SelectedTextContext): string {
-  if (selection.selectionStartLine === undefined || selection.selectionEndLine === undefined) {
-    return selection.sourcePath;
-  }
-
-  if (selection.selectionStartLine === selection.selectionEndLine) {
-    return `${selection.sourcePath}:${selection.selectionStartLine}`;
-  }
-
-  return `${selection.sourcePath}:${selection.selectionStartLine}-${selection.selectionEndLine}`;
-}
-
-function truncateSelection(
-  selection: SelectedTextContext | null,
-  maxSelectionLength: number
-): SelectedTextContext | null {
-  if (!selection) {
-    return null;
-  }
-
-  if (selection.text.length <= maxSelectionLength) {
-    return selection;
-  }
-
-  return {
-    ...selection,
-    text: selection.text.slice(0, Math.max(0, maxSelectionLength)) + "... [truncated]",
-  };
 }

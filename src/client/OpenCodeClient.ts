@@ -146,6 +146,7 @@ export class OpenCodeClient {
     contextText: string,
     provenance?: ContextMessageProvenance
   ): Promise<OpenCodeContextMessageRef | null> {
+    // Legacy explicit context-message path. Automatic oc-ctx prompt injection does not call this.
     if (contextText.trim().length === 0) {
       return null;
     }

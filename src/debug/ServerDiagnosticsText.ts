@@ -1,4 +1,5 @@
 import type { ServerDiagnostics } from "../server/ServerManager";
+import { getText } from "../i18n";
 
 export type ServerDiagnosticsSnapshot = ServerDiagnostics & {
   logFile: string;
@@ -37,12 +38,11 @@ export function formatServerDiagnosticsForClipboard(
 }
 
 export function formatStartFailureNotice(diagnostics: ServerDiagnosticsSnapshot): string {
+  const text = getText();
   const error = diagnostics.lastError?.trim();
-  const firstLine = error
-    ? `OpenCode failed to start: ${truncate(error, 120)}`
-    : "OpenCode failed to start.";
+  const firstLine = text.notices.startFailureLine(error ? truncate(error, 120) : null);
 
-  return `${firstLine} Run "Copy OpenCode diagnostics" for details. Log: ${diagnostics.logFile}`;
+  return text.notices.startFailure(firstLine, diagnostics.logFile);
 }
 
 function truncate(value: string, maxLength: number): string {

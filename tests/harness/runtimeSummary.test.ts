@@ -18,6 +18,19 @@ describe("summarizeSettings", () => {
         useCustomCommand: true,
         customCommand: "opencode serve --hostname {hostname} --port {port}",
         webViewAppearance: "obsidian",
+        contextAssist: {
+          enabled: true,
+          workspace: {
+            enabled: true,
+            maxOpenNotes: 3,
+            includeActiveLocation: true,
+          },
+          selection: {
+            enabled: true,
+            maxSnippets: 3,
+            maxCharsPerSnippet: 500,
+          },
+        },
       })
     ).toMatchObject({
       port: 4096,
@@ -27,6 +40,68 @@ describe("summarizeSettings", () => {
       explicitCustomCommand: "opencode serve --hostname {hostname} --port {port}",
       effectiveStartMode: "custom",
       webViewAppearance: "obsidian",
+      contextAssist: {
+        enabled: true,
+        workspace: {
+          enabled: true,
+          maxOpenNotes: 3,
+          includeActiveLocation: true,
+        },
+        selection: {
+          enabled: true,
+          maxSnippets: 3,
+          maxCharsPerSnippet: 500,
+        },
+      },
+    });
+  });
+
+  test("ignores legacy context booleans", () => {
+    const summary = summarizeSettings({
+      injectWorkspaceContext: true,
+      autoAddSelectionContext: false,
+      autoAddBacklinksContext: true,
+      autoAddCursorContext: false,
+    });
+
+    expect(summary).toMatchObject({
+      contextAssist: {
+        enabled: null,
+        workspace: {
+          enabled: null,
+          maxOpenNotes: null,
+          includeActiveLocation: null,
+        },
+        selection: {
+          enabled: null,
+          maxSnippets: null,
+          maxCharsPerSnippet: null,
+        },
+      },
+    });
+    expect(JSON.stringify(summary)).not.toContain("legacyContextSourceBooleans");
+    expect(JSON.stringify(summary)).not.toContain("injectWorkspaceContext");
+  });
+
+  test("reports missing context assist settings as unknown", () => {
+    expect(
+      summarizeSettings({
+        hostname: "127.0.0.1",
+      })
+    ).toMatchObject({
+      contextAssist: {
+        enabled: null,
+        workspace: {
+          enabled: null,
+          maxOpenNotes: null,
+          includeActiveLocation: null,
+        },
+        selection: {
+          enabled: null,
+          maxSnippets: null,
+          maxCharsPerSnippet: null,
+        },
+      },
     });
   });
 });

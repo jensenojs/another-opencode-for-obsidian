@@ -1,10 +1,9 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test";
 import type { App } from "obsidian";
-import type { OpenCodeClient, OpenCodeMessage } from "../../src/client/OpenCodeClient";
+import type { OpenCodeClient } from "../../src/client/OpenCodeClient";
 import type { ContextManager as ContextManagerClass } from "../../src/context/ContextManager";
 import { CurrentContextSession } from "../../src/context/ContextSessionResolver";
-import { formatContextMessageText } from "../../src/context/ContextProvenance";
-import type { OpenCodeSettings } from "../../src/types";
+import { DEFAULT_SETTINGS, OPENCODE_VIEW_TYPE, type OpenCodeSettings } from "../../src/types";
 
 mock.module("obsidian", () => ({
   addIcon: () => {},
@@ -41,39 +40,211 @@ beforeAll(async () => {
   MarkdownView = obsidianModule.MarkdownView as unknown as typeof MarkdownView;
 });
 
+describe("ContextManager", () => {
+  test("adds manual context through the legacy explicit command path", async () => {
+    const calls: Array<{ sessionId: string; text: string }> = [];
+    const manager = createManager({
+      client: {
+        addContextMessage: async (sessionId, text) => {
+          calls.push({ sessionId, text });
+          return { messageId: "msg_1", partId: "prt_1" };
+        },
+      },
+    });
+
+    const item = await manager.addManual("ses_1", "selected text", "note.md", 3, 5);
+
+    expect(calls).toEqual([{ sessionId: "ses_1", text: "selected text" }]);
+    expect(item).toMatchObject({
+      id: "msg_1:prt_1",
+      type: "manual",
+      label: "note.md:3-5",
+      sourceFile: "note.md",
+      messageId: "msg_1",
+      partId: "prt_1",
+    });
+  });
+
+  test("editor selection events create one-shot candidates with bounded FIFO eviction", async () => {
+    const { app, handlers } = createAppWithEvents();
+    const settings = createSettings();
+    settings.contextAssist.selection.maxSnippets = 1;
+    const manager = createManager({ app, settings });
+    manager.updateSettings(settings);
+
+    handlers["editor-change"]?.(null, createMarkdownView("first.md", "first", 1, 1));
+    await tick();
+    handlers["editor-change"]?.(null, createMarkdownView("second.md", "second", 2, 2));
+    await tick();
+
+    expect(manager.getCandidates()).toMatchObject([
+      {
+        sourceId: "selection",
+        sourceKind: "selection",
+        label: "Selection: second.md:2",
+        text: "second",
+        lifetime: "one-shot",
+        included: true,
+      },
+    ]);
+  });
+
+  test("workspace refresh creates a dynamic candidate with active location", async () => {
+    const activeView = createMarkdownView("active.md", "", 8, 8, 8);
+    const app = createApp({
+      activeMarkdownView: activeView,
+      markdownLeaves: [
+        { view: createMarkdownView("a.md", "", 1, 1) },
+        { view: createMarkdownView("b.md", "", 1, 1) },
+      ],
+      activeLeaf: createOpenCodeLeaf(),
+    });
+    const manager = createManager({ app });
+
+    await manager.refreshVisibleOpenCodeContext();
+
+    expect(manager.getCandidates()).toMatchObject([
+      {
+        sourceId: "workspace",
+        sourceKind: "workspace",
+        identityKey: "current",
+        lifetime: "dynamic",
+        included: true,
+        navigationSourceFile: "active.md",
+        startLine: 8,
+        endLine: 8,
+      },
+    ]);
+    expect(manager.getCandidates()[0].text).toContain("Active: active.md:L8");
+    expect(manager.getCandidates()[0].text).toContain("- a.md");
+    expect(manager.getCandidates()[0].text).toContain("- b.md");
+  });
+
+  test("disabled sources clear their candidates and stop maintaining source state", async () => {
+    const { app, handlers } = createAppWithEvents();
+    const settings = createSettings();
+    const manager = createManager({ app, settings });
+    manager.updateSettings(settings);
+
+    handlers["editor-change"]?.(null, createMarkdownView("note.md", "selected", 1, 1));
+    await tick();
+    expect(manager.getCandidates()).toHaveLength(1);
+
+    const disabled = createSettings();
+    disabled.contextAssist.selection.enabled = false;
+    manager.updateSettings(disabled);
+
+    expect(manager.getCandidates()).toEqual([]);
+    handlers["editor-change"]?.(null, createMarkdownView("note.md", "new", 1, 1));
+    await tick();
+    expect(manager.getCandidates()).toEqual([]);
+  });
+
+  test("prompt injection delegates to the prompt-coupled injector", () => {
+    const manager = createManager({});
+    const candidateRegistry = (manager as any).candidateRegistry;
+    candidateRegistry.setSession("ses_1");
+    candidateRegistry.upsert({
+      id: "selection",
+      sourceId: "selection",
+      sourceKind: "selection",
+      identityKey: "selection",
+      fingerprint: "fp",
+      label: "Selection",
+      text: "selected",
+      sourceFile: "note.md",
+      included: true,
+      lifetime: "one-shot",
+      status: "active",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const plan = manager.preparePromptContext("ses_1", {
+      parts: [{ type: "text", text: "user prompt" }],
+    });
+
+    expect(plan?.requestBody).toEqual({
+      parts: [
+        { type: "text", text: "user prompt" },
+        {
+          type: "text",
+          text: "Obsidian context: Selection\nSource: note.md\n\nselected",
+          synthetic: true,
+        },
+      ],
+    });
+  });
+});
+
 function createSettings(): OpenCodeSettings {
   return {
-    port: 14096,
-    hostname: "127.0.0.1",
-    autoStart: false,
-    opencodePath: "opencode",
-    projectDirectory: "",
-    startupTimeout: 45000,
-    defaultViewLocation: "sidebar",
-    injectWorkspaceContext: false,
-    autoAddSelectionContext: false,
-    autoAddBacklinksContext: false,
-    autoAddCursorContext: false,
-    maxNotesInContext: 20,
-    maxSelectionLength: 2000,
-    customCommand: "",
-    useCustomCommand: false,
-    webViewAppearance: "obsidian",
-    lastSessionUrl: "",
+    ...DEFAULT_SETTINGS,
+    contextAssist: {
+      enabled: true,
+      workspace: {
+        enabled: true,
+        maxOpenNotes: 3,
+        includeActiveLocation: true,
+      },
+      selection: {
+        enabled: true,
+        maxSnippets: 3,
+        maxCharsPerSnippet: 500,
+      },
+    },
   };
 }
 
-function createApp(): App {
+function createManager(options: {
+  app?: App;
+  settings?: OpenCodeSettings;
+  client?: Partial<OpenCodeClient>;
+}): ContextManagerClass {
+  return new ContextManager({
+    app: options.app ?? createApp(),
+    settings: options.settings ?? createSettings(),
+    client: {
+      addContextMessage: async () => ({ messageId: "msg_1", partId: "prt_1" }),
+      deleteMessage: async () => true,
+      listSessionMessages: async () => [],
+      ...options.client,
+    } as OpenCodeClient,
+    getServerState: () => "running",
+    currentSession: createCurrentSession("http://127.0.0.1/session/ses_1"),
+    registerEvent: () => {},
+  });
+}
+
+function createCurrentSession(cachedUrl: string | null): CurrentContextSession {
+  return new CurrentContextSession({
+    getCachedIframeUrl: () => cachedUrl,
+    setCachedIframeUrl: (url) => {
+      cachedUrl = url;
+    },
+    resolveSessionId: (url) => url.match(/\/session\/([^/?#]+)/)?.[1] ?? null,
+  });
+}
+
+function createApp(
+  params: {
+    activeLeaf?: any;
+    markdownLeaves?: Array<{ view: any }>;
+    activeMarkdownView?: any;
+  } = {}
+): App {
   return {
     metadataCache: {
       on: () => ({}),
       resolvedLinks: {},
     },
     workspace: {
+      activeLeaf: params.activeLeaf ?? null,
+      rightSplit: { collapsed: false },
       on: () => ({}),
       offref: () => {},
-      getLeavesOfType: () => [],
-      getActiveViewOfType: () => null,
+      getLeavesOfType: (type: string) => (type === "markdown" ? (params.markdownLeaves ?? []) : []),
+      getActiveViewOfType: () => params.activeMarkdownView ?? null,
     },
   } as unknown as App;
 }
@@ -81,30 +252,14 @@ function createApp(): App {
 function createAppWithEvents(): {
   app: App;
   handlers: Record<string, (...args: unknown[]) => void>;
-  resolvedLinks: Record<string, Record<string, number>>;
 } {
   const handlers: Record<string, (...args: unknown[]) => void> = {};
-  const resolvedLinks: Record<string, Record<string, number>> = {};
-  const app = {
-    metadataCache: {
-      on: (event: string, handler: (...args: unknown[]) => void) => {
-        handlers[`metadata:${event}`] = handler;
-        return {};
-      },
-      resolvedLinks,
-    },
-    workspace: {
-      on: (event: string, handler: (...args: unknown[]) => void) => {
-        handlers[event] = handler;
-        return {};
-      },
-      offref: () => {},
-      getLeavesOfType: () => [],
-      getActiveViewOfType: () => null,
-    },
-  } as unknown as App;
-
-  return { app, handlers, resolvedLinks };
+  const app = createApp();
+  (app.workspace as any).on = (event: string, handler: (...args: unknown[]) => void) => {
+    handlers[event] = handler;
+    return {};
+  };
+  return { app, handlers };
 }
 
 function createMarkdownView(
@@ -112,714 +267,28 @@ function createMarkdownView(
   selection: string,
   startLine: number,
   endLine: number,
-  cursorLine = startLine,
-  cursorColumn = 1
+  cursorLine = startLine
 ): any {
   const view = new MarkdownView({});
   view.file = { path };
   view.editor = {
     getSelection: () => selection,
     listSelections: () => [{ anchor: { line: startLine - 1 }, head: { line: endLine - 1 } }],
-    getCursor: () => ({ line: cursorLine - 1, ch: cursorColumn - 1 }),
+    getCursor: () => ({ line: cursorLine - 1, ch: 0 }),
   };
   return view;
 }
 
-function createManager(client: Partial<OpenCodeClient>): ContextManagerClass {
-  return new ContextManager({
-    app: createApp(),
-    settings: createSettings(),
-    client: {
-      deleteMessage: async () => true,
-      ...client,
-    } as OpenCodeClient,
-    getServerState: () => "running",
-    currentSession: createCurrentSession(null),
-    registerEvent: () => {},
-  });
+function createOpenCodeLeaf(): any {
+  return {
+    view: {
+      getViewType: () => OPENCODE_VIEW_TYPE,
+      getIframeUrl: () => "http://127.0.0.1/session/ses_1",
+    },
+  };
 }
 
-function createCurrentSession(cachedUrl: string | null): CurrentContextSession {
-  return createDynamicCurrentSession(
-    () => cachedUrl,
-    (url) => {
-      cachedUrl = url;
-    }
-  );
+async function tick(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
-
-function createDynamicCurrentSession(
-  getCachedIframeUrl: () => string | null,
-  setCachedIframeUrl: (url: string | null) => void = () => {}
-): CurrentContextSession {
-  return new CurrentContextSession({
-    getCachedIframeUrl,
-    setCachedIframeUrl,
-    resolveSessionId: (url) => url.match(/\/session\/([^/?#]+)/)?.[1] ?? null,
-  });
-}
-
-function expectItem<T>(item: T | null): T {
-  if (!item) {
-    throw new Error("Expected context item");
-  }
-  return item;
-}
-
-describe("ContextManager", () => {
-  test("adds manual context as a ContextItem after OpenCode accepts it", async () => {
-    const calls: Array<{ sessionId: string; text: string }> = [];
-    const manager = createManager({
-      addContextMessage: async (sessionId, text) => {
-        calls.push({ sessionId, text });
-        return { messageId: "msg_1", partId: "prt_1" };
-      },
-    });
-
-    const item = expectItem(await manager.addManual("ses_1", "selected text", "note.md", 3, 5));
-
-    expect(calls).toEqual([{ sessionId: "ses_1", text: "selected text" }]);
-    expect(item).toMatchObject({
-      id: "msg_1:prt_1",
-      type: "manual",
-      label: "note.md:3-5",
-      text: "selected text",
-      sourceFile: "note.md",
-      startLine: 3,
-      endLine: 5,
-      messageId: "msg_1",
-      partId: "prt_1",
-    });
-    expect(manager.getItems()).toEqual([item]);
-  });
-
-  test("adds selected text to the current OpenCode session", async () => {
-    const calls: Array<{ sessionId: string; text: string }> = [];
-    const manager = new ContextManager({
-      app: createApp(),
-      settings: createSettings(),
-      client: {
-        addContextMessage: async (sessionId: string, text: string) => {
-          calls.push({ sessionId, text });
-          return { messageId: "msg_1", partId: "prt_1" };
-        },
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
-      registerEvent: () => {},
-    });
-
-    const item = await manager.addSelectionForCurrentSession("selected text", "note.md", 2, 3);
-
-    expect(calls).toEqual([{ sessionId: "ses_1", text: "selected text" }]);
-    expect(item).toMatchObject({
-      label: "note.md:2-3",
-      sourceFile: "note.md",
-      startLine: 2,
-      endLine: 3,
-    });
-  });
-
-  test("adds the current note to the current OpenCode session", async () => {
-    const calls: Array<{ sessionId: string; text: string }> = [];
-    const manager = new ContextManager({
-      app: createApp(),
-      settings: createSettings(),
-      client: {
-        addContextMessage: async (sessionId: string, text: string) => {
-          calls.push({ sessionId, text });
-          return { messageId: "msg_1", partId: "prt_1" };
-        },
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
-      registerEvent: () => {},
-    });
-
-    const item = await manager.addCurrentNoteForCurrentSession(
-      "notes/current.md",
-      "line 1\nline 2"
-    );
-
-    expect(calls).toEqual([{ sessionId: "ses_1", text: "line 1\nline 2" }]);
-    expect(item).toMatchObject({
-      type: "manual",
-      label: "notes/current.md:1-2",
-      text: "line 1\nline 2",
-      sourceFile: "notes/current.md",
-      startLine: 1,
-      endLine: 2,
-    });
-  });
-
-  test("does not add an empty current note", async () => {
-    const calls: string[] = [];
-    const manager = new ContextManager({
-      app: createApp(),
-      settings: createSettings(),
-      client: {
-        addContextMessage: async (_sessionId: string, text: string) => {
-          calls.push(text);
-          return { messageId: "msg_1", partId: "prt_1" };
-        },
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
-      registerEvent: () => {},
-    });
-
-    const item = await manager.addCurrentNoteForCurrentSession("notes/current.md", " \n ");
-
-    expect(item).toBeNull();
-    expect(calls).toEqual([]);
-    expect(manager.getItems()).toEqual([]);
-  });
-
-  test("auto-adds changed editor selection when enabled", async () => {
-    const settings = createSettings();
-    settings.autoAddSelectionContext = true;
-    const { app, handlers } = createAppWithEvents();
-    const calls: Array<{ sessionId: string; text: string }> = [];
-    const manager = new ContextManager({
-      app,
-      settings,
-      client: {
-        addContextMessage: async (sessionId: string, text: string) => {
-          calls.push({ sessionId, text });
-          return { messageId: `msg_${calls.length}`, partId: `prt_${calls.length}` };
-        },
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
-      registerEvent: () => {},
-    });
-
-    manager.updateSettings(settings);
-    handlers["editor-change"]?.({}, createMarkdownView("note.md", "selected text", 2, 3));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    handlers["editor-change"]?.({}, createMarkdownView("note.md", "selected text", 2, 3));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    handlers["editor-change"]?.({}, createMarkdownView("note.md", "new selected text", 4, 4));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(calls).toEqual([
-      { sessionId: "ses_1", text: "selected text" },
-      { sessionId: "ses_1", text: "new selected text" },
-    ]);
-    expect(manager.getItems()).toMatchObject([
-      { label: "note.md:2-3", text: "selected text", sourceFile: "note.md" },
-      { label: "note.md:4", text: "new selected text", sourceFile: "note.md" },
-    ]);
-  });
-
-  test("retries the same auto selection after a missing session", async () => {
-    const settings = createSettings();
-    settings.autoAddSelectionContext = true;
-    const { app, handlers } = createAppWithEvents();
-    const calls: string[] = [];
-    let iframeUrl: string | null = null;
-    const manager = new ContextManager({
-      app,
-      settings,
-      client: {
-        addContextMessage: async (_sessionId: string, text: string) => {
-          calls.push(text);
-          return { messageId: "msg_1", partId: "prt_1" };
-        },
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createDynamicCurrentSession(() => iframeUrl),
-      registerEvent: () => {},
-    });
-
-    manager.updateSettings(settings);
-    handlers["editor-change"]?.({}, createMarkdownView("note.md", "selected text", 2, 3));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    iframeUrl = "http://127.0.0.1:4097/project/session/ses_1";
-    handlers["editor-change"]?.({}, createMarkdownView("note.md", "selected text", 2, 3));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(calls).toEqual(["selected text"]);
-    expect(manager.getItems()).toMatchObject([
-      { label: "note.md:2-3", text: "selected text", sourceFile: "note.md" },
-    ]);
-  });
-
-  test("does not auto-add editor selection when disabled", async () => {
-    const settings = createSettings();
-    const { app, handlers } = createAppWithEvents();
-    const calls: string[] = [];
-    const manager = new ContextManager({
-      app,
-      settings,
-      client: {
-        addContextMessage: async (_sessionId: string, text: string) => {
-          calls.push(text);
-          return { messageId: "msg_1", partId: "prt_1" };
-        },
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
-      registerEvent: () => {},
-    });
-
-    manager.updateSettings(settings);
-    handlers["editor-change"]?.({}, createMarkdownView("note.md", "selected text", 2, 3));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(calls).toEqual([]);
-    expect(manager.getItems()).toEqual([]);
-  });
-
-  test("auto-adds resolved backlinks for the active note when enabled", async () => {
-    const settings = createSettings();
-    settings.autoAddBacklinksContext = true;
-    const { app, handlers, resolvedLinks } = createAppWithEvents();
-    resolvedLinks["source.md"] = { "target.md": 2 };
-    const calls: Array<{ sessionId: string; text: string }> = [];
-    const manager = new ContextManager({
-      app,
-      settings,
-      client: {
-        addContextMessage: async (sessionId: string, text: string) => {
-          calls.push({ sessionId, text });
-          return { messageId: `msg_${calls.length}`, partId: `prt_${calls.length}` };
-        },
-        deleteMessage: async () => true,
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
-      registerEvent: () => {},
-    });
-
-    manager.updateSettings(settings);
-    handlers["file-open"]?.({ path: "target.md" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    handlers["metadata:resolve"]?.({ path: "source.md" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(calls).toEqual([
-      {
-        sessionId: "ses_1",
-        text: `<obsidian-backlinks file="target.md">
-- source.md (2)
-</obsidian-backlinks>`,
-      },
-    ]);
-    expect(manager.getItems()).toMatchObject([
-      {
-        type: "auto",
-        label: "Backlinks: target.md",
-        sourceFile: "target.md",
-      },
-    ]);
-  });
-
-  test("keeps only one active backlink auto item", async () => {
-    const settings = createSettings();
-    settings.autoAddBacklinksContext = true;
-    const { app, handlers, resolvedLinks } = createAppWithEvents();
-    resolvedLinks["source.md"] = { "first.md": 1, "second.md": 1 };
-    const deleted: string[] = [];
-    let messageIndex = 0;
-    const manager = new ContextManager({
-      app,
-      settings,
-      client: {
-        addContextMessage: async () => {
-          messageIndex += 1;
-          return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
-        },
-        deleteMessage: async (_sessionId: string, messageId: string) => {
-          deleted.push(messageId);
-          return true;
-        },
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
-      registerEvent: () => {},
-    });
-
-    manager.updateSettings(settings);
-    handlers["file-open"]?.({ path: "first.md" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    handlers["file-open"]?.({ path: "second.md" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(deleted).toEqual(["msg_1"]);
-    expect(manager.getItems()).toMatchObject([
-      {
-        type: "auto",
-        label: "Backlinks: second.md",
-        sourceFile: "second.md",
-      },
-    ]);
-  });
-
-  test("auto-adds cursor position for the active note when enabled", async () => {
-    const settings = createSettings();
-    settings.autoAddCursorContext = true;
-    const { app, handlers } = createAppWithEvents();
-    const calls: Array<{ sessionId: string; text: string }> = [];
-    const manager = new ContextManager({
-      app,
-      settings,
-      client: {
-        addContextMessage: async (sessionId: string, text: string) => {
-          calls.push({ sessionId, text });
-          return { messageId: `msg_${calls.length}`, partId: `prt_${calls.length}` };
-        },
-        deleteMessage: async () => true,
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
-      registerEvent: () => {},
-    });
-
-    manager.updateSettings(settings);
-    handlers["editor-change"]?.({}, createMarkdownView("target.md", "", 3, 3, 3, 5));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    handlers["editor-change"]?.({}, createMarkdownView("target.md", "", 3, 3, 3, 5));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    handlers["editor-change"]?.({}, createMarkdownView("target.md", "", 4, 4, 4, 1));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(calls).toEqual([
-      {
-        sessionId: "ses_1",
-        text: '<obsidian-cursor file="target.md" line="3" column="5" />',
-      },
-      {
-        sessionId: "ses_1",
-        text: '<obsidian-cursor file="target.md" line="4" column="1" />',
-      },
-    ]);
-    expect(manager.getItems()).toMatchObject([
-      {
-        type: "auto",
-        label: "Cursor: target.md:4:1",
-        sourceFile: "target.md",
-        startLine: 4,
-        endLine: 4,
-      },
-    ]);
-  });
-
-  test("keeps only one active cursor auto item", async () => {
-    const settings = createSettings();
-    settings.autoAddCursorContext = true;
-    const { app, handlers } = createAppWithEvents();
-    const deleted: string[] = [];
-    let messageIndex = 0;
-    const manager = new ContextManager({
-      app,
-      settings,
-      client: {
-        addContextMessage: async () => {
-          messageIndex += 1;
-          return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
-        },
-        deleteMessage: async (_sessionId: string, messageId: string) => {
-          deleted.push(messageId);
-          return true;
-        },
-      } as unknown as OpenCodeClient,
-      getServerState: () => "running",
-      currentSession: createCurrentSession("http://127.0.0.1:4097/project/session/ses_1"),
-      registerEvent: () => {},
-    });
-
-    manager.updateSettings(settings);
-    handlers["editor-change"]?.({}, createMarkdownView("first.md", "", 2, 2, 2, 1));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    handlers["editor-change"]?.({}, createMarkdownView("second.md", "", 8, 8, 8, 3));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(deleted).toEqual(["msg_1"]);
-    expect(manager.getItems()).toMatchObject([
-      {
-        type: "auto",
-        label: "Cursor: second.md:8:3",
-        sourceFile: "second.md",
-        startLine: 8,
-        endLine: 8,
-      },
-    ]);
-  });
-
-  test("removes context only after the remote message is deleted", async () => {
-    const deleted: string[] = [];
-    const manager = createManager({
-      addContextMessage: async () => ({ messageId: "msg_1", partId: "prt_1" }),
-      deleteMessage: async (sessionId, messageId) => {
-        deleted.push(`${sessionId}:${messageId}`);
-        return true;
-      },
-    });
-
-    const item = expectItem(await manager.addManual("ses_1", "selected text", "note.md"));
-    const removed = await manager.removeItem("ses_1", item.id);
-
-    expect(removed).toBe(true);
-    expect(deleted).toEqual(["ses_1:msg_1"]);
-    expect(manager.getItems()).toEqual([]);
-  });
-
-  test("keeps local context when remote delete fails", async () => {
-    const manager = createManager({
-      addContextMessage: async () => ({ messageId: "msg_1", partId: "prt_1" }),
-      deleteMessage: async () => false,
-    });
-
-    const item = expectItem(await manager.addManual("ses_1", "selected text", "note.md"));
-    const removed = await manager.removeItem("ses_1", item.id);
-
-    expect(removed).toBe(false);
-    expect(manager.getItems()).toEqual([item]);
-  });
-
-  test("replaces workspace auto context through its public identity", async () => {
-    const deleted: string[] = [];
-    let messageIndex = 0;
-    const manager = createManager({
-      addContextMessage: async () => {
-        messageIndex += 1;
-        return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
-      },
-      deleteMessage: async (_sessionId: string, messageId: string) => {
-        deleted.push(messageId);
-        return true;
-      },
-    });
-
-    await manager["addItem"]({
-      sessionId: "ses_1",
-      type: "auto",
-      label: "Workspace context",
-      text: "first",
-      sourceFile: "Obsidian workspace",
-    });
-    await manager["addItem"]({
-      sessionId: "ses_1",
-      type: "auto",
-      label: "Workspace context",
-      text: "second",
-      sourceFile: "Obsidian workspace",
-    });
-
-    expect(deleted).toEqual(["msg_1"]);
-    expect(manager.getItems()).toMatchObject([
-      {
-        id: "msg_2:prt_2",
-        type: "auto",
-        text: "second",
-        sourceFile: "Obsidian workspace",
-      },
-    ]);
-  });
-
-  test("derives workspace navigation target from selection or a single open note", () => {
-    const manager = createManager({});
-
-    expect(
-      manager["getWorkspaceNavigationTarget"]({
-        openNotePaths: ["a.md", "b.md"],
-        selection: {
-          text: "selected",
-          sourcePath: "b.md",
-          selectionStartLine: 3,
-          selectionEndLine: 4,
-        },
-      })
-    ).toEqual({
-      navigationSourceFile: "b.md",
-      startLine: 3,
-      endLine: 4,
-    });
-
-    expect(
-      manager["getWorkspaceNavigationTarget"]({
-        openNotePaths: ["only.md"],
-        selection: null,
-      })
-    ).toEqual({
-      navigationSourceFile: "only.md",
-    });
-
-    expect(
-      manager["getWorkspaceNavigationTarget"]({
-        openNotePaths: ["a.md", "b.md"],
-        selection: null,
-      })
-    ).toEqual({});
-  });
-
-  test("serializes identical workspace auto context refreshes without duplicate posts", async () => {
-    const calls: string[] = [];
-    let messageIndex = 0;
-    let releaseFirstAdd!: () => void;
-    const firstAddGate = new Promise<void>((resolve) => {
-      releaseFirstAdd = resolve;
-    });
-    const manager = createManager({
-      addContextMessage: async (_sessionId: string, text: string) => {
-        calls.push(text);
-        if (calls.length === 1) {
-          await firstAddGate;
-        }
-        messageIndex += 1;
-        return { messageId: `msg_${messageIndex}`, partId: `prt_${messageIndex}` };
-      },
-      deleteMessage: async () => true,
-    });
-
-    const first = manager["addItem"]({
-      sessionId: "ses_1",
-      type: "auto",
-      label: "Workspace context",
-      text: "same",
-      sourceFile: "Obsidian workspace",
-    });
-    const second = manager["addItem"]({
-      sessionId: "ses_1",
-      type: "auto",
-      label: "Workspace context",
-      text: "same",
-      sourceFile: "Obsidian workspace",
-    });
-
-    releaseFirstAdd();
-    const [firstItem, secondItem] = await Promise.all([first, second]);
-
-    expect(calls).toEqual(["same"]);
-    expect(secondItem).toEqual(firstItem);
-    expect(manager.getItems()).toHaveLength(1);
-  });
-
-  test("restores one active auto context per public identity and deletes stale messages", async () => {
-    const deleted: string[] = [];
-    const messages: OpenCodeMessage[] = [
-      {
-        info: { id: "msg_1", sessionID: "ses_1" },
-        parts: [
-          {
-            id: "prt_1",
-            sessionID: "ses_1",
-            messageID: "msg_1",
-            type: "text",
-            text: formatContextMessageText("old", {
-              version: 1,
-              type: "auto",
-              label: "Workspace context",
-              sourceFile: "Obsidian workspace",
-              textLength: "old".length,
-              createdAt: 100,
-            }),
-          },
-        ],
-      },
-      {
-        info: { id: "msg_2", sessionID: "ses_1" },
-        parts: [
-          {
-            id: "prt_2",
-            sessionID: "ses_1",
-            messageID: "msg_2",
-            type: "text",
-            text: formatContextMessageText("new", {
-              version: 1,
-              type: "auto",
-              label: "Workspace context",
-              sourceFile: "Obsidian workspace",
-              textLength: "new".length,
-              createdAt: 200,
-            }),
-          },
-        ],
-      },
-    ];
-    const manager = createManager({
-      listSessionMessages: async () => messages,
-      deleteMessage: async (_sessionId: string, messageId: string) => {
-        deleted.push(messageId);
-        return true;
-      },
-    });
-
-    await manager.restoreFromServer("ses_1");
-
-    expect(deleted).toEqual(["msg_1"]);
-    expect(manager.getItems()).toMatchObject([
-      {
-        id: "msg_2:prt_2",
-        type: "auto",
-        label: "Workspace context",
-        text: "new",
-        sourceFile: "Obsidian workspace",
-      },
-    ]);
-  });
-
-  test("restores active plugin context messages from the server", async () => {
-    const messages: OpenCodeMessage[] = [
-      {
-        info: { id: "msg_1", sessionID: "ses_1" },
-        parts: [
-          {
-            id: "prt_1",
-            sessionID: "ses_1",
-            messageID: "msg_1",
-            type: "text",
-            text: "<!-- oc-ctx -->\nrestored",
-            time: { start: 123 },
-          },
-        ],
-      },
-      {
-        info: { id: "msg_2", sessionID: "ses_1" },
-        parts: [
-          {
-            id: "prt_2",
-            sessionID: "ses_1",
-            messageID: "msg_2",
-            type: "text",
-            text: "<!-- oc-ctx -->\nignored",
-            ignored: true,
-          },
-        ],
-      },
-      {
-        info: { id: "msg_3", sessionID: "ses_1" },
-        parts: [
-          {
-            id: "prt_3",
-            sessionID: "ses_1",
-            messageID: "msg_3",
-            type: "text",
-            text: "normal user message",
-          },
-        ],
-      },
-    ];
-    const manager = createManager({
-      listSessionMessages: async () => messages,
-    });
-
-    await manager.restoreFromServer("ses_1");
-
-    expect(manager.getItems()).toEqual([
-      {
-        id: "msg_1:prt_1",
-        type: "manual",
-        label: "Restored context",
-        text: "restored",
-        sourceFile: "OpenCode session",
-        messageId: "msg_1",
-        partId: "prt_1",
-        textLength: "restored".length,
-        provenanceStatus: "uncertain",
-        createdAt: 123,
-      },
-    ]);
-  });
-});

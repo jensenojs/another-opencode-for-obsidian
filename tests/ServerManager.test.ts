@@ -1,26 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { ServerManager } from "../src/server/ServerManager";
-import type { OpenCodeSettings } from "../src/types";
+import { DEFAULT_SETTINGS, type OpenCodeSettings } from "../src/types";
 
 function createTestSettings(port = 15000): OpenCodeSettings {
   return {
+    ...DEFAULT_SETTINGS,
     port,
-    hostname: "127.0.0.1",
-    autoStart: false,
-    opencodePath: "opencode",
-    projectDirectory: "",
     startupTimeout: 10000,
-    defaultViewLocation: "sidebar",
-    injectWorkspaceContext: true,
-    autoAddSelectionContext: false,
-    autoAddBacklinksContext: false,
-    autoAddCursorContext: false,
-    maxNotesInContext: 20,
-    maxSelectionLength: 2000,
-    customCommand: "",
-    useCustomCommand: false,
-    webViewAppearance: "obsidian",
-    lastSessionUrl: "",
   };
 }
 

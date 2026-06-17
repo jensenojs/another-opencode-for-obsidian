@@ -1,82 +1,64 @@
 import { describe, expect, test } from "bun:test";
 import { AutoSelectionContextSource } from "../../src/context/AutoSelectionContextSource";
-import type { ContextItem } from "../../src/types";
-
-const item: ContextItem = {
-  id: "ctx-1",
-  type: "manual",
-  label: "Selection",
-  text: "selected text",
-  sourceFile: "note.md",
-  createdAt: 123,
-};
 
 describe("AutoSelectionContextSource", () => {
-  test("adds changed selections and skips duplicate fingerprints", async () => {
-    const calls: string[] = [];
+  test("returns one-shot upsert results for changed selections and skips duplicate fingerprints", () => {
     const source = new AutoSelectionContextSource({
       isEnabled: () => true,
-      addSelection: async (selection) => {
-        calls.push(selection.text);
-        return item;
-      },
+      maxCharsPerSnippet: () => 2000,
     });
 
-    await source.handleSelection({
+    const first = source.handleSelection({
       sourcePath: "note.md",
       text: "selected text",
       selectionStartLine: 2,
       selectionEndLine: 3,
     });
-    await source.handleSelection({
+    const duplicate = source.handleSelection({
       sourcePath: "note.md",
       text: "selected text",
       selectionStartLine: 2,
       selectionEndLine: 3,
     });
-    await source.handleSelection({
+    const changed = source.handleSelection({
       sourcePath: "note.md",
       text: "new selected text",
       selectionStartLine: 4,
       selectionEndLine: 4,
     });
 
-    expect(calls).toEqual(["selected text", "new selected text"]);
-  });
-
-  test("does not mark a selection as handled when add fails", async () => {
-    const calls: string[] = [];
-    let accepted = false;
-    const source = new AutoSelectionContextSource({
-      isEnabled: () => true,
-      addSelection: async (selection) => {
-        calls.push(selection.text);
-        return accepted ? item : null;
+    expect(first).toMatchObject({
+      type: "upsert",
+      candidate: {
+        sourceId: "selection",
+        sourceKind: "selection",
+        text: "selected text",
+        sourceFile: "note.md",
+        navigationSourceFile: "note.md",
+        startLine: 2,
+        endLine: 3,
+        lifetime: "one-shot",
       },
     });
-    const selection = {
-      sourcePath: "note.md",
-      text: "selected text",
-      selectionStartLine: 2,
-      selectionEndLine: 3,
-    };
-
-    await source.handleSelection(selection);
-    accepted = true;
-    await source.handleSelection(selection);
-
-    expect(calls).toEqual(["selected text", "selected text"]);
+    expect(
+      first?.type === "upsert" ? first.candidate.identityKey.startsWith("selection:") : false
+    ).toBe(true);
+    expect(duplicate).toBeNull();
+    expect(changed).toMatchObject({
+      type: "upsert",
+      candidate: {
+        label: "Selection: note.md:4",
+        text: "new selected text",
+        lifetime: "one-shot",
+      },
+    });
   });
 
-  test("ignores selections while disabled and resets on empty selection", async () => {
+  test("ignores disabled and empty selections without clearing the queue", () => {
     let enabled = true;
-    const calls: string[] = [];
     const source = new AutoSelectionContextSource({
       isEnabled: () => enabled,
-      addSelection: async (selection) => {
-        calls.push(selection.text);
-        return item;
-      },
+      maxCharsPerSnippet: () => 2000,
     });
     const selection = {
       sourcePath: "note.md",
@@ -86,12 +68,30 @@ describe("AutoSelectionContextSource", () => {
     };
 
     enabled = false;
-    await source.handleSelection(selection);
+    expect(source.handleSelection(selection)).toBeNull();
     enabled = true;
-    await source.handleSelection(selection);
-    await source.handleSelection(null);
-    await source.handleSelection(selection);
+    expect(source.handleSelection(selection)?.type).toBe("upsert");
+    expect(source.handleSelection(null)).toBeNull();
+    source.reset();
+    expect(source.handleSelection(selection)?.type).toBe("upsert");
+  });
 
-    expect(calls).toEqual(["selected text", "selected text"]);
+  test("truncates candidate text before it reaches the registry", () => {
+    const source = new AutoSelectionContextSource({
+      isEnabled: () => true,
+      maxCharsPerSnippet: () => 3,
+    });
+
+    const result = source.handleSelection({
+      sourcePath: "note.md",
+      text: "abcdef",
+    });
+
+    expect(result).toMatchObject({
+      type: "upsert",
+      candidate: {
+        text: "abc... [truncated]",
+      },
+    });
   });
 });

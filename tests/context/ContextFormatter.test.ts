@@ -2,87 +2,66 @@ import { describe, expect, test } from "bun:test";
 import { formatWorkspaceContext } from "../../src/context/ContextFormatter";
 
 describe("formatWorkspaceContext", () => {
-  test("returns null when there is no context to send", () => {
+  test("returns null when there is no workspace clue to send", () => {
     expect(
       formatWorkspaceContext(
         {
           openNotePaths: [],
-          selection: null,
+          activeLocation: null,
         },
-        { maxNotes: 20, maxSelectionLength: 2000 }
+        { maxOpenNotes: 20, includeActiveLocation: true }
       )
     ).toBeNull();
   });
 
-  test("formats open notes and selected text", () => {
+  test("formats open notes and active location", () => {
     expect(
       formatWorkspaceContext(
         {
           openNotePaths: ["a.md", "b.md"],
-          selection: {
+          activeLocation: {
             sourcePath: "a.md",
-            text: "selected",
-            selectionStartLine: 4,
-            selectionEndLine: 6,
+            line: 8,
           },
         },
-        { maxNotes: 20, maxSelectionLength: 2000 }
+        { maxOpenNotes: 20, includeActiveLocation: true }
       )
-    ).toBe(`<obsidian-context>
-Currently open notes in Obsidian:
-- a.md
-- b.md
+    ).toBe(`Obsidian workspace:
+Active: a.md:L8
 
-Selected text (from a.md:4-6):
-"""
-selected
-"""
-</obsidian-context>`);
+Open notes:
+- a.md
+- b.md`);
   });
 
-  test("formats a single-line selection location", () => {
+  test("can omit active location while keeping open notes", () => {
     expect(
       formatWorkspaceContext(
         {
-          openNotePaths: [],
-          selection: {
+          openNotePaths: ["a.md"],
+          activeLocation: {
             sourcePath: "a.md",
-            text: "selected",
-            selectionStartLine: 4,
-            selectionEndLine: 4,
+            line: 8,
           },
         },
-        { maxNotes: 20, maxSelectionLength: 2000 }
+        { maxOpenNotes: 20, includeActiveLocation: false }
       )
-    ).toBe(`<obsidian-context>
-
-Selected text (from a.md:4):
-"""
-selected
-"""
-</obsidian-context>`);
+    ).toBe(`Obsidian workspace:
+Open notes:
+- a.md`);
   });
 
-  test("applies formatting limits outside the Obsidian snapshot collector", () => {
+  test("applies open note limits outside the Obsidian snapshot collector", () => {
     expect(
       formatWorkspaceContext(
         {
           openNotePaths: ["a.md", "b.md"],
-          selection: {
-            sourcePath: "b.md",
-            text: "abcdef",
-          },
+          activeLocation: null,
         },
-        { maxNotes: 1, maxSelectionLength: 3 }
+        { maxOpenNotes: 1, includeActiveLocation: true }
       )
-    ).toBe(`<obsidian-context>
-Currently open notes in Obsidian:
-- a.md
-
-Selected text (from b.md):
-"""
-abc... [truncated]
-"""
-</obsidian-context>`);
+    ).toBe(`Obsidian workspace:
+Open notes:
+- a.md`);
   });
 });

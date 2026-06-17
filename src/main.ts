@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   OPENCODE_VIEW_TYPE,
   createServerEndpoint,
+  normalizeOpenCodeSettings,
   type OpenCodeSettings,
   type WebViewTheme,
 } from "./types";
@@ -20,7 +21,7 @@ import { getSelectionLineRange } from "./context/SelectionLineRange";
 import type { GraphIndex } from "./graph/GraphIndex";
 import { createObsidianGraphIndex, isMarkdownTFile, toGraphFile } from "./graph/ObsidianGraphIndex";
 import { ExecutableResolver } from "./server/ExecutableResolver";
-import { OpenCodeWebUiProxy } from "./proxy/OpenCodeWebUiProxy";
+import { OpenCodeWebUiProxy, extractPromptSessionId } from "./proxy/OpenCodeWebUiProxy";
 import { OpenCodeBridge } from "./bridge/OpenCodeBridge";
 import {
   createLogger,
@@ -34,6 +35,7 @@ import {
 } from "./debug/ServerDiagnosticsText";
 import { BRIDGE_MESSAGES, isBridgeMessage, isVaultFileOpenPayload } from "./bridge/BridgeProtocol";
 import { captureObsidianWebViewTheme, findObsidianWebViewThemeSource } from "./theme/WebViewTheme";
+import { getText } from "./i18n";
 
 export default class OpenCodePlugin extends Plugin {
   settings: OpenCodeSettings = DEFAULT_SETTINGS;
@@ -60,6 +62,7 @@ export default class OpenCodePlugin extends Plugin {
   private logger = createLogger("plugin");
 
   async onload(): Promise<void> {
+    const text = getText();
     this.logger.info("loading plugin");
 
     registerOpenCodeIcons();
@@ -154,11 +157,16 @@ export default class OpenCodePlugin extends Plugin {
       currentSession: this.currentContextSession,
       registerEvent: (ref) => this.registerEvent(ref),
     });
+    this.installPromptContextHook();
     this.contextItemNavigator = new ContextItemNavigator(this.app, this.graphIndex);
     this.contextStatusBar = new ContextStatusBar({
       addStatusBarItem: () => this.addStatusBarItem(),
       getItems: () => this.contextManager.getItems(),
       onItemsChanged: (callback) => this.contextManager.onItemsChanged(callback),
+      getCandidates: () => this.contextManager.getCandidates(),
+      onCandidatesChanged: (callback) => this.contextManager.onCandidatesChanged(callback),
+      toggleCandidate: (candidateId) => this.contextManager.toggleCandidate(candidateId),
+      removeCandidate: (candidateId) => this.contextManager.removeCandidate(candidateId),
       resolveItem: (item) => this.contextItemNavigator.resolve(item),
       openItem: (item) => this.contextItemNavigator.open(item),
       removeItem: (itemId) => this.contextManager.removeItemForCurrentSession(itemId),
@@ -182,13 +190,13 @@ export default class OpenCodePlugin extends Plugin {
       )
     );
 
-    this.addRibbonIcon(OPENCODE_ICON_NAME, "OpenCode", () => {
+    this.addRibbonIcon(OPENCODE_ICON_NAME, text.commands.ribbonTooltip, () => {
       void this.viewManager.activateView();
     });
 
     this.addCommand({
       id: "toggle-opencode-view",
-      name: "Toggle OpenCode panel",
+      name: text.commands.togglePanel,
       callback: () => {
         void this.viewManager.toggleView();
       },
@@ -202,7 +210,7 @@ export default class OpenCodePlugin extends Plugin {
 
     this.addCommand({
       id: "open-opencode-view",
-      name: "Open OpenCode panel",
+      name: text.commands.openPanel,
       callback: () => {
         void this.viewManager.activateView();
       },
@@ -210,7 +218,7 @@ export default class OpenCodePlugin extends Plugin {
 
     this.addCommand({
       id: "copy-opencode-diagnostics",
-      name: "Copy OpenCode diagnostics",
+      name: text.commands.copyDiagnostics,
       callback: () => {
         void this.copyServerDiagnosticsToClipboard();
       },
@@ -218,12 +226,12 @@ export default class OpenCodePlugin extends Plugin {
 
     this.addCommand({
       id: "add-selection-to-context",
-      name: "Add selection to OpenCode context",
+      name: text.commands.addSelectionToContext,
       editorCallback: (editor, ctx) => {
         const sourcePath = ctx.file?.path;
         const selectedText = editor.getSelection();
         if (!sourcePath || !selectedText.trim()) {
-          new Notice("Select text in a note before adding OpenCode context");
+          new Notice(getText().notices.selectTextBeforeAdding);
           return;
         }
 
@@ -237,7 +245,7 @@ export default class OpenCodePlugin extends Plugin {
           )
           .then((item) => {
             if (!item) {
-              new Notice("OpenCode context was not added. Open an active OpenCode session first.");
+              new Notice(getText().notices.contextNotAddedNoSession);
             }
           });
       },
@@ -251,7 +259,7 @@ export default class OpenCodePlugin extends Plugin {
 
     this.addCommand({
       id: "add-current-note-to-context",
-      name: "Add current note to OpenCode context",
+      name: text.commands.addCurrentNoteToContext,
       callback: () => {
         void this.addCurrentNoteToContext();
       },
@@ -259,7 +267,7 @@ export default class OpenCodePlugin extends Plugin {
 
     this.addCommand({
       id: "start-opencode-server",
-      name: "Start OpenCode server",
+      name: text.commands.startServer,
       callback: () => {
         this.startServer();
       },
@@ -267,7 +275,7 @@ export default class OpenCodePlugin extends Plugin {
 
     this.addCommand({
       id: "stop-opencode-server",
-      name: "Stop OpenCode server",
+      name: text.commands.stopServer,
       callback: () => {
         this.stopServer();
       },
@@ -318,7 +326,7 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.settings = normalizeOpenCodeSettings(await this.loadData());
   }
 
   private async attemptAutodetect(): Promise<void> {
@@ -334,10 +342,10 @@ export default class OpenCodePlugin extends Plugin {
       this.logger.info("autodetected opencode executable", { path: detectedPath });
       this.settings.opencodePath = detectedPath;
       await this.saveData(this.settings);
-      new Notice(`OpenCode executable found at ${detectedPath}`);
+      new Notice(getText().notices.executableFound(detectedPath));
     } else {
       this.logger.warn("could not autodetect opencode executable");
-      new Notice("Could not find opencode. Please check Settings");
+      new Notice(getText().notices.executableNotFoundSettings);
     }
   }
 
@@ -353,7 +361,7 @@ export default class OpenCodePlugin extends Plugin {
   async startServer(): Promise<boolean> {
     const success = await this.processManager.start();
     if (success) {
-      new Notice("OpenCode server started");
+      new Notice(getText().notices.serverStarted);
       const initialized = await this.openCodeClient.initializeProject();
       if (!initialized) {
         this.logger.warn("failed to initialize project on server");
@@ -368,7 +376,7 @@ export default class OpenCodePlugin extends Plugin {
 
   async stopServer(): Promise<void> {
     await this.processManager.stop();
-    new Notice("OpenCode server stopped");
+    new Notice(getText().notices.serverStopped);
     this.writeStatus("stop");
   }
 
@@ -376,7 +384,7 @@ export default class OpenCodePlugin extends Plugin {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const file = view?.file;
     if (!file) {
-      new Notice("Open a note before adding it to OpenCode context");
+      new Notice(getText().notices.openNoteBeforeAdding);
       return;
     }
 
@@ -388,18 +396,18 @@ export default class OpenCodePlugin extends Plugin {
         path: file.path,
         error: error instanceof Error ? error.message : String(error),
       });
-      new Notice("OpenCode could not read the current note. Check the plugin log.");
+      new Notice(getText().notices.currentNoteReadFailed);
       return;
     }
 
     if (!text.trim()) {
-      new Notice("Current note is empty");
+      new Notice(getText().notices.currentNoteEmpty);
       return;
     }
 
     const item = await this.contextManager.addCurrentNoteForCurrentSession(file.path, text);
     if (!item) {
-      new Notice("OpenCode context was not added. Open an active OpenCode session first.");
+      new Notice(getText().notices.contextNotAddedNoSession);
     }
   }
 
@@ -429,13 +437,13 @@ export default class OpenCodePlugin extends Plugin {
       await navigator.clipboard.writeText(
         formatServerDiagnosticsForClipboard(this.getServerDiagnostics())
       );
-      new Notice("OpenCode diagnostics copied");
+      new Notice(getText().notices.diagnosticsCopied);
       return true;
     } catch (error) {
       this.logger.error("failed to copy diagnostics", {
         error: error instanceof Error ? error.message : String(error),
       });
-      new Notice("Failed to copy OpenCode diagnostics");
+      new Notice(getText().notices.diagnosticsCopyFailed);
       return false;
     }
   }
@@ -504,6 +512,53 @@ export default class OpenCodePlugin extends Plugin {
     const theme =
       this.settings.webViewAppearance === "obsidian" ? () => this.getWebViewTheme() : null;
     this.openCodeWebUiProxy.updateAppearance(this.settings.webViewAppearance, theme);
+  }
+
+  private installPromptContextHook(): void {
+    this.openCodeWebUiProxy.updatePromptRequestHook(
+      async (input) => {
+        const sessionId = extractPromptSessionId(input.path);
+        if (!sessionId) {
+          return null;
+        }
+
+        let requestBody: unknown;
+        try {
+          requestBody = JSON.parse(input.body.toString("utf8"));
+        } catch (error) {
+          this.contextManager.preparePromptContext(sessionId, null);
+          this.logger.warn("prompt context injection skipped because request body is not JSON", {
+            path: input.path,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        }
+
+        const plan = this.contextManager.preparePromptContext(sessionId, requestBody);
+        if (!plan) {
+          return null;
+        }
+
+        return {
+          body: Buffer.from(JSON.stringify(plan.requestBody), "utf8"),
+          headers: {
+            "content-type": "application/json",
+          },
+          planId: plan.id,
+        };
+      },
+      (planId, outcome) => {
+        if (outcome.ok) {
+          this.contextManager.completePromptContext(planId);
+          return;
+        }
+
+        this.contextManager.failPromptContext(
+          planId,
+          outcome.error ?? `OpenCode returned HTTP ${outcome.statusCode ?? "unknown"}`
+        );
+      }
+    );
   }
 
   getWebViewTheme(paneSource?: HTMLElement): WebViewTheme {

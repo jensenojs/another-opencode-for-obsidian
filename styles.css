@@ -178,6 +178,32 @@
 }
 
 /* Settings tab styles */
+.opencode-settings-group {
+  margin-block: 12px 18px;
+}
+
+.opencode-settings-level-1 {
+  margin-inline-start: 16px;
+  padding-inline-start: 12px;
+  border-inline-start: 0;
+  box-shadow: none;
+}
+
+.opencode-settings-source-group .setting-item:not(:first-child) {
+  margin-inline-start: 18px;
+  padding-inline-start: 12px;
+}
+
+.opencode-settings-source-group::before,
+.opencode-settings-level-1::before {
+  display: none;
+}
+
+.opencode-settings-status-group .setting-item {
+  display: block;
+  padding-block: 0;
+}
+
 .opencode-settings-status {
   margin-top: 12px;
   padding: 12px;
@@ -186,11 +212,18 @@
 }
 
 .opencode-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
   margin-bottom: 8px;
 }
 
 .opencode-status-line a {
   color: var(--text-accent);
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .opencode-status-badge {
@@ -222,6 +255,7 @@
 
 .opencode-settings-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }
@@ -356,7 +390,7 @@
   background-color: var(--background-secondary);
 }
 
-.opencode-ctx-item.is-selected {
+.opencode-ctx-candidate.is-excluded {
   opacity: 0.55;
 }
 

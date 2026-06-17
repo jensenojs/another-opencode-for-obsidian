@@ -1,19 +1,26 @@
 import { App, EventRef, MarkdownView, WorkspaceLeaf } from "obsidian";
-import { OPENCODE_VIEW_TYPE, type ContextItem, type OpenCodeSettings } from "../types";
+import {
+  OPENCODE_VIEW_TYPE,
+  type ContextCandidate,
+  type ContextItem,
+  type OpenCodeSettings,
+} from "../types";
 import { OpenCodeClient } from "../client/OpenCodeClient";
 import { WorkspaceContext } from "./WorkspaceContext";
 import { formatWorkspaceContext, type WorkspaceContextSnapshot } from "./ContextFormatter";
 import { ContextAutoSources } from "./ContextAutoSources";
-import { formatCursorContext, type CursorContextSnapshot } from "./CursorContextSource";
+import { CandidateRegistry } from "./CandidateRegistry";
 import { ContextRegistry } from "./ContextRegistry";
 import { ContextSyncer } from "./ContextSyncer";
 import { CurrentContextSession } from "./ContextSessionResolver";
+import type { ContextCandidateInput, ContextSourceResult } from "./ContextSourceDriver";
+import { PromptContextInjector, type PromptInjectionPlan } from "./PromptContextInjector";
 import type { ServerState } from "../server/types";
 
 const WORKSPACE_CONTEXT_LABEL = "Workspace context";
 const WORKSPACE_CONTEXT_SOURCE = "Obsidian workspace";
-const BACKLINK_CONTEXT_LABEL_PREFIX = "Backlinks:";
-const CURSOR_CONTEXT_LABEL_PREFIX = "Cursor:";
+const WORKSPACE_SOURCE_ID = "workspace";
+const WORKSPACE_IDENTITY_KEY = "current";
 
 type ContextManagerDeps = {
   app: App;
@@ -37,8 +44,9 @@ export class ContextManager {
   private contextEventRefs: EventRef[] = [];
   private contextRefreshTimer: number | null = null;
   private registry = new ContextRegistry();
+  private candidateRegistry = new CandidateRegistry();
+  private promptInjector = new PromptContextInjector(this.candidateRegistry);
   private autoSources: ContextAutoSources;
-  private autoItemOperations = new Map<string, Promise<unknown>>();
 
   constructor(deps: ContextManagerDeps) {
     this.app = deps.app;
@@ -50,36 +58,28 @@ export class ContextManager {
     this.currentSession = deps.currentSession;
     this.registerEvent = deps.registerEvent;
     this.autoSources = new ContextAutoSources({
-      isSelectionEnabled: () => this.settings.autoAddSelectionContext,
-      isBacklinksEnabled: () => this.settings.autoAddBacklinksContext,
-      isCursorEnabled: () => this.settings.autoAddCursorContext,
-      addSelection: (selection) =>
-        this.addSelectionForCurrentSession(
-          selection.text,
-          selection.sourcePath,
-          selection.selectionStartLine,
-          selection.selectionEndLine
-        ),
-      addBacklinks: (filePath, text) => this.addBacklinksForCurrentSession(filePath, text),
-      removeBacklinks: () => this.removeBacklinksForCurrentSession(),
-      addCursor: (cursor) => this.addCursorForCurrentSession(cursor),
-      removeCursor: () => this.removeCursorForCurrentSession(),
-      getResolvedLinks: () => this.app.metadataCache.resolvedLinks,
+      isSelectionEnabled: () => this.isSelectionSourceEnabled(),
+      maxSelectionChars: () => this.settings.contextAssist.selection.maxCharsPerSnippet,
     });
+    this.candidateRegistry.setSourceLimit(
+      "selection",
+      this.settings.contextAssist.selection.maxSnippets
+    );
   }
 
   updateSettings(settings: OpenCodeSettings): void {
+    const previous = this.settings;
     this.settings = settings;
+    this.candidateRegistry.setSourceLimit(
+      "selection",
+      settings.contextAssist.selection.maxSnippets
+    );
+    this.clearDisabledCandidates(previous, settings);
     this.updateListeners();
   }
 
   private updateListeners(): void {
-    if (
-      !this.settings.injectWorkspaceContext &&
-      !this.settings.autoAddSelectionContext &&
-      !this.settings.autoAddBacklinksContext &&
-      !this.settings.autoAddCursorContext
-    ) {
+    if (!this.isWorkspaceSourceEnabled() && !this.isSelectionSourceEnabled()) {
       this.clearListeners();
       return;
     }
@@ -91,50 +91,47 @@ export class ContextManager {
     const activeLeafRef = this.app.workspace.on("active-leaf-change", (leaf) => {
       if (leaf?.view instanceof MarkdownView) {
         this.workspaceContext.trackViewSelection(leaf.view);
-        void this.autoSources.handleActiveMarkdownChanged({
-          filePath: leaf.view.file?.path ?? null,
-          cursor: this.getCursorSnapshot(leaf.view),
-        });
+        void this.handleAutoSourceResults(
+          this.autoSources.handleActiveMarkdownChanged({
+            filePath: leaf.view.file?.path ?? null,
+          })
+        );
       }
-      this.scheduleRefresh(0);
+      if (this.isWorkspaceSourceEnabled()) {
+        this.scheduleRefresh(0);
+      }
     });
     const fileOpenRef = this.app.workspace.on("file-open", (file) => {
-      const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-      void this.autoSources.handleActiveMarkdownChanged({
-        filePath: file?.path ?? null,
-        cursor: this.getCursorSnapshot(markdownView),
-      });
-      this.scheduleRefresh();
+      void this.handleAutoSourceResults(
+        this.autoSources.handleActiveMarkdownChanged({
+          filePath: file?.path ?? null,
+        })
+      );
+      if (this.isWorkspaceSourceEnabled()) {
+        this.scheduleRefresh();
+      }
     });
     const layoutChangeRef = this.app.workspace.on("layout-change", () => {
-      this.scheduleRefresh();
+      if (this.isWorkspaceSourceEnabled()) {
+        this.scheduleRefresh();
+      }
     });
     const editorChangeRef = this.app.workspace.on("editor-change", (_editor, view) => {
       if (view instanceof MarkdownView) {
         const selection = this.workspaceContext.trackViewSelection(view);
-        void this.autoSources.handleEditorChanged({
-          filePath: view.file?.path ?? null,
-          selection,
-          cursor: this.getCursorSnapshot(view),
-        });
+        void this.handleAutoSourceResults(
+          this.autoSources.handleEditorChanged({
+            filePath: view.file?.path ?? null,
+            selection,
+          })
+        );
       }
-      this.scheduleRefresh(500);
-    });
-    const metadataChangeRef = this.app.metadataCache.on("changed", () => {
-      void this.autoSources.handleMetadataChanged();
-    });
-    const metadataResolveRef = this.app.metadataCache.on("resolve", () => {
-      void this.autoSources.handleMetadataChanged();
+      if (this.isWorkspaceSourceEnabled()) {
+        this.scheduleRefresh(500);
+      }
     });
 
-    this.contextEventRefs = [
-      activeLeafRef,
-      fileOpenRef,
-      layoutChangeRef,
-      editorChangeRef,
-      metadataChangeRef,
-      metadataResolveRef,
-    ];
+    this.contextEventRefs = [activeLeafRef, fileOpenRef, layoutChangeRef, editorChangeRef];
     this.contextEventRefs.forEach((ref) => this.registerEvent(ref));
   }
 
@@ -216,6 +213,39 @@ export class ContextManager {
     return this.registry.onItemsChanged(callback);
   }
 
+  getCandidates(): ContextCandidate[] {
+    return this.candidateRegistry.getCandidates();
+  }
+
+  onCandidatesChanged(callback: (items: ContextCandidate[]) => void): () => void {
+    return this.candidateRegistry.onCandidatesChanged(callback);
+  }
+
+  toggleCandidate(candidateId: string): ContextCandidate | null {
+    return this.candidateRegistry.toggleIncluded(candidateId);
+  }
+
+  setCandidateIncluded(candidateId: string, included: boolean): ContextCandidate | null {
+    return this.candidateRegistry.setIncluded(candidateId, included);
+  }
+
+  removeCandidate(candidateId: string): ContextCandidate | null {
+    return this.candidateRegistry.remove(candidateId);
+  }
+
+  preparePromptContext(sessionId: string, requestBody: unknown): PromptInjectionPlan | null {
+    this.candidateRegistry.setSession(sessionId);
+    return this.promptInjector.prepare(sessionId, requestBody);
+  }
+
+  completePromptContext(planId: string): void {
+    this.promptInjector.complete(planId);
+  }
+
+  failPromptContext(planId: string, reason: string): void {
+    this.promptInjector.fail(planId, reason);
+  }
+
   async addManual(
     sessionId: string,
     text: string,
@@ -256,86 +286,6 @@ export class ContextManager {
     return this.addSelectionForCurrentSession(text, sourceFile, 1, endLine);
   }
 
-  async addAutoForCurrentSession(params: {
-    label: string;
-    text: string;
-    sourceFile: string;
-    navigationSourceFile?: string;
-  }): Promise<ContextItem | null> {
-    const sessionId = this.currentSession.getCurrentSessionId();
-    if (!sessionId) {
-      return null;
-    }
-
-    return this.addItem({
-      sessionId,
-      type: "auto",
-      label: params.label,
-      text: params.text,
-      sourceFile: params.sourceFile,
-      navigationSourceFile: params.navigationSourceFile,
-    });
-  }
-
-  private async addBacklinksForCurrentSession(
-    filePath: string,
-    text: string
-  ): Promise<ContextItem | null> {
-    const sessionId = this.currentSession.getCurrentSessionId();
-    if (!sessionId) {
-      return null;
-    }
-
-    await this.removeBacklinkAutoItems(sessionId);
-    return this.addItem({
-      sessionId,
-      type: "auto",
-      label: `${BACKLINK_CONTEXT_LABEL_PREFIX} ${filePath}`,
-      text,
-      sourceFile: filePath,
-    });
-  }
-
-  private async removeBacklinksForCurrentSession(): Promise<boolean> {
-    const sessionId = this.currentSession.getCurrentSessionId();
-    if (!sessionId) {
-      return false;
-    }
-
-    await this.removeBacklinkAutoItems(sessionId);
-    return true;
-  }
-
-  private async addCursorForCurrentSession(
-    cursor: CursorContextSnapshot
-  ): Promise<ContextItem | null> {
-    const sessionId = this.currentSession.getCurrentSessionId();
-    if (!sessionId) {
-      return null;
-    }
-
-    await this.removeCursorAutoItems(sessionId);
-    return this.addItem({
-      sessionId,
-      type: "auto",
-      label: `${CURSOR_CONTEXT_LABEL_PREFIX} ${cursor.sourcePath}:${cursor.line}:${cursor.column}`,
-      text: formatCursorContext(cursor),
-      sourceFile: cursor.sourcePath,
-      startLine: cursor.line,
-      endLine: cursor.line,
-    });
-  }
-
-  private async removeCursorForCurrentSession(): Promise<boolean> {
-    const sessionId = this.currentSession.getCurrentSessionId();
-    if (!sessionId) {
-      return false;
-    }
-
-    await this.removeCursorAutoItems(sessionId);
-    return true;
-  }
-
   async removeItem(sessionId: string, itemId: string): Promise<boolean> {
     const item = this.registry.find(itemId);
     if (!item) {
@@ -371,7 +321,7 @@ export class ContextManager {
   }
 
   private async refreshContext(leaf: WorkspaceLeaf): Promise<void> {
-    if (!this.settings.injectWorkspaceContext) {
+    if (!this.isWorkspaceSourceEnabled()) {
       return;
     }
 
@@ -383,31 +333,105 @@ export class ContextManager {
     if (!sessionId) {
       return;
     }
+    this.candidateRegistry.setSession(sessionId);
 
     const snapshot = this.workspaceContext.gatherContext();
     const contextText = formatWorkspaceContext(snapshot, {
-      maxNotes: this.settings.maxNotesInContext,
-      maxSelectionLength: this.settings.maxSelectionLength,
+      maxOpenNotes: this.settings.contextAssist.workspace.maxOpenNotes,
+      includeActiveLocation: this.settings.contextAssist.workspace.includeActiveLocation,
     });
 
     if (!contextText) {
-      await this.removeAutoItem(sessionId, WORKSPACE_CONTEXT_LABEL, WORKSPACE_CONTEXT_SOURCE);
+      this.applySourceResult({
+        type: "remove",
+        sourceId: WORKSPACE_SOURCE_ID,
+        identityKey: WORKSPACE_IDENTITY_KEY,
+      });
       return;
     }
 
-    await this.addItem({
-      sessionId,
-      type: "auto",
-      label: WORKSPACE_CONTEXT_LABEL,
-      text: contextText,
-      sourceFile: WORKSPACE_CONTEXT_SOURCE,
-      ...this.getWorkspaceNavigationTarget(snapshot),
+    this.applySourceResult({
+      type: "upsert",
+      candidate: {
+        sourceId: WORKSPACE_SOURCE_ID,
+        sourceKind: "workspace",
+        identityKey: WORKSPACE_IDENTITY_KEY,
+        fingerprint: contextText,
+        label: WORKSPACE_CONTEXT_LABEL,
+        text: contextText,
+        sourceFile: WORKSPACE_CONTEXT_SOURCE,
+        lifetime: "dynamic",
+        ...this.getWorkspaceNavigationTarget(snapshot),
+      },
     });
+  }
+
+  private async handleAutoSourceResults(
+    resultsPromise: Promise<ContextSourceResult[]>
+  ): Promise<void> {
+    this.applySourceResults(await resultsPromise);
+  }
+
+  private applySourceResults(results: ContextSourceResult[]): void {
+    const sessionId = this.currentSession.getCurrentSessionId();
+    this.candidateRegistry.setSession(sessionId);
+    if (!sessionId) {
+      this.autoSources.reset();
+      return;
+    }
+
+    for (const result of results) {
+      this.applySourceResult(result);
+    }
+  }
+
+  private applySourceResult(result: ContextSourceResult): ContextCandidate | null {
+    if (result.type === "remove") {
+      this.candidateRegistry.removeByIdentity(result.sourceId, result.identityKey);
+      return null;
+    }
+
+    if (result.type === "clear-source") {
+      this.candidateRegistry.clearSource(result.sourceId);
+      return null;
+    }
+
+    if (result.type === "failed") {
+      return this.candidateRegistry.markSourceFailed(
+        result.sourceId,
+        result.identityKey,
+        result.reason
+      );
+    }
+
+    return this.candidateRegistry.upsert(this.createCandidate(result.candidate));
+  }
+
+  private createCandidate(input: ContextCandidateInput): ContextCandidate {
+    const now = Date.now();
+    return {
+      id: `candidate:${input.sourceId}:${input.identityKey}`,
+      sourceId: input.sourceId,
+      sourceKind: input.sourceKind,
+      identityKey: input.identityKey,
+      fingerprint: input.fingerprint,
+      label: input.label,
+      text: input.text,
+      sourceFile: input.sourceFile,
+      navigationSourceFile: input.navigationSourceFile,
+      startLine: input.startLine,
+      endLine: input.endLine,
+      included: true,
+      lifetime: input.lifetime,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    };
   }
 
   private async addItem(params: {
     sessionId: string;
-    type: ContextItem["type"];
+    type: "manual";
     label: string;
     text: string;
     sourceFile: string;
@@ -420,10 +444,6 @@ export class ContextManager {
       return null;
     }
 
-    if (params.type === "auto") {
-      return this.replaceAutoItem({ ...params, type: "auto", text });
-    }
-
     if (!this.registry.canAdd()) {
       return null;
     }
@@ -431,79 +451,6 @@ export class ContextManager {
     const item = await this.syncer.add({ ...params, text });
 
     return item ? this.registry.add(item) : null;
-  }
-
-  private async replaceAutoItem(params: {
-    sessionId: string;
-    type: "auto";
-    label: string;
-    text: string;
-    sourceFile: string;
-    navigationSourceFile?: string;
-    startLine?: number;
-    endLine?: number;
-  }): Promise<ContextItem | null> {
-    const key = this.autoItemKey(params.sessionId, params.label, params.sourceFile);
-    return this.runAutoItemOperation(key, async () => {
-      const items = this.findAutoItems(params.label, params.sourceFile);
-      const current = this.latestItem(items);
-
-      if (current?.text === params.text) {
-        for (const stale of items) {
-          if (stale.id !== current.id) {
-            await this.removeItem(params.sessionId, stale.id);
-          }
-        }
-        return current;
-      }
-
-      for (const item of items) {
-        const removed = await this.removeItem(params.sessionId, item.id);
-        if (!removed) {
-          return null;
-        }
-      }
-
-      if (!this.registry.canAdd()) {
-        return null;
-      }
-
-      const item = await this.syncer.add(params);
-      return item ? this.registry.add(item) : null;
-    });
-  }
-
-  private async removeAutoItem(
-    sessionId: string,
-    label: string,
-    sourceFile: string
-  ): Promise<void> {
-    const key = this.autoItemKey(sessionId, label, sourceFile);
-    await this.runAutoItemOperation(key, async () => {
-      const items = this.findAutoItems(label, sourceFile);
-      for (const item of items) {
-        await this.removeItem(sessionId, item.id);
-      }
-      return null;
-    });
-  }
-
-  private async removeBacklinkAutoItems(sessionId: string): Promise<void> {
-    const items = this.registry.findAll(
-      (item) => item.type === "auto" && item.label.startsWith(BACKLINK_CONTEXT_LABEL_PREFIX)
-    );
-    for (const item of items) {
-      await this.removeItem(sessionId, item.id);
-    }
-  }
-
-  private async removeCursorAutoItems(sessionId: string): Promise<void> {
-    const items = this.registry.findAll(
-      (item) => item.type === "auto" && item.label.startsWith(CURSOR_CONTEXT_LABEL_PREFIX)
-    );
-    for (const item of items) {
-      await this.removeItem(sessionId, item.id);
-    }
   }
 
   private formatContextLabel(sourceFile: string, startLine?: number, endLine?: number): string {
@@ -557,26 +504,6 @@ export class ContextManager {
     return result;
   }
 
-  private runAutoItemOperation<T>(key: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.autoItemOperations.get(key) ?? Promise.resolve();
-    const current = previous
-      .catch(() => undefined)
-      .then(operation)
-      .finally(() => {
-        if (this.autoItemOperations.get(key) === current) {
-          this.autoItemOperations.delete(key);
-        }
-      });
-    this.autoItemOperations.set(key, current);
-    return current;
-  }
-
-  private findAutoItems(label: string, sourceFile: string): ContextItem[] {
-    return this.registry.findAll(
-      (item) => item.type === "auto" && item.label === label && item.sourceFile === sourceFile
-    );
-  }
-
   private latestItem(items: ContextItem[]): ContextItem | null {
     return items.reduce<ContextItem | null>((latest, item) => {
       if (!latest || item.createdAt >= latest.createdAt) {
@@ -590,16 +517,39 @@ export class ContextManager {
     return JSON.stringify([sessionId, label, sourceFile]);
   }
 
+  private clearDisabledCandidates(previous: OpenCodeSettings, next: OpenCodeSettings): void {
+    if (previous.contextAssist.enabled && !next.contextAssist.enabled) {
+      this.candidateRegistry.clear();
+      this.autoSources.reset();
+      return;
+    }
+
+    if (
+      previous.contextAssist.workspace.enabled &&
+      (!next.contextAssist.enabled || !next.contextAssist.workspace.enabled)
+    ) {
+      this.candidateRegistry.clearSource(WORKSPACE_SOURCE_ID);
+    }
+
+    if (
+      previous.contextAssist.selection.enabled &&
+      (!next.contextAssist.enabled || !next.contextAssist.selection.enabled)
+    ) {
+      this.candidateRegistry.clearSource("selection");
+      this.autoSources.stopSelection();
+    }
+  }
+
   private getWorkspaceNavigationTarget(snapshot: WorkspaceContextSnapshot): {
     navigationSourceFile?: string;
     startLine?: number;
     endLine?: number;
   } {
-    if (snapshot.selection) {
+    if (snapshot.activeLocation) {
       return {
-        navigationSourceFile: snapshot.selection.sourcePath,
-        startLine: snapshot.selection.selectionStartLine,
-        endLine: snapshot.selection.selectionEndLine,
+        navigationSourceFile: snapshot.activeLocation.sourcePath,
+        startLine: snapshot.activeLocation.line,
+        endLine: snapshot.activeLocation.line,
       };
     }
 
@@ -612,18 +562,12 @@ export class ContextManager {
     return {};
   }
 
-  private getCursorSnapshot(view: MarkdownView | null): CursorContextSnapshot | null {
-    const sourcePath = view?.file?.path;
-    const cursor = view?.editor?.getCursor?.();
-    if (!sourcePath || !cursor) {
-      return null;
-    }
+  private isWorkspaceSourceEnabled(): boolean {
+    return this.settings.contextAssist.enabled && this.settings.contextAssist.workspace.enabled;
+  }
 
-    return {
-      sourcePath,
-      line: cursor.line + 1,
-      column: cursor.ch + 1,
-    };
+  private isSelectionSourceEnabled(): boolean {
+    return this.settings.contextAssist.enabled && this.settings.contextAssist.selection.enabled;
   }
 
   destroy(): void {

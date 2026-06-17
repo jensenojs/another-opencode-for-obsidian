@@ -1,6 +1,7 @@
 import { Notice, getLinkpath, parseLinktext, type App, type OpenViewState } from "obsidian";
 import type { GraphIndex, GraphReference, GraphSubpathKind } from "../graph/GraphIndex";
-import type { ContextItem } from "../types";
+import type { ContextCandidate, ContextItem } from "../types";
+import { getText } from "../i18n";
 
 export type ContextNavigationUnresolvedReason =
   | "empty-source"
@@ -28,6 +29,11 @@ export type ContextNavigationResolution =
 
 const SYNTHETIC_CONTEXT_SOURCES = new Set(["Obsidian workspace", "OpenCode session"]);
 
+export type ContextNavigationSource = Pick<
+  ContextItem | ContextCandidate,
+  "sourceFile" | "navigationSourceFile" | "startLine" | "endLine"
+>;
+
 // Production entry for Obsidian evidence navigation. It only opens resolved TFiles.
 export class ContextItemNavigator {
   constructor(
@@ -35,7 +41,7 @@ export class ContextItemNavigator {
     private graphIndex?: GraphIndex
   ) {}
 
-  resolve(item: ContextItem): ContextNavigationResolution {
+  resolve(item: ContextNavigationSource): ContextNavigationResolution {
     const sourceFile = item.navigationSourceFile ?? item.sourceFile;
     return this.resolveSource(sourceFile, item.startLine);
   }
@@ -103,7 +109,7 @@ export class ContextItemNavigator {
     };
   }
 
-  async open(item: ContextItem): Promise<ContextNavigationResult> {
+  async open(item: ContextNavigationSource): Promise<ContextNavigationResult> {
     const resolution = this.resolve(item);
     return this.openResolution(resolution, item.navigationSourceFile ?? item.sourceFile);
   }
@@ -153,10 +159,11 @@ export class ContextItemNavigator {
 }
 
 export function formatNavigationResolution(resolution: ContextNavigationResolution): string {
+  const text = getText();
   if (resolution.status === "resolved") {
     return resolution.line === null
-      ? "source resolved"
-      : `source resolved at line ${resolution.line + 1}`;
+      ? text.context.sourceResolved
+      : text.context.sourceResolvedAtLine(resolution.line + 1);
   }
   return formatUnresolvedReason(resolution);
 }
@@ -166,31 +173,32 @@ export function noticeContextNavigationResult(result: ContextNavigationResult): 
     return;
   }
 
-  new Notice(`OpenCode context source unavailable: ${formatUnresolvedReason(result)}`);
+  new Notice(getText().notices.contextSourceUnavailable(formatUnresolvedReason(result)));
 }
 
 export function formatUnresolvedReason(
   result: Extract<ContextNavigationResult, { status: "unresolved" }>
 ): string {
+  const text = getText();
   switch (result.reason) {
     case "empty-source":
-      return "empty source";
+      return text.context.unresolved.emptySource;
     case "synthetic-source":
-      return `${result.sourceFile} is a synthetic source`;
+      return text.context.unresolved.syntheticSource(result.sourceFile);
     case "external-url":
-      return `${result.sourceFile} is outside this vault`;
+      return text.context.unresolved.externalUrl(result.sourceFile);
     case "missing-file":
-      return `${result.sourceFile} does not exist in this vault`;
+      return text.context.unresolved.missingFile(result.sourceFile);
     case "folder":
-      return `${result.sourceFile} is a folder`;
+      return text.context.unresolved.folder(result.sourceFile);
     case "unresolved-heading":
-      return `${result.sourceFile} contains an unresolved heading reference`;
+      return text.context.unresolved.unresolvedHeading(result.sourceFile);
     case "unresolved-block":
-      return `${result.sourceFile} contains an unresolved block reference`;
+      return text.context.unresolved.unresolvedBlock(result.sourceFile);
     case "unresolved-footnote":
-      return `${result.sourceFile} contains an unresolved footnote reference`;
+      return text.context.unresolved.unresolvedFootnote(result.sourceFile);
     case "unresolved-subpath":
-      return `${result.sourceFile} contains an unresolved subpath reference`;
+      return text.context.unresolved.unresolvedSubpath(result.sourceFile);
   }
 }
 

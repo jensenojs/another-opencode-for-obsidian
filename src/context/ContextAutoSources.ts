@@ -1,81 +1,71 @@
-import type { ContextItem } from "../types";
 import type { SelectedTextContext } from "./ContextFormatter";
-import { AutoSelectionContextSource } from "./AutoSelectionContextSource";
-import { BacklinkContextSource, type ResolvedLinks } from "./BacklinkContextSource";
-import { CursorContextSource, type CursorContextSnapshot } from "./CursorContextSource";
+import { AutoSelectionContextSource, SELECTION_SOURCE_ID } from "./AutoSelectionContextSource";
+import type { ContextSourceResult } from "./ContextSourceDriver";
 
 interface ContextAutoSourcesDeps {
   isSelectionEnabled: () => boolean;
-  isBacklinksEnabled: () => boolean;
-  isCursorEnabled: () => boolean;
-  addSelection: (selection: SelectedTextContext) => Promise<ContextItem | null>;
-  addBacklinks: (filePath: string, text: string) => Promise<ContextItem | null>;
-  removeBacklinks: () => Promise<boolean>;
-  addCursor: (cursor: CursorContextSnapshot) => Promise<ContextItem | null>;
-  removeCursor: () => Promise<boolean>;
-  getResolvedLinks: () => ResolvedLinks;
+  maxSelectionChars: () => number;
 }
 
 export class ContextAutoSources {
-  private activeMarkdownPath: string | null = null;
   private selectionSource: AutoSelectionContextSource;
-  private backlinkSource: BacklinkContextSource;
-  private cursorSource: CursorContextSource;
 
   constructor(private deps: ContextAutoSourcesDeps) {
     this.selectionSource = new AutoSelectionContextSource({
       isEnabled: deps.isSelectionEnabled,
-      addSelection: deps.addSelection,
-    });
-    this.backlinkSource = new BacklinkContextSource({
-      isEnabled: deps.isBacklinksEnabled,
-      addBacklinks: (params) => deps.addBacklinks(params.filePath, params.text),
-      removeBacklinks: deps.removeBacklinks,
-    });
-    this.cursorSource = new CursorContextSource({
-      isEnabled: deps.isCursorEnabled,
-      addCursor: deps.addCursor,
-      removeCursor: deps.removeCursor,
+      maxCharsPerSnippet: deps.maxSelectionChars,
     });
   }
 
-  async handleActiveMarkdownChanged(params: {
+  async handleActiveMarkdownChanged(_params: {
     filePath: string | null;
-    cursor: CursorContextSnapshot | null;
-  }): Promise<void> {
-    this.activeMarkdownPath = params.filePath;
-    await Promise.all([this.refreshBacklinks(), this.refreshCursor(params.cursor)]);
+  }): Promise<ContextSourceResult[]> {
+    return [];
   }
 
   async handleEditorChanged(params: {
     filePath: string | null;
     selection: SelectedTextContext | null;
-    cursor: CursorContextSnapshot | null;
-  }): Promise<void> {
-    this.activeMarkdownPath = params.filePath;
-    await Promise.all([
-      this.selectionSource.handleSelection(params.selection),
-      this.refreshBacklinks(),
-      this.refreshCursor(params.cursor),
-    ]);
+  }): Promise<ContextSourceResult[]> {
+    return [this.refreshSelection(params.selection)].filter(isContextSourceResult);
   }
 
-  async handleMetadataChanged(): Promise<void> {
-    await this.refreshBacklinks();
+  async handleMetadataChanged(): Promise<ContextSourceResult[]> {
+    return [];
   }
 
   reset(): void {
-    this.activeMarkdownPath = null;
     this.selectionSource.reset();
-    this.backlinkSource.reset();
-    this.cursorSource.reset();
   }
 
-  private async refreshBacklinks(): Promise<void> {
-    await this.backlinkSource.refresh(this.activeMarkdownPath, this.deps.getResolvedLinks());
+  stopSelection(): void {
+    this.selectionSource.stop();
   }
 
-  private async refreshCursor(cursor: CursorContextSnapshot | null): Promise<void> {
-    await this.cursorSource.refresh(cursor);
+  private refreshSelection(selection: SelectedTextContext | null): ContextSourceResult | null {
+    return this.runSource(
+      () => this.selectionSource.handleSelection(selection),
+      SELECTION_SOURCE_ID
+    );
   }
+
+  private runSource(
+    refresh: () => ContextSourceResult | null,
+    sourceId: string
+  ): ContextSourceResult | null {
+    try {
+      return refresh();
+    } catch (error) {
+      return {
+        type: "failed",
+        sourceId,
+        identityKey: "source-error",
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+}
+
+function isContextSourceResult(result: ContextSourceResult | null): result is ContextSourceResult {
+  return result !== null;
 }

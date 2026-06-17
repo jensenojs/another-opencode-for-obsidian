@@ -1,10 +1,10 @@
-import { beforeAll, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
 import { Window } from "happy-dom";
 import type {
   ContextStatusBar as ContextStatusBarClass,
   formatContextDiagnostics as formatContextDiagnosticsFn,
 } from "../../src/context/ContextStatusBar";
-import type { ContextItem } from "../../src/types";
+import type { ContextCandidate, ContextItem } from "../../src/types";
 
 mock.module("obsidian", () => ({
   addIcon: () => {},
@@ -28,10 +28,16 @@ mock.module("obsidian", () => ({
 
 let ContextStatusBar: typeof ContextStatusBarClass;
 let formatContextDiagnostics: typeof formatContextDiagnosticsFn;
+let setPluginLanguageForTests: (language: string | null) => void;
 
 beforeAll(async () => {
   ({ ContextStatusBar, formatContextDiagnostics } =
     await import("../../src/context/ContextStatusBar"));
+  ({ setPluginLanguageForTests } = await import("../../src/i18n"));
+});
+
+afterEach(() => {
+  setPluginLanguageForTests?.(null);
 });
 
 class FakeStatusElement {
@@ -115,6 +121,24 @@ const folderItem: ContextItem = {
   createdAt: 890,
 };
 
+const candidateItem: ContextCandidate = {
+  id: "candidate:selection:latest",
+  sourceId: "selection",
+  sourceKind: "selection",
+  identityKey: "latest",
+  fingerprint: "candidate-fingerprint",
+  label: "Selection candidate",
+  text: "candidate content",
+  sourceFile: "candidate.md",
+  startLine: 7,
+  endLine: 9,
+  included: true,
+  lifetime: "one-shot",
+  status: "active",
+  createdAt: 1000,
+  updatedAt: 1000,
+};
+
 describe("ContextStatusBar", () => {
   test("renders the active context count from ContextManager updates", () => {
     const statusEl = new FakeStatusElement();
@@ -143,7 +167,7 @@ describe("ContextStatusBar", () => {
 
     expect(statusEl.text).toBe("OpenCode ctx 1");
     expect(statusEl.classes.has("is-active")).toBe(true);
-    expect(statusEl.title).toBe("1 OpenCode context item");
+    expect(statusEl.title).toBe("1 committed, 0 candidate OpenCode context item");
 
     statusBar.destroy();
 
@@ -154,7 +178,10 @@ describe("ContextStatusBar", () => {
   test("formats context diagnostics without copying full context text", () => {
     const payload = JSON.parse(formatContextDiagnostics([manualItem]));
 
+    expect(payload.committedCount).toBe(1);
+    expect(payload.candidateCount).toBe(0);
     expect(payload.itemCount).toBe(1);
+    expect(payload.candidates).toEqual([]);
     expect(payload.items[0]).toEqual({
       id: "msg_1:prt_1",
       type: "manual",
@@ -335,6 +362,177 @@ describe("ContextStatusBar", () => {
     });
   });
 
+  test("renders candidates separately from committed context without an attach action", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const removedCandidates: string[] = [];
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [manualItem],
+        onItemsChanged: (callback) => {
+          callback([manualItem]);
+          return () => {};
+        },
+        getCandidates: () => [candidateItem],
+        onCandidatesChanged: (callback) => {
+          callback([candidateItem]);
+          return () => {};
+        },
+        toggleCandidate: () => null,
+        removeCandidate: (candidateId) => {
+          removedCandidates.push(candidateId);
+          return candidateItem;
+        },
+        resolveItem: (item) => ({ status: "resolved", path: item.sourceFile, line: null }),
+        openItem: async (item) => ({ status: "opened", path: item.sourceFile, line: null }),
+        removeItem: async () => true,
+      });
+
+      expect(statusEl.textContent).toBe("OpenCode ctx 1 +1");
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(window.document.body.textContent).toContain("Next message will include");
+      expect(window.document.body.textContent).toContain("Current session context");
+      expect(window.document.querySelectorAll(".opencode-ctx-candidate")).toHaveLength(1);
+      expect(window.document.body.textContent).toContain("included");
+      expect(window.document.body.textContent).not.toContain("Attach");
+      expect(window.document.querySelector(".opencode-ctx-attach")).toBeNull();
+
+      const removeCandidateButton = window.document.querySelector(".opencode-ctx-candidate-remove");
+      removeCandidateButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(removedCandidates).toEqual(["candidate:selection:latest"]);
+
+      statusBar.destroy();
+    });
+  });
+
+  test("candidate toggle delegates locally and does not remove committed context", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const toggled: string[] = [];
+      const removed: string[] = [];
+      const skippedCandidate = { ...candidateItem, included: false };
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [manualItem],
+        onItemsChanged: (callback) => {
+          callback([manualItem]);
+          return () => {};
+        },
+        getCandidates: () => [skippedCandidate],
+        onCandidatesChanged: (callback) => {
+          callback([skippedCandidate]);
+          return () => {};
+        },
+        toggleCandidate: (candidateId) => {
+          toggled.push(candidateId);
+          return { ...skippedCandidate, included: true };
+        },
+        resolveItem: (item) => ({ status: "resolved", path: item.sourceFile, line: null }),
+        openItem: async (item) => ({ status: "opened", path: item.sourceFile, line: null }),
+        removeItem: async (itemId) => {
+          removed.push(itemId);
+          return true;
+        },
+      });
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const candidateToggle = window.document.querySelector(".opencode-ctx-candidate-toggle");
+      candidateToggle?.dispatchEvent(new window.Event("click", { bubbles: true }));
+
+      expect(toggled).toEqual(["candidate:selection:latest"]);
+      expect(removed).toEqual([]);
+      expect(window.document.body.textContent).toContain("Include");
+
+      statusBar.destroy();
+    });
+  });
+
+  test("renders candidate controls in the Obsidian language", async () => {
+    setPluginLanguageForTests("zh-CN");
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [manualItem],
+        onItemsChanged: (callback) => {
+          callback([manualItem]);
+          return () => {};
+        },
+        getCandidates: () => [candidateItem],
+        onCandidatesChanged: (callback) => {
+          callback([candidateItem]);
+          return () => {};
+        },
+        toggleCandidate: () => null,
+        resolveItem: (item) => ({ status: "resolved", path: item.sourceFile, line: null }),
+        openItem: async (item) => ({ status: "opened", path: item.sourceFile, line: null }),
+        removeItem: async () => true,
+      });
+
+      expect(statusEl.textContent).toBe("OpenCode 上下文 1 +1");
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(window.document.body.textContent).toContain("下一条消息将包含");
+      expect(window.document.body.textContent).toContain("当前 session 上下文");
+      expect(window.document.body.textContent).toContain("已包含");
+      expect(window.document.body.textContent).not.toContain("附加");
+      expect(window.document.body.textContent).toContain("跳过");
+
+      statusBar.destroy();
+    });
+  });
+
+  test("formats candidate diagnostics without copying candidate text", () => {
+    const payload = JSON.parse(
+      formatContextDiagnostics(
+        [manualItem],
+        (item) => ({ status: "resolved", path: item.sourceFile, line: null }),
+        [candidateItem]
+      )
+    );
+
+    expect(payload.committedCount).toBe(1);
+    expect(payload.candidateCount).toBe(1);
+    expect(payload.candidates[0]).toMatchObject({
+      id: "candidate:selection:latest",
+      sourceId: "selection",
+      sourceKind: "selection",
+      identityKey: "latest",
+      fingerprint: "candidate-fingerprint",
+      label: "Selection candidate",
+      sourceFile: "candidate.md",
+      navigationSourceFile: null,
+      startLine: 7,
+      endLine: 9,
+      included: true,
+      lifetime: "one-shot",
+      status: "active",
+      statusReason: null,
+      textLength: "candidate content".length,
+      navigation: {
+        status: "resolved",
+        path: "candidate.md",
+        line: null,
+      },
+      createdAt: "1970-01-01T00:00:01.000Z",
+      updatedAt: "1970-01-01T00:00:01.000Z",
+    });
+    expect(JSON.stringify(payload)).not.toContain("candidate content");
+    expect(JSON.stringify(payload)).not.toContain("selected text");
+  });
+
   test("renders unresolved navigation reasons for missing files, folders, and synthetic sources", async () => {
     await withContextStatusBarDom(async (window) => {
       const statusEl = window.document.createElement("div");
@@ -427,7 +625,7 @@ describe("ContextStatusBar", () => {
       expect(row).toBeTruthy();
       expect(row?.getAttribute("role")).toBe("button");
       expect(row?.getAttribute("tabindex")).toBe("0");
-      expect(row?.getAttribute("aria-pressed")).toBe("false");
+      expect(row?.getAttribute("aria-expanded")).toBe("false");
       expect(window.document.body.textContent).not.toContain("Open source");
 
       row?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
@@ -470,15 +668,15 @@ describe("ContextStatusBar", () => {
       await new Promise((resolve) => setTimeout(resolve, 220));
 
       expect(opened).toEqual([]);
-      expect(row?.classList.contains("is-selected")).toBe(true);
-      expect(row?.getAttribute("aria-pressed")).toBe("true");
+      expect(row?.classList.contains("is-expanded")).toBe(true);
+      expect(row?.getAttribute("aria-expanded")).toBe("true");
       expect(window.document.body.textContent).toContain("provenance known");
       expect(window.document.body.textContent).toContain("13 chars");
 
       row?.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
 
-      expect(row?.classList.contains("is-selected")).toBe(false);
-      expect(row?.getAttribute("aria-pressed")).toBe("false");
+      expect(row?.classList.contains("is-expanded")).toBe(false);
+      expect(row?.getAttribute("aria-expanded")).toBe("false");
       expect(window.document.body.textContent).not.toContain("provenance known");
       expect(window.document.body.textContent).not.toContain("13 chars");
 

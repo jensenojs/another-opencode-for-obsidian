@@ -27,6 +27,19 @@ export function summarizeSettings(data: any): unknown {
       : "path",
     webViewAppearance: data.webViewAppearance,
     projectDirectory: data.projectDirectory,
+    contextAssist: {
+      enabled: data.contextAssist?.enabled ?? null,
+      workspace: {
+        enabled: data.contextAssist?.workspace?.enabled ?? null,
+        maxOpenNotes: data.contextAssist?.workspace?.maxOpenNotes ?? null,
+        includeActiveLocation: data.contextAssist?.workspace?.includeActiveLocation ?? null,
+      },
+      selection: {
+        enabled: data.contextAssist?.selection?.enabled ?? null,
+        maxSnippets: data.contextAssist?.selection?.maxSnippets ?? null,
+        maxCharsPerSnippet: data.contextAssist?.selection?.maxCharsPerSnippet ?? null,
+      },
+    },
     startupTimeout: data.startupTimeout,
     lastSessionUrl: data.lastSessionUrl,
   };

@@ -21,7 +21,7 @@ export class ViewManager {
   private client: OpenCodeClient;
   private contextManager: ContextManager;
   private currentSession: CurrentContextSession;
-  private getServerState: () => string;
+  private getServerState: () => ServerState;
   private previousEditorLeaf: WorkspaceLeaf | null = null;
 
   constructor(deps: ViewManagerDeps) {

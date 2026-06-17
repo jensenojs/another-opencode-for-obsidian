@@ -5,6 +5,7 @@ import { OPENCODE_ICON_NAME } from "../icons";
 import type OpenCodePlugin from "../main";
 import type { ServerState } from "../server/types";
 import { createLogger } from "../debug/RuntimeDiagnostics";
+import { getText } from "../i18n";
 
 const THEME_SYNC_DELAYS_MS = [0, 250, 1000, 2500] as const;
 const THEME_SYNC_HISTORY_LIMIT = 80;
@@ -112,6 +113,7 @@ export class OpenCodeView extends ItemView {
   }
 
   private renderStoppedState(): void {
+    const text = getText();
     this.contentEl.empty();
 
     const statusContainer = this.contentEl.createDiv({
@@ -121,14 +123,14 @@ export class OpenCodeView extends ItemView {
     const iconEl = statusContainer.createDiv({ cls: "opencode-status-icon" });
     setIcon(iconEl, "power-off");
 
-    statusContainer.createEl("h3", { text: "OpenCode is stopped" });
+    statusContainer.createEl("h3", { text: text.view.stoppedTitle });
     statusContainer.createEl("p", {
-      text: "Click the button below to start the OpenCode server.",
+      text: text.view.stoppedMessage,
       cls: "opencode-status-message",
     });
 
     const startButton = statusContainer.createEl("button", {
-      text: "Start OpenCode",
+      text: text.view.startOpenCode,
       cls: "mod-cta",
     });
     startButton.addEventListener("click", () => {
@@ -137,6 +139,7 @@ export class OpenCodeView extends ItemView {
   }
 
   private renderStartingState(): void {
+    const text = getText();
     this.contentEl.empty();
 
     const statusContainer = this.contentEl.createDiv({
@@ -146,9 +149,9 @@ export class OpenCodeView extends ItemView {
     const loadingEl = statusContainer.createDiv({ cls: "opencode-loading" });
     loadingEl.createDiv({ cls: "opencode-spinner" });
 
-    statusContainer.createEl("h3", { text: "Starting OpenCode..." });
+    statusContainer.createEl("h3", { text: text.view.startingTitle });
     statusContainer.createEl("p", {
-      text: "Please wait while the server starts up.",
+      text: text.view.startingMessage,
       cls: "opencode-status-message",
     });
   }
@@ -286,6 +289,7 @@ export class OpenCodeView extends ItemView {
   }
 
   private renderErrorState(): void {
+    const text = getText();
     this.contentEl.empty();
     const diagnostics = this.plugin.getServerDiagnostics();
 
@@ -296,7 +300,7 @@ export class OpenCodeView extends ItemView {
     const iconEl = statusContainer.createDiv({ cls: "opencode-status-icon" });
     setIcon(iconEl, "alert-circle");
 
-    statusContainer.createEl("h3", { text: "Failed to start OpenCode" });
+    statusContainer.createEl("h3", { text: text.view.failedTitle });
 
     const errorMessage = diagnostics.lastError;
     if (errorMessage) {
@@ -306,7 +310,7 @@ export class OpenCodeView extends ItemView {
       });
     } else {
       statusContainer.createEl("p", {
-        text: "There was an error starting the OpenCode server.",
+        text: text.view.genericStartError,
         cls: "opencode-status-message",
       });
     }
@@ -322,20 +326,37 @@ export class OpenCodeView extends ItemView {
       cls: "opencode-diagnostics",
     });
 
-    this.createDiagnosticRow(detailsContainer, "Mode", diagnostics.lastStartMode);
-    this.createDiagnosticRow(detailsContainer, "Command", diagnostics.lastDisplayCommand);
-    this.createDiagnosticRow(detailsContainer, "Working directory", diagnostics.lastCwd);
-    this.createDiagnosticRow(detailsContainer, "Health check", diagnostics.lastHealthError);
-    this.createDiagnosticRow(detailsContainer, "Stderr", diagnostics.lastStderr, true);
-    this.createDiagnosticRow(detailsContainer, "Log", diagnostics.logFile);
-    this.createDiagnosticRow(detailsContainer, "Status", diagnostics.statusFile);
+    this.createDiagnosticRow(detailsContainer, text.view.diagnosticMode, diagnostics.lastStartMode);
+    this.createDiagnosticRow(
+      detailsContainer,
+      text.view.diagnosticCommand,
+      diagnostics.lastDisplayCommand
+    );
+    this.createDiagnosticRow(
+      detailsContainer,
+      text.view.diagnosticWorkingDirectory,
+      diagnostics.lastCwd
+    );
+    this.createDiagnosticRow(
+      detailsContainer,
+      text.view.diagnosticHealthCheck,
+      diagnostics.lastHealthError
+    );
+    this.createDiagnosticRow(
+      detailsContainer,
+      text.view.diagnosticStderr,
+      diagnostics.lastStderr,
+      true
+    );
+    this.createDiagnosticRow(detailsContainer, text.view.diagnosticLog, diagnostics.logFile);
+    this.createDiagnosticRow(detailsContainer, text.view.diagnosticStatus, diagnostics.statusFile);
 
     const buttonContainer = statusContainer.createDiv({
       cls: "opencode-button-group",
     });
 
     const retryButton = buttonContainer.createEl("button", {
-      text: "Retry",
+      text: text.view.retry,
       cls: "mod-cta",
     });
     retryButton.addEventListener("click", () => {
@@ -343,7 +364,7 @@ export class OpenCodeView extends ItemView {
     });
 
     const settingsButton = buttonContainer.createEl("button", {
-      text: "Open Settings",
+      text: text.view.openSettings,
     });
     settingsButton.addEventListener("click", () => {
       (this.app as any).setting.open();
@@ -351,7 +372,7 @@ export class OpenCodeView extends ItemView {
     });
 
     const copyButton = buttonContainer.createEl("button", {
-      text: "Copy diagnostics",
+      text: text.view.copyDiagnostics,
     });
     copyButton.addEventListener("click", () => {
       void this.plugin.copyServerDiagnosticsToClipboard();

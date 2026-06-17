@@ -1,10 +1,13 @@
 import { App, MarkdownView } from "obsidian";
-import type { SelectedTextContext, WorkspaceContextSnapshot } from "./ContextFormatter";
+import type {
+  SelectedTextContext,
+  WorkspaceActiveLocation,
+  WorkspaceContextSnapshot,
+} from "./ContextFormatter";
 import { getSelectionLineRange } from "./SelectionLineRange";
 
 export class WorkspaceContext {
   private app: App;
-  private lastSelection: SelectedTextContext | null = null;
   private lastMarkdownView: MarkdownView | null = null;
 
   constructor(app: App) {
@@ -17,9 +20,6 @@ export class WorkspaceContext {
     }
 
     const selectionContext = this.getSelectionContext(view);
-    if (selectionContext) {
-      this.lastSelection = selectionContext;
-    }
     return selectionContext;
   }
 
@@ -38,16 +38,23 @@ export class WorkspaceContext {
     const openNotePaths = Array.from(paths);
     const view = this.app.workspace.getActiveViewOfType(MarkdownView) ?? this.lastMarkdownView;
 
-    this.trackViewSelection(view);
+    return {
+      openNotePaths,
+      activeLocation: this.getActiveLocation(view),
+    };
+  }
 
-    const selectionContext = this.getSelectionContext(view) ?? this.lastSelection;
-    if (selectionContext) {
-      this.lastSelection = selectionContext;
+  private getActiveLocation(view: MarkdownView | null): WorkspaceActiveLocation | null {
+    const sourcePath = view?.file?.path;
+    const cursor = view?.editor?.getCursor?.();
+
+    if (!view || !sourcePath || !cursor) {
+      return null;
     }
 
     return {
-      openNotePaths,
-      selection: selectionContext,
+      sourcePath,
+      line: cursor.line + 1,
     };
   }
 
