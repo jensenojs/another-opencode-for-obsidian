@@ -13,6 +13,7 @@ type ViewManagerDeps = {
   contextManager: ContextManager;
   currentSession: CurrentContextSession;
   getServerState: () => ServerState;
+  startServer: () => void;
 };
 
 export class ViewManager {
@@ -22,6 +23,7 @@ export class ViewManager {
   private contextManager: ContextManager;
   private currentSession: CurrentContextSession;
   private getServerState: () => ServerState;
+  private startServer: () => void;
   private previousEditorLeaf: WorkspaceLeaf | null = null;
 
   constructor(deps: ViewManagerDeps) {
@@ -31,6 +33,7 @@ export class ViewManager {
     this.contextManager = deps.contextManager;
     this.currentSession = deps.currentSession;
     this.getServerState = deps.getServerState;
+    this.startServer = deps.startServer;
   }
 
   updateSettings(settings: OpenCodeSettings): void {
@@ -47,6 +50,7 @@ export class ViewManager {
 
     if (existingLeaf) {
       this.app.workspace.revealLeaf(existingLeaf);
+      this.startServerForUserActivation();
       return;
     }
 
@@ -61,10 +65,17 @@ export class ViewManager {
         active: true,
       });
       this.app.workspace.revealLeaf(leaf);
+      this.startServerForUserActivation();
       const view = leaf.view;
       if (view instanceof OpenCodeView) {
         requestAnimationFrame(() => view.focusIframe());
       }
+    }
+  }
+
+  private startServerForUserActivation(): void {
+    if (this.getServerState() === "stopped") {
+      this.startServer();
     }
   }
 
@@ -85,6 +96,7 @@ export class ViewManager {
           } else {
             this.app.workspace.revealLeaf(existingLeaf);
             this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+            this.startServerForUserActivation();
             const view = existingLeaf.view;
             if (view instanceof OpenCodeView) {
               requestAnimationFrame(() => view.focusIframe());
@@ -97,6 +109,7 @@ export class ViewManager {
           }
           this.app.workspace.revealLeaf(existingLeaf);
           this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+          this.startServerForUserActivation();
           const view = existingLeaf.view;
           if (view instanceof OpenCodeView) {
             requestAnimationFrame(() => view.focusIframe());
@@ -115,6 +128,7 @@ export class ViewManager {
           }
           this.app.workspace.revealLeaf(existingLeaf);
           this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+          this.startServerForUserActivation();
           const view = existingLeaf.view;
           if (view instanceof OpenCodeView) {
             requestAnimationFrame(() => view.focusIframe());

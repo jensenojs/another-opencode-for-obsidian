@@ -179,6 +179,9 @@ export default class OpenCodePlugin extends Plugin {
       contextManager: this.contextManager,
       currentSession: this.currentContextSession,
       getServerState: () => this.getServerState(),
+      startServer: () => {
+        void this.startServer();
+      },
     });
 
     this.logger.info("configured project directory", { projectDirectory });

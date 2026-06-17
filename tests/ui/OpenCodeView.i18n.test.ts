@@ -47,6 +47,25 @@ describe("OpenCodeView i18n", () => {
       expect(window.document.body.textContent).toContain("点击下面的按钮启动 OpenCode 服务器。");
     });
   });
+
+  test("does not start the server when Obsidian restores the view", async () => {
+    await withViewDom(async () => {
+      let startCount = 0;
+      const view = new OpenCodeView(
+        { app: {}, getRoot: () => null } as any,
+        fakePlugin({
+          startServer: () => {
+            startCount += 1;
+          },
+        }) as any
+      );
+
+      await view.onOpen();
+
+      expect(startCount).toBe(0);
+      expect(document.body.textContent).toContain("OpenCode is stopped");
+    });
+  });
 });
 
 function withViewDom(run: (window: Window) => void | Promise<void>): void | Promise<void> {

@@ -66,10 +66,6 @@ export class OpenCodeView extends ItemView {
 
     this.currentState = this.plugin.getServerState();
     this.updateView();
-
-    if (this.currentState === "stopped") {
-      this.plugin.startServer();
-    }
   }
 
   async onClose(): Promise<void> {
