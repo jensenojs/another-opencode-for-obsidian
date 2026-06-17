@@ -316,6 +316,112 @@ describe("ProxyInjection", () => {
     });
   });
 
+  test("leaves review line comment controls in the line-number column to OpenCode", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
+        <div id="target" data-column-number="159">
+          <button type="button" aria-label="评论">+</button>
+        </div>
+      </div>
+    `);
+
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.querySelector('button[aria-label="评论"]')!,
+      "click",
+      0
+    );
+
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
+  });
+
+  test("does not treat the whole review content column as a vault navigation target", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
+        <div id="target" data-content>
+          <div>column whitespace</div>
+        </div>
+      </div>
+    `);
+
+    const defaultWasNotPrevented = dispatchMouse(window, document.getElementById("target")!, "click", 0);
+
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
+  });
+
+  test("does not treat a review column-content wrapper as a vault navigation target", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
+        <div id="target" data-column-content>
+          <div>column whitespace</div>
+        </div>
+      </div>
+    `);
+
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
+
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
+  });
+
+  test("leaves review annotation controls mounted in diff content to OpenCode", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
+        <div data-content>
+          <div slot="annotation-additions-39">
+            <textarea>native comment</textarea>
+            <button id="target" type="button">评论</button>
+          </div>
+        </div>
+      </div>
+    `);
+
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
+
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
+  });
+
   test("posts a line-aware message from tool file content", () => {
     const { document, messages, window } = runInjectedBridge(`
       <div data-scope="apply-patch">

@@ -54,7 +54,7 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
     },
     {
       name: 'session-review-line',
-      eventTargetSelector: '[data-line], [data-alt-line], [data-column-number], [data-column-content], [data-content]',
+      eventTargetSelector: '[data-line], [data-alt-line]',
       containerSelector: '[data-slot="session-review-accordion-item"], [data-file]',
       attribute: 'data-file'
     },
@@ -67,14 +67,14 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
     },
     {
       name: 'session-turn-diff-line',
-      eventTargetSelector: '[data-line], [data-alt-line], [data-column-number], [data-column-content], [data-content]',
+      eventTargetSelector: '[data-line], [data-alt-line]',
       containerSelector: '[data-slot="accordion-item"]',
       directorySelector: '[data-slot="session-turn-diff-directory"]',
       filenameSelector: '[data-slot="session-turn-diff-filename"]'
     },
     {
       name: 'tool-file-line',
-      eventTargetSelector: '[data-line], [data-alt-line], [data-column-number], [data-column-content], [data-content]',
+      eventTargetSelector: '[data-line], [data-alt-line]',
       containerSelector: '[data-slot="accordion-item"]',
       directorySelector: '[data-slot="apply-patch-directory"]',
       filenameSelector: '[data-slot="apply-patch-filename"]'
@@ -180,12 +180,11 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
     return directory ? cleanVaultPath(directory + '/' + filename) : filename;
   }
   function lineNumberFromPath(path) {
-    var lineElement = closestFromPath(path, '[data-line], [data-alt-line], [data-column-number]');
+    var lineElement = closestFromPath(path, '[data-line], [data-alt-line]');
     if (!lineElement) return null;
     var raw =
       lineElement.getAttribute('data-line') ||
-      lineElement.getAttribute('data-alt-line') ||
-      lineElement.getAttribute('data-column-number');
+      lineElement.getAttribute('data-alt-line');
     var line = parseInt(raw || '', 10);
     return Number.isFinite(line) && line > 0 ? line : null;
   }
