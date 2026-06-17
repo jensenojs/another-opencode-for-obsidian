@@ -1,4 +1,4 @@
-import { Notice } from "obsidian";
+import { Notice, setIcon } from "obsidian";
 import type { ContextCandidate, ContextItem } from "../types";
 import {
   formatNavigationResolution,
@@ -8,6 +8,7 @@ import {
   type ContextNavigationResult,
 } from "./ContextItemNavigator";
 import { getText } from "../i18n";
+import { OPENCODE_ICON_NAME } from "../icons";
 
 interface ContextStatusBarDeps {
   addStatusBarItem: () => HTMLElement;
@@ -34,6 +35,7 @@ export class ContextStatusBar {
   private removeKeydown: (() => void) | null = null;
   private expandedItemIds = new Set<string>();
   private pendingOpenTimers = new Map<string, number>();
+  private removeFailures = new Map<string, string>();
 
   constructor(private deps: ContextStatusBarDeps) {
     this.statusEl = deps.addStatusBarItem();
@@ -56,7 +58,7 @@ export class ContextStatusBar {
     const total = items.length + candidates.length;
     this.statusEl.empty();
     this.statusEl.toggleClass("is-active", total > 0);
-    this.statusEl.setText(text.context.statusText(items.length, candidates.length));
+    this.renderStatusLabel(text.context.statusText(items.length, candidates.length));
     this.statusEl.title = text.context.statusTitle(items.length, candidates.length, total);
     if (this.popoverEl) {
       this.renderPopover(items, candidates);
@@ -128,7 +130,13 @@ export class ContextStatusBar {
     const text = getText();
     this.popoverEl.empty();
     const headerEl = this.popoverEl.createDiv({ cls: "opencode-ctx-popover-header" });
-    headerEl.createDiv({
+    const brandEl = headerEl.createDiv({ cls: "opencode-ctx-popover-brand" });
+    const brandIconEl = brandEl.createSpan({
+      cls: "opencode-ctx-popover-icon",
+      attr: { "aria-hidden": "true" },
+    });
+    setIcon(brandIconEl, OPENCODE_ICON_NAME);
+    brandEl.createDiv({
       cls: "opencode-ctx-popover-title",
       text: text.context.popoverTitle(items.length, candidates.length),
     });
@@ -299,22 +307,30 @@ export class ContextStatusBar {
       }
 
       const actionsEl = rowEl.createDiv({ cls: "opencode-ctx-item-actions" });
-      const removeButton = actionsEl.createEl("button", {
-        cls: "opencode-ctx-action",
-        text: getText().context.remove,
-        attr: { type: "button", title: getText().context.removeTitle },
-      });
-      removeButton.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        removeButton.disabled = true;
-        const removed = await this.deps.removeItem(item.id);
-        if (!removed) {
-          removeButton.disabled = false;
-          new Notice(getText().notices.contextRemoveFailed);
-        }
+      actionsEl.createSpan({
+        cls: "opencode-ctx-row-state",
+        text: this.expandedItemIds.has(item.id) ? "⌃" : "›",
+        attr: { "aria-hidden": "true" },
       });
     }
+  }
+
+  private renderStatusLabel(label: string): void {
+    if (!this.statusEl.ownerDocument || !("appendChild" in this.statusEl)) {
+      this.statusEl.setText(label);
+      return;
+    }
+
+    const iconEl = this.statusEl.ownerDocument.createElement("span");
+    iconEl.className = "opencode-ctx-status-icon";
+    iconEl.setAttribute("aria-hidden", "true");
+    setIcon(iconEl, OPENCODE_ICON_NAME);
+    this.statusEl.appendChild(iconEl);
+
+    const countEl = this.statusEl.ownerDocument.createElement("span");
+    countEl.className = "opencode-ctx-status-count";
+    countEl.textContent = label;
+    this.statusEl.appendChild(countEl);
   }
 
   private scheduleOpenItem(
@@ -473,6 +489,34 @@ export class ContextStatusBar {
         hour: "2-digit",
         minute: "2-digit",
       }),
+    });
+    const removeFailure = this.removeFailures.get(item.id);
+    if (removeFailure) {
+      detailsEl.createSpan({
+        cls: "opencode-ctx-pill is-warning",
+        text: removeFailure,
+      });
+    }
+    const removeButton = detailsEl.createEl("button", {
+      cls: "opencode-ctx-detail-action is-danger",
+      text: getText().context.removeCommitted,
+      attr: { type: "button", title: getText().context.removeTitle },
+    });
+    removeButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeButton.disabled = true;
+      const removed = await this.deps.removeItem(item.id);
+      if (removed) {
+        this.removeFailures.delete(item.id);
+        return;
+      }
+      const reason = getText().context.removeFailed;
+      this.removeFailures.set(item.id, reason);
+      removeButton.disabled = false;
+      bodyEl.querySelector(".opencode-ctx-item-details")?.remove();
+      this.renderRowDetails(bodyEl, item, resolution);
+      new Notice(getText().notices.contextRemoveFailed);
     });
   }
 

@@ -22,6 +22,7 @@ mock.module("obsidian", () => ({
       subpath: linktext.slice(subpathIndex + 1),
     };
   },
+  setIcon: () => {},
   TFile: class TFile {},
   TFolder: class TFolder {},
 }));
@@ -160,12 +161,12 @@ describe("ContextStatusBar", () => {
       removeItem: async () => true,
     });
 
-    expect(statusEl.text).toBe("ctx 0");
+    expect(statusEl.text).toBe("0");
     expect(statusEl.classes.has("is-active")).toBe(false);
 
     callbacks[0]([manualItem]);
 
-    expect(statusEl.text).toBe("ctx 1");
+    expect(statusEl.text).toBe("1");
     expect(statusEl.classes.has("is-active")).toBe(true);
     expect(statusEl.title).toBe("1 committed, 0 candidate OpenCode context item");
 
@@ -345,9 +346,12 @@ describe("ContextStatusBar", () => {
       expect(window.document.body.textContent).not.toContain("Open source");
       expect(window.document.querySelectorAll(".opencode-ctx-warning")).toHaveLength(1);
 
-      const removeButton = [...window.document.querySelectorAll("button")].find(
-        (button) => button.textContent === "Remove"
-      );
+      expect(window.document.body.textContent).not.toContain("Remove from session");
+
+      const row = window.document.querySelector(".opencode-ctx-item");
+      row?.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+
+      const removeButton = window.document.querySelector(".opencode-ctx-detail-action");
       expect(removeButton).toBeTruthy();
       expect(removeButton?.getAttribute("title")).toBe(
         "Remove from current OpenCode session context"
@@ -357,6 +361,7 @@ describe("ContextStatusBar", () => {
 
       expect(removed).toEqual(["msg_1:prt_1"]);
       expect(window.document.body.textContent).toContain("Workspace context");
+      expect(window.document.body.textContent).toContain("remove failed");
 
       statusBar.destroy();
     });
@@ -389,7 +394,7 @@ describe("ContextStatusBar", () => {
         removeItem: async () => true,
       });
 
-      expect(statusEl.textContent).toBe("ctx 1+1");
+      expect(statusEl.textContent).toBe("1+1");
 
       statusEl.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -479,7 +484,7 @@ describe("ContextStatusBar", () => {
         removeItem: async () => true,
       });
 
-      expect(statusEl.textContent).toBe("ctx 1+1");
+      expect(statusEl.textContent).toBe("1+1");
 
       statusEl.click();
       await new Promise((resolve) => setTimeout(resolve, 0));

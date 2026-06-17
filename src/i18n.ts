@@ -137,7 +137,7 @@ const EN_TEXT = {
   },
   context: {
     statusText: (committed: number, candidates: number) =>
-      candidates === 0 ? `ctx ${committed}` : `ctx ${committed}+${candidates}`,
+      candidates === 0 ? `${committed}` : `${committed}+${candidates}`,
     statusTitle: (committed: number, candidates: number, total: number) =>
       `${committed} committed, ${candidates} candidate OpenCode context item${total === 1 ? "" : "s"}`,
     popoverTitle: (_committed: number, _candidates: number) => "Context",
@@ -151,8 +151,10 @@ const EN_TEXT = {
     currentSessionContext: "Committed",
     noActiveContext: "No active context",
     remove: "Remove",
+    removeCommitted: "Remove from session",
     removeCandidateTitle: "Remove this local candidate",
     removeTitle: "Remove from current OpenCode session context",
+    removeFailed: "remove failed",
     provenance: (status: string) => `provenance ${status}`,
     chars: (count: number) => `${count} chars`,
     included: "included",
@@ -303,7 +305,7 @@ const ZH_CN_TEXT: PluginText = {
   },
   context: {
     statusText: (committed: number, candidates: number) =>
-      candidates === 0 ? `ctx ${committed}` : `ctx ${committed}+${candidates}`,
+      candidates === 0 ? `${committed}` : `${committed}+${candidates}`,
     statusTitle: (committed: number, candidates: number) =>
       `${committed} 个已提交上下文，${candidates} 个候选上下文`,
     popoverTitle: (_committed: number, _candidates: number) => "上下文",
@@ -317,8 +319,10 @@ const ZH_CN_TEXT: PluginText = {
     currentSessionContext: "已提交",
     noActiveContext: "没有活跃上下文",
     remove: "移除",
+    removeCommitted: "从会话移除",
     removeCandidateTitle: "移除这个本地候选",
     removeTitle: "从当前 OpenCode session 上下文中移除",
+    removeFailed: "移除失败",
     provenance: (status: string) => `来源 ${status}`,
     chars: (count: number) => `${count} 字符`,
     included: "已包含",
