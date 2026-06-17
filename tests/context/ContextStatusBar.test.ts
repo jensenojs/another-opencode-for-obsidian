@@ -160,12 +160,12 @@ describe("ContextStatusBar", () => {
       removeItem: async () => true,
     });
 
-    expect(statusEl.text).toBe("OpenCode ctx 0");
+    expect(statusEl.text).toBe("ctx 0");
     expect(statusEl.classes.has("is-active")).toBe(false);
 
     callbacks[0]([manualItem]);
 
-    expect(statusEl.text).toBe("OpenCode ctx 1");
+    expect(statusEl.text).toBe("ctx 1");
     expect(statusEl.classes.has("is-active")).toBe(true);
     expect(statusEl.title).toBe("1 committed, 0 candidate OpenCode context item");
 
@@ -333,7 +333,7 @@ describe("ContextStatusBar", () => {
       statusEl.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(window.document.body.textContent).toContain("Current session context");
+      expect(window.document.body.textContent).toContain("Committed");
       expect(window.document.body.textContent).not.toContain("Candidate content");
       expect(window.document.body.textContent).not.toContain(
         "GraphIndex candidates are not connected in this surface yet."
@@ -389,13 +389,13 @@ describe("ContextStatusBar", () => {
         removeItem: async () => true,
       });
 
-      expect(statusEl.textContent).toBe("OpenCode ctx 1 +1");
+      expect(statusEl.textContent).toBe("ctx 1+1");
 
       statusEl.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(window.document.body.textContent).toContain("Next message will include");
-      expect(window.document.body.textContent).toContain("Current session context");
+      expect(window.document.body.textContent).toContain("Next message");
+      expect(window.document.body.textContent).toContain("Committed");
       expect(window.document.querySelectorAll(".opencode-ctx-candidate")).toHaveLength(1);
       expect(window.document.body.textContent).toContain("included");
       expect(window.document.body.textContent).not.toContain("Attach");
@@ -479,13 +479,13 @@ describe("ContextStatusBar", () => {
         removeItem: async () => true,
       });
 
-      expect(statusEl.textContent).toBe("OpenCode 上下文 1 +1");
+      expect(statusEl.textContent).toBe("ctx 1+1");
 
       statusEl.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(window.document.body.textContent).toContain("下一条消息将包含");
-      expect(window.document.body.textContent).toContain("当前 session 上下文");
+      expect(window.document.body.textContent).toContain("下一条消息");
+      expect(window.document.body.textContent).toContain("已提交");
       expect(window.document.body.textContent).toContain("已包含");
       expect(window.document.body.textContent).not.toContain("附加");
       expect(window.document.body.textContent).toContain("跳过");

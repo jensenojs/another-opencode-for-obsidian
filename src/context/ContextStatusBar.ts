@@ -38,6 +38,7 @@ export class ContextStatusBar {
   constructor(private deps: ContextStatusBarDeps) {
     this.statusEl = deps.addStatusBarItem();
     this.statusEl.addClass("opencode-ctx-status");
+    this.statusEl.parentElement?.prepend(this.statusEl);
     this.statusEl.addEventListener("click", (event) => {
       event.preventDefault();
       this.togglePopover();

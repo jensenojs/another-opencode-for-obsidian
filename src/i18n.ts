@@ -137,19 +137,18 @@ const EN_TEXT = {
   },
   context: {
     statusText: (committed: number, candidates: number) =>
-      candidates === 0 ? `OpenCode ctx ${committed}` : `OpenCode ctx ${committed} +${candidates}`,
+      candidates === 0 ? `ctx ${committed}` : `ctx ${committed}+${candidates}`,
     statusTitle: (committed: number, candidates: number, total: number) =>
       `${committed} committed, ${candidates} candidate OpenCode context item${total === 1 ? "" : "s"}`,
-    popoverTitle: (committed: number, candidates: number) =>
-      `OpenCode context (${committed} committed, ${candidates} candidate)`,
+    popoverTitle: (_committed: number, _candidates: number) => "Context",
     copyDiagnostics: "Copy diagnostics",
     candidates: "Candidates",
-    nextMessageIncludes: "Next message will include",
+    nextMessageIncludes: "Next message",
     skip: "Skip",
     skipOnce: "Skip once",
     include: "Include",
     toggleCandidateTitle: "Toggle this local candidate for the next message",
-    currentSessionContext: "Current session context",
+    currentSessionContext: "Committed",
     noActiveContext: "No active context",
     remove: "Remove",
     removeCandidateTitle: "Remove this local candidate",
@@ -304,21 +303,18 @@ const ZH_CN_TEXT: PluginText = {
   },
   context: {
     statusText: (committed: number, candidates: number) =>
-      candidates === 0
-        ? `OpenCode 上下文 ${committed}`
-        : `OpenCode 上下文 ${committed} +${candidates}`,
+      candidates === 0 ? `ctx ${committed}` : `ctx ${committed}+${candidates}`,
     statusTitle: (committed: number, candidates: number) =>
       `${committed} 个已提交上下文，${candidates} 个候选上下文`,
-    popoverTitle: (committed: number, candidates: number) =>
-      `OpenCode 上下文（${committed} 个已提交，${candidates} 个候选）`,
+    popoverTitle: (_committed: number, _candidates: number) => "上下文",
     copyDiagnostics: "复制诊断",
     candidates: "候选",
-    nextMessageIncludes: "下一条消息将包含",
+    nextMessageIncludes: "下一条消息",
     skip: "跳过",
     skipOnce: "跳过一次",
     include: "包含",
     toggleCandidateTitle: "切换这个本地候选是否进入下一条消息",
-    currentSessionContext: "当前 session 上下文",
+    currentSessionContext: "已提交",
     noActiveContext: "没有活跃上下文",
     remove: "移除",
     removeCandidateTitle: "移除这个本地候选",
