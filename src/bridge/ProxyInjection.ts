@@ -1,5 +1,5 @@
 import { createBridgeScript, type BridgeInjectionOptions } from "./BridgeInjection";
-import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../bridge/BridgeProtocol";
+import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "./BridgeProtocol";
 import type { WebViewAppearance, WebViewTheme } from "../types";
 
 const HEAD_OPEN_TAG = /<head(\s[^>]*)?>/i;

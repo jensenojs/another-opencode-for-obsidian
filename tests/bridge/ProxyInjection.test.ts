@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE } from "../../src/bridge/BridgeProtocol";
-import { injectOpenCodeWebUiProxyHtml } from "../../src/proxy/ProxyInjection";
-import type { BridgeInjectionOptions } from "../../src/proxy/BridgeInjection";
+import { injectOpenCodeWebUiProxyHtml } from "../../src/bridge/ProxyInjection";
+import type { BridgeInjectionOptions } from "../../src/bridge/BridgeInjection";
 
 const html = "<html><head></head><body>OpenCode</body></html>";
 type PostedBridgeMessage = {
@@ -195,6 +195,8 @@ describe("ProxyInjection", () => {
     expect(body).toContain('data-slot="session-review-filename"');
     expect(body).toContain("composedPath");
     expect(body).toContain("session-review-line");
+    expect(body).toContain("file-tab-line");
+    expect(body).toContain('data-slot="tabs-content"');
     expect(body).toContain("tool-file-line");
     expect(body).toContain("basic-tool-path-text");
     expect(body).toContain("absoluteFilesystemRootPattern");
@@ -316,6 +318,62 @@ describe("ProxyInjection", () => {
     });
   });
 
+  test("posts a line-aware message from an OpenCode file tab", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div
+        id="tabs-cl-198-content-file://0-%E7%90%86%E8%AE%BA/%E8%AE%A1%E7%AE%97%E6%9C%BA%E4%BD%93%E7%B3%BB%E7%BB%93%E6%9E%84/A.md"
+        data-slot="tabs-content"
+        data-selected
+      >
+        <div id="host" data-component="file"></div>
+      </div>
+    `);
+    const host = document.getElementById("host")!;
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `
+      <pre data-file>
+        <code data-code>
+          <div data-content>
+            <div data-line="15" data-line-type="context"><span id="line">content</span></div>
+          </div>
+        </code>
+      </pre>
+    `;
+
+    click(window, shadow.getElementById("line")!);
+
+    expect(lastMessage(messages)).toEqual({
+      ns: BRIDGE_NAMESPACE,
+      version: 1,
+      type: BRIDGE_MESSAGES.vaultFileOpen,
+      payload: { path: "0-理论/计算机体系结构/A.md", line: 15 },
+    });
+  });
+
+  test("reads an OpenCode file tab path from aria-labelledby when the tab panel id is unavailable", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div
+        id="plain-panel"
+        data-slot="tabs-content"
+        aria-labelledby="tabs-cl-198-trigger-file://0-%E7%90%86%E8%AE%BA/%E8%AE%A1%E7%AE%97%E6%9C%BA%E4%BD%93%E7%B3%BB%E7%BB%93%E6%9E%84/B.md"
+      >
+        <div id="host" data-component="file"></div>
+      </div>
+    `);
+    const host = document.getElementById("host")!;
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `<div data-line="27"><span id="line">content</span></div>`;
+
+    click(window, shadow.getElementById("line")!);
+
+    expect(lastMessage(messages)).toEqual({
+      ns: BRIDGE_NAMESPACE,
+      version: 1,
+      type: BRIDGE_MESSAGES.vaultFileOpen,
+      payload: { path: "0-理论/计算机体系结构/B.md", line: 27 },
+    });
+  });
+
   test("leaves review line comment controls in the line-number column to OpenCode", () => {
     const { document, messages, window } = runInjectedBridge(`
       <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
@@ -343,6 +401,75 @@ describe("ProxyInjection", () => {
     ]);
   });
 
+  test("leaves OpenCode file tab comment controls to OpenCode", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div
+        id="tabs-cl-198-content-file://0-%E7%90%86%E8%AE%BA/%E8%AE%A1%E7%AE%97%E6%9C%BA%E4%BD%93%E7%B3%BB%E7%BB%93%E6%9E%84/A.md"
+        data-slot="tabs-content"
+        data-selected
+      >
+        <div id="host" data-component="file">
+          <button id="target" type="button" slot="gutter-utility-slot" aria-label="评论">+</button>
+        </div>
+      </div>
+    `);
+
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
+
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
+  });
+
+  test("leaves OpenCode file tab annotation controls to OpenCode even inside line content", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div
+        id="tabs-cl-198-content-file://0-%E7%90%86%E8%AE%BA/%E8%AE%A1%E7%AE%97%E6%9C%BA%E4%BD%93%E7%B3%BB%E7%BB%93%E6%9E%84/A.md"
+        data-slot="tabs-content"
+        data-selected
+      >
+        <div id="host" data-component="file"></div>
+      </div>
+    `);
+    const host = document.getElementById("host")!;
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `
+      <div data-line="15">
+        <div slot="annotation-additions-15">
+          <textarea id="target">comment</textarea>
+        </div>
+      </div>
+    `;
+
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      shadow.getElementById("target")!,
+      "click",
+      0
+    );
+
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
+  });
+
   test("does not treat the whole review content column as a vault navigation target", () => {
     const { document, messages, window } = runInjectedBridge(`
       <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
@@ -352,7 +479,12 @@ describe("ProxyInjection", () => {
       </div>
     `);
 
-    const defaultWasNotPrevented = dispatchMouse(window, document.getElementById("target")!, "click", 0);
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
 
     expect(defaultWasNotPrevented).toBe(true);
     expect(messages).toEqual([

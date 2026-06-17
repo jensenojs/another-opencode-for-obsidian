@@ -36,7 +36,7 @@ const obsidianMaterialAlphaSets = [
 ];
 const themeBoundaryFiles = {
   stylesCss: "styles.css",
-  proxyInjectionTs: join("src", "proxy", "ProxyInjection.ts"),
+  proxyInjectionTs: join("src", "bridge", "ProxyInjection.ts"),
   webViewThemeTs: join("src", "theme", "WebViewTheme.ts"),
 };
 

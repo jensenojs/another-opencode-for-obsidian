@@ -21,7 +21,7 @@ import { getSelectionLineRange } from "./context/SelectionLineRange";
 import type { GraphIndex } from "./graph/GraphIndex";
 import { createObsidianGraphIndex, isMarkdownTFile, toGraphFile } from "./graph/ObsidianGraphIndex";
 import { ExecutableResolver } from "./server/ExecutableResolver";
-import { OpenCodeWebUiProxy, extractPromptSessionId } from "./proxy/OpenCodeWebUiProxy";
+import { OpenCodeWebUiProxy, extractPromptSessionId } from "./bridge/OpenCodeWebUiProxy";
 import { OpenCodeBridge } from "./bridge/OpenCodeBridge";
 import {
   createLogger,
@@ -522,19 +522,18 @@ export default class OpenCodePlugin extends Plugin {
 
   private installPromptContextHook(): void {
     this.openCodeWebUiProxy.updatePromptRequestHook(
-      async (input) => {
-        const sessionId = extractPromptSessionId(input.path);
+      async ({ path, body }) => {
+        const sessionId = extractPromptSessionId(path);
         if (!sessionId) {
           return null;
         }
 
         let requestBody: unknown;
         try {
-          requestBody = JSON.parse(input.body.toString("utf8"));
+          requestBody = JSON.parse(body.toString("utf8"));
         } catch (error) {
-          this.contextManager.preparePromptContext(sessionId, null);
-          this.logger.warn("prompt context injection skipped because request body is not JSON", {
-            path: input.path,
+          this.logger.warn("prompt context injection skipped for non-json body", {
+            path,
             error: error instanceof Error ? error.message : String(error),
           });
           return null;
@@ -547,22 +546,29 @@ export default class OpenCodePlugin extends Plugin {
 
         return {
           body: Buffer.from(JSON.stringify(plan.requestBody), "utf8"),
-          headers: {
-            "content-type": "application/json",
-          },
+          headers: { "content-type": "application/json" },
           planId: plan.id,
         };
       },
       (planId, outcome) => {
         if (outcome.ok) {
           this.contextManager.completePromptContext(planId);
+          this.writeStatus("prompt-context-injected");
           return;
         }
 
-        this.contextManager.failPromptContext(
+        const reason =
+          outcome.error ??
+          (outcome.statusCode
+            ? `OpenCode prompt returned HTTP ${outcome.statusCode}`
+            : "OpenCode prompt failed");
+        this.contextManager.failPromptContext(planId, reason);
+        this.logger.warn("prompt context injection failed", {
           planId,
-          outcome.error ?? `OpenCode returned HTTP ${outcome.statusCode ?? "unknown"}`
-        );
+          statusCode: outcome.statusCode,
+          error: outcome.error,
+        });
+        this.writeStatus("prompt-context-injection-failed");
       }
     );
   }

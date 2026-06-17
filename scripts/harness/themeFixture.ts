@@ -5,7 +5,7 @@ import { join } from "path";
 import { Script, createContext } from "vm";
 import { Window } from "happy-dom";
 import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../../src/bridge/BridgeProtocol";
-import { OpenCodeWebUiProxy } from "../../src/proxy/OpenCodeWebUiProxy";
+import { OpenCodeWebUiProxy } from "../../src/bridge/OpenCodeWebUiProxy";
 import { createOpenCodeWebViewTheme } from "../../src/theme/WebViewTheme";
 import { fetchText, type FetchTextResult } from "./httpText";
 

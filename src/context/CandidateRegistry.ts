@@ -2,6 +2,8 @@ import type { ContextCandidate } from "../types";
 
 type CandidateChangeCallback = (items: ContextCandidate[]) => void;
 
+// Local pre-send candidate store. It owns identity, included/skipped state,
+// source clearing, bounded queues, one-shot consumption, and failure status.
 export class CandidateRegistry {
   private candidates: ContextCandidate[] = [];
   private sessionId: string | null = null;

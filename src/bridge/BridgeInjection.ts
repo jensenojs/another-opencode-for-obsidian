@@ -1,5 +1,8 @@
-import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../bridge/BridgeProtocol";
+import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "./BridgeProtocol";
 
+// Iframe-side hook installer. It captures OpenCode Web UI actions and emits
+// local bridge messages; future live Web UI actions should arrive here as typed
+// adapter commands from the context layer.
 export interface BridgeInjectionOptions {
   webUiVaultNavigationPrimaryClick?: boolean;
 }
@@ -57,6 +60,12 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
       eventTargetSelector: '[data-line], [data-alt-line]',
       containerSelector: '[data-slot="session-review-accordion-item"], [data-file]',
       attribute: 'data-file'
+    },
+    {
+      name: 'file-tab-line',
+      eventTargetSelector: '[data-line], [data-alt-line]',
+      containerSelector: '[data-slot="tabs-content"]',
+      fileTabPath: true
     },
     {
       name: 'session-turn-diff-slots',
@@ -120,6 +129,19 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
     var match = text.match(/(?:^|\\s)(\\/?(?:[^\\s/]+\\/)*[^\\s/]+\\.(?:md|markdown|canvas)(?:#[^\\s]+)?)/i);
     return match ? cleanVaultPath(match[1]) : null;
   }
+  function extractVaultPathFromFileUrlValue(value) {
+    if (typeof value !== 'string') return null;
+    var marker = 'file://';
+    var index = value.indexOf(marker);
+    if (index === -1) return null;
+    var encodedPath = value.slice(index + marker.length);
+    if (!encodedPath) return null;
+    try {
+      return cleanVaultPath(decodeURIComponent(encodedPath));
+    } catch (_error) {
+      return null;
+    }
+  }
   function eventPath(e) {
     if (typeof e.composedPath === 'function') {
       return e.composedPath();
@@ -155,9 +177,20 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
     var element = container.querySelector(selector);
     return element ? element.textContent || '' : '';
   }
+  function pathFromFileTabPanel(path, selector) {
+    var panel = closestFromPath(path, selector);
+    if (!panel) return null;
+    return (
+      extractVaultPathFromFileUrlValue(panel.getAttribute('id')) ||
+      extractVaultPathFromFileUrlValue(panel.getAttribute('aria-labelledby'))
+    );
+  }
   function pathFromRule(path, rule) {
     if (rule.eventTargetSelector && !closestFromPath(path, rule.eventTargetSelector)) {
       return null;
+    }
+    if (rule.fileTabPath) {
+      return pathFromFileTabPanel(path, rule.containerSelector);
     }
     if (rule.attribute) {
       return attributeFromPath(path, rule.containerSelector, rule.attribute);
@@ -277,8 +310,17 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
       rect: rectFromTextRange(position.node, match.start, match.end)
     };
   }
+  function isNativeCommentControl(path) {
+    return Boolean(
+      closestFromPath(
+        path,
+        'button[aria-label="评论"], button[aria-label="Comment"], textarea, input, [slot="gutter-utility-slot"], [slot^="annotation-"]'
+      )
+    );
+  }
   function vaultFileClickFromEvent(e) {
     var path = eventPath(e);
+    if (isNativeCommentControl(path)) return null;
     for (var i = 0; i < vaultFileClickRules.length; i += 1) {
       var rule = vaultFileClickRules[i];
       var filePath = pathFromRule(path, rule);

@@ -8,6 +8,9 @@ import type { WebViewAppearance, WebViewTheme } from "../types";
 type WebViewThemeProvider = () => WebViewTheme | null;
 type WebViewThemeSource = WebViewTheme | WebViewThemeProvider | null;
 
+// HTTP boundary for the embedded OpenCode Web UI. It owns bridge transport,
+// injected HTML assets, and narrow hooks that hand request/UI facts to typed
+// plugin adapters.
 export interface PromptRequestHookInput {
   method: string;
   path: string;

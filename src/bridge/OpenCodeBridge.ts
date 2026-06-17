@@ -4,6 +4,8 @@ import {
   type OpenCodeEventSourceSnapshot,
 } from "../client/OpenCodeEventSource";
 
+// Product-level bridge entry for OpenCode server events. It turns OpenCode
+// event-stream facts into plugin diagnostics.
 export interface OpenCodeBridgeOptions {
   apiBaseUrl: string;
   projectDirectory: string;

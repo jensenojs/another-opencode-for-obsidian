@@ -18,6 +18,8 @@ interface PromptRequestBody {
   [key: string]: unknown;
 }
 
+// Prompt-request-coupled adapter. It turns included local candidates into
+// synthetic parts on the same OpenCode prompt request.
 export class PromptContextInjector {
   private plans = new Map<string, StoredPromptInjectionPlan>();
 

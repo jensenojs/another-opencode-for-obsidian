@@ -6,6 +6,19 @@
 
 本文档固定 oc-ctx 第一阶段的产品行为和实现边界。
 
+2026-06-17 后续调研更新：OpenCode Web UI 已有原生“下一条消息
+context card”，并且运行态 demo 已证明真实 Obsidian workspace context 可以
+通过 OpenCode 原生评论入口进入这张卡片。StatusBar 作为下一条消息候选主控
+制面的结论需要重新讨论。后续 native context card 方向以
+`src/bridge/AGENTS.md` 和 `src/bridge/OpenCodePromptContextAdapter.ts`
+作为本地入口继续收敛。
+
+再后续的 upstream / hook 调研已经把控制面结论进一步收紧：OpenCode 原生
+context card 是更合适的用户可见层。本文保留 prompt-coupled 机制、source
+生命周期和失败合同的分析价值，但不再作为“继续扩展 StatusBar 候选控制面”的
+依据。后续实现应优先让 Obsidian context 进入 OpenCode 原生 context card；
+只有 native bridge 不可用时，才保留插件侧降级入口。
+
 它替代早期文档中把候选上下文先写成独立 OpenCode context message 的主路径。
 早期的 `synthetic + noReply` 机制仍然可以作为历史机制理解，但它不再是第一阶段自动上下文的推荐实现。
 
@@ -266,25 +279,25 @@ OpenCode ctx   [工作区] [选区 1] [选区 2]
 ```text
 ContextSourceDriver
   -> CandidateRegistry
-    -> ContextStatusBar toggle
+    -> ContextStatusBar
       -> PromptContextInjector
-        -> OpenCodeWebUiProxy prompt request hook
+        -> OpenCode prompt request parts
 ```
 
 模块职责：
 
 - `ContextSourceDriver`：只产出本地候选。
 - `CandidateRegistry`：维护候选、included/skipped、一次性消费状态。
-- `ContextStatusBar`：只渲染和委托用户动作。
-- `PromptContextInjector`：把 included candidates 转成 OpenCode prompt parts。
-- `OpenCodeWebUiProxy`：识别 prompt POST，调用注入器，转发修改后的 JSON body。
+- `ContextStatusBar`：展示本地候选，委托 included/skipped 和 remove 操作。
+- `PromptContextInjector`：在 prompt request 边界把 included candidates 追加为 synthetic parts。
+- `OpenCodeWebUiProxy`：只识别 prompt POST、读取 body、调用 hook、转发修改后的 body，并根据响应通知 injector 成功或失败。
 - `ContextManager`：根据 settings 管理 source driver 生命周期。
 
-`OpenCodeWebUiProxy` 不能拥有上下文策略。它只知道这是不是一条 OpenCode prompt 请求，以及修改后的 body 要怎么转发。
+`OpenCodeWebUiProxy` 不能拥有上下文策略。它只能把 prompt request 交给 `PromptContextInjector`，不能判断哪个候选应该 included，也不能维护 source lifecycle。
 
 新增或收紧：
 
-- `PromptContextInjector`：把 included candidates 转成 OpenCode prompt `parts`。
+- `PromptContextInjector`：把 included candidates 转成同一条 OpenCode prompt request 的 synthetic text parts。
 - `CandidateRegistry.consumeSentCandidates()`：成功发送后清理一次性候选。
 - `CandidateRegistry.clearSource()`：来源关闭时立即清空对应候选。
 - `ContextManager`：负责 settings 到 source driver 生命周期，不让关闭的 source 空转。
@@ -365,9 +378,10 @@ contextAssist: {
 - 成功发送后，已发送 selection candidates 被移除。
 - 发送失败时，selection candidates 保留并标记 failed。
 
-### prompt 注入
+### prompt request 注入
 
-- OpenCode prompt body 被追加 `synthetic: true` text parts。
+- `POST /session/{id}/message` 走 proxy hook。
+- included candidates 被追加为 `synthetic: true` parts。
 - 用户正文仍是普通 text part。
 - 主路径不写 `noReply`。
 - 非 prompt 请求原样转发。
@@ -385,7 +399,7 @@ contextAssist: {
 
 ```bash
 rg "contextCommitMode|Backlink.*Candidate|Cursor.*Candidate|Attach included" src tests
-rg "noReply" src/context src/proxy src/client tests
+rg "noReply" src/context src/bridge src/client tests
 bun run check
 ```
 
@@ -403,7 +417,7 @@ bun run check
 - `src/context/AutoSelectionContextSource.ts`
 - `src/context/CursorContextSource.ts`
 - `src/context/BacklinkContextSource.ts`
-- `src/proxy/OpenCodeWebUiProxy.ts`
+- `src/bridge/OpenCodeWebUiProxy.ts`
 - `src/settings/SettingsTab.ts`
 
 本地 OpenCode 源码中，`PromptInput` 支持 `parts`、`synthetic` 和 `noReply`：

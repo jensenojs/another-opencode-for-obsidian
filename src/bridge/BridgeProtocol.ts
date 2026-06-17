@@ -1,5 +1,5 @@
-// Local iframe protocol only. OpenCode and Obsidian contracts are checked from
-// their own local gold standards by `bun run harness bridge`.
+// Local iframe protocol for plugin-owned facts captured inside the OpenCode Web
+// UI and consumed by the Obsidian plugin main thread.
 export const BRIDGE_NAMESPACE = "another-opencode-for-obsidian";
 export const BRIDGE_VERSION = 1;
 

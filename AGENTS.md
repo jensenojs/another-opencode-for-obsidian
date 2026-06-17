@@ -53,17 +53,19 @@ src/
 │       ├── OpenCodeProcess.ts   # 进程抽象（平台无关接口）
 │       ├── PosixProcess.ts      # Unix/macOS 进程实现
 │       └── WindowsProcess.ts    # Windows 进程实现
-├── proxy/
-│   └── OpenCodeWebUiProxy.ts # 本地 Web UI HTTP 代理：剥离 CSP 头、注入键盘监听
 ├── bridge/
-│   ├── OpenCodeBridge.ts   # 广义 Obsidian/OpenCode bridge 入口：当前承接 read-only event diagnostics
-│   └── BridgeProtocol.ts  # 本项目自己的 iframe -> Obsidian postMessage 协议
+│   ├── OpenCodeWebUiProxy.ts # 本地 Web UI HTTP 代理：剥离 CSP 头、注入 iframe hook
+│   ├── ProxyInjection.ts  # HTML/CSS/JS 注入入口
+│   ├── BridgeInjection.ts # iframe 内 UI hook 安装
+│   ├── BridgeProtocol.ts  # 本项目自己的 iframe -> Obsidian postMessage 协议
+│   ├── OpenCodeBridge.ts  # OpenCode server event diagnostics
+│   └── OpenCodePromptContextAdapter.ts # future native prompt context card adapter contract
 ├── debug/
 │   └── RuntimeDiagnostics.ts # XDG 日志、status.json、运行时路径
 ├── context/
-│   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，维护候选并暴露 prompt 注入入口
+│   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，维护本地上下文候选
 │   ├── CandidateRegistry.ts # 本地候选状态：include、source clear、one-shot 消费、bounded queue
-│   ├── PromptContextInjector.ts # 发送边界：把 included candidate 追加到同一个 OpenCode prompt parts
+│   ├── PromptContextInjector.ts # 在发送边界把 included candidate 追加到 prompt request
 │   ├── ContextSyncer.ts     # legacy/manual context message 的写入、删除、恢复
 │   ├── ContextProvenance.ts # context marker + provenance 载荷格式
 │   ├── ContextItemNavigator.ts # context source 安全打开入口
@@ -115,19 +117,40 @@ scripts/
 
 ### `OpenCodeBridge.ts` — Obsidian/OpenCode bridge 入口
 
-- 这是产品层 Obsidian/OpenCode 互联互通的入口模块，不能和 iframe Web UI 代理混名
-- 当前第一阶段只承接 read-only OpenCode event diagnostics：根据 server lifecycle 启停 `OpenCodeEventSource`
-- 未来 OpenCode event、hooks、TUI coexistence、以及 Obsidian 事实进入 OpenCode 的桥接入口优先放在这里讨论
-- 它不维护 ContextItem 生命周期，不解析 iframe URL，不转发 iframe HTTP 流量，不注入 HTML
-- 新增能力前必须先确认两边金标准：OpenCode OpenAPI/source contract，以及 Obsidian API/runtime facts
+- 这是产品层 Obsidian/OpenCode 互联互通入口。它承接 OpenCode event diagnostics：
+  根据 server lifecycle 启停 `OpenCodeEventSource`，把 read-only OpenCode event
+  facts 写入 runtime diagnostics。
+- hooks / callbacks / events 类能力先看本地 export surface：`node_modules/obsidian/obsidian.d.ts`、
+  OpenCode package exports、`@opencode-ai/plugin` hooks、TUI API、SDK generated
+  client、Web UI app exports。官方文档用于确认版本背景。
+- 生产代码 owner map：
+  - `src/context/*` 拥有 Obsidian context source、candidate lifecycle、GraphRAG 派生入口、
+    Obsidian link/subpath resolution 和 safe navigation。
+  - `src/bridge/*` 拥有 OpenCode Web UI transport、HTML 注入、iframe 内 UI hook 安装、
+    iframe 本地 message shape、OpenCode server event diagnostics 和 future Web UI bridge 执行点。
+  - `OpenCodePromptContextAdapter` 是 future OpenCode Web UI prompt context adapter 的
+    生产类型位置；它表达 Web UI `PromptProvider` / `prompt.context.add(item)` 这类
+    internal source contract，并把 internal shape 集中在一个代码入口。
+- harness 的角色是本地 OpenCode/Obsidian 版本漂移检查。生产边界由上面的 owner map、
+  TypeScript imports 和 adapter 类型表达。
 
-### `OpenCodeWebUiProxy.ts` — 本地 Web UI HTTP 代理
+### `OpenCodeWebUiProxy.ts` — bridge 内的本地 Web UI HTTP 代理
 
 - 启动本地代理服务器（端口从 4097 起自动检测）
 - 转发请求到 opencode 服务器，同时在响应中:
   1. **剥离 Content-Security-Policy 头**——否则注入的脚本会被浏览器阻止执行
   2. **注入键盘监听脚本**——拦截 iframe 内的 `Cmd+L` / `Ctrl+L`，通过 `BridgeProtocol.ts` 定义的 `postMessage` 协议发送到父窗口
   3. **注入文件点击监听脚本**——只从 OpenCode iframe DOM 中提取用户点击的 vault path 字符串，并发送 `vault-file:open` 本地 bridge message；proxy 不解析 wikilink，不判断文件是否存在
+- 注入层 UI hook 是插件的产品能力之一。它用于承接“事实发生在 OpenCode iframe
+  里，但结果需要 Obsidian API 或 vault 事实完成”的动作，例如插件拥有的
+  context card 点击后跳回 Obsidian。hook 可以捕获 iframe 里的 UI 事实，也可以在
+  iframe/Web UI bridge 中执行已经由 context 层决定好的 OpenCode UI 动作，例如
+  future `prompt.context.add(item)`。hook 不能拥有 context source 策略、GraphRAG
+  策略、link resolver、selection queue 或 OpenCode prompt 写入策略。
+- OpenCode 原生 review / diff comment card 继续交给 OpenCode 自己处理。本插件
+  写入的 Obsidian-owned card 不允许伪造 `commentID` 或 `commentOrigin: "review"`；
+  若无法稳定识别 ownership marker，注入层必须不拦截点击，并把证据写入
+  diagnostics。
 - `webViewAppearance === "obsidian"` 时读取 Obsidian 当前 CSS 变量，并在 proxied HTML 里覆盖 OpenCode 的设计 token
 - Obsidian 外观的 theme payload 必须在 proxy 注入 HTML 时读取当前 CSS 变量。不要在插件 `onload()` 早期缓存 theme 快照；Obsidian layout、社区主题和 CSS snippets 可能还没把变量写到最终容器上，早期快照会让重启后的首次 iframe 使用陈旧背景。proxy 初始注入只是首帧快照；`OpenCodeView` 必须在 iframe 创建、iframe load、`proxy:loaded` 后通过本地 `theme:update` bridge 把父窗口当前 `WebViewTheme` 推给 iframe。冷启动验收以这个运行态同步后的 diagnostics 为准。
 - Obsidian 外观模式的 theme source 优先当前 active Markdown/editor view，其次才回退到 OpenCode ItemView 和 `body`。Obsidian 主题和社区插件常把最终颜色写到编辑器容器上；从 OpenCode pane 或 `body` 早读会拿到不匹配的背景。
@@ -196,23 +219,22 @@ scripts/
 - `contextAssist.selection.enabled` 控制 one-shot selection candidate。选区 source 只产候选，registry 负责最近 N 条 FIFO 队列
 - 第一阶段不维护 backlinks source，不监听 metadata resolvedLinks，不把 backlinks 当默认候选。GraphRAG、块引用、链接证据以后必须作为新的 source driver 产出 candidate
 - 关闭任一 source 时，`ContextManager.updateSettings()` 必须清掉该 source 已有候选；关闭总开关时必须清空 CandidateRegistry，避免已禁用来源随 prompt 发送
-- oc-ctx 演进必须按 source driver → CandidateRegistry → StatusBar local controls → PromptContextInjector → OpenCode prompt request parts 的链路收拢。source driver 不能直接写 OpenCode session。
+- oc-ctx 演进必须按 source driver → CandidateRegistry → PromptContextInjector → OpenCode prompt request parts 的链路收拢。source driver 不能直接写 OpenCode session。
 - candidate 是本地 Obsidian 插件状态，没有 `messageId` / `partId`，toggle included/excluded 时不能调用 OpenCode API。committed context 才是 `ContextItem`，只属于 legacy/manual context message 生命周期。
 - CandidateRegistry 第一阶段按当前 OpenCode session 作用域处理。`CurrentContextSession` 变化时必须清空候选，不能把旧 session 的 candidate attach 到新 session。
 - source driver 输出必须表达 `upsert`、`remove`、`clear-source`、`failed`。不要把 source 消失、刷新失败或内容未变硬塞进 `ContextManager` 的临时分支。
-- PromptContextInjector 只在 prompt 发送边界工作。它从 registry 取 included candidates，追加 `synthetic: true` text parts；2xx 后消费 one-shot，保留 dynamic；失败时保留候选并标记 failed。自动主路径不能使用 `noReply`。
+- ContextStatusBar 是当前自动 oc-ctx 的用户可见控制面。用户在状态栏切换 included/skipped 或移除 one-shot 候选；发送成功后，PromptContextInjector 消费 one-shot candidates 并恢复临时跳过的 dynamic candidates。
 - 旧 `ContextSuggestion` 不能和 `ContextCandidate` 作为两套运行时候选模型长期并存。实现 candidate 层时必须删除、迁移或明确降级它。
-- oc-ctx 注入策略属于 `src/context`。不要把 source driver、CandidateRegistry、PromptContextInjector、GraphRAG candidate lifecycle 放进 `OpenCodeWebUiProxy` 或 `OpenCodeBridge`。proxy 只提供 HTTP 边界和 prompt request hook；bridge 只承接 OpenCode event/diagnostics。
+- oc-ctx 注入策略属于 `src/context`。source driver、CandidateRegistry、GraphRAG candidate lifecycle 留在 context 层；`src/bridge` 提供 Web UI transport、HTML 注入、iframe hook、本地 message protocol、prompt request hook 和 future native prompt context card adapter。
 - 当前行为合同见 [docs/plans/2026-06-17-oc-ctx-prompt-coupled-behavior-design.md](docs/plans/2026-06-17-oc-ctx-prompt-coupled-behavior-design.md)。
 
-### `PromptContextInjector.ts` — 自动 oc-ctx 发送边界
+### `PromptContextInjector.ts` — 自动 oc-ctx 到 prompt request
 
-- 自动 oc-ctx 主路径只在用户发送 OpenCode prompt 时注入，不提前写独立 context message
-- 输入是当前 session id 和 OpenCode prompt request body；输出是追加了 synthetic context part 的 request body
-- 只接受带 `parts: []` 的 OpenCode prompt body。无法识别 body 时返回 no-op，保留用户 prompt，并把 included candidates 标记 failed
-- 注入 part 只写 `{ type: "text", text, synthetic: true }`。主路径禁止写 `noReply`
-- `complete(planId)` 只在 proxy 收到 2xx response 后调用；它消费 one-shot candidates，并把 dynamic candidates 恢复为默认 included
-- `fail(planId, reason)` 保留候选并记录 reason。失败不能吞掉用户 prompt，也不能让 UI 误以为 context 已发送
+- 自动 oc-ctx 主路径不提前写独立 context message
+- `PromptContextInjector` 只在 `POST /session/{id}/message` 的发送边界读取 included candidates
+- injector 把候选追加为同一条 request 的 `synthetic: true` text parts
+- 主路径不写 `noReply`
+- OpenCode 返回 2xx 后才消费 one-shot candidates；非 2xx 或网络错误时保留候选并标记 failed
 
 ### `ContextSyncer.ts` / `ContextProvenance.ts` — legacy/manual context message 协议
 
@@ -304,7 +326,7 @@ scripts/
 
 - 事件源合同见 [docs/plans/opencode-event-source-contract.md](docs/plans/opencode-event-source-contract.md)
 - 新的 Obsidian-side event code 首选 OpenCode dev 的 `GET /api/event` / `v2.event.subscribe`，因为它携带 location 语义；`GET /event` 只作为 legacy compatibility 参考
-- 产品层的 bridge/proxy 是 Obsidian 与 OpenCode 的互联互通总称，必须基于两边的金标准：OpenCode OpenAPI/source contract 和 Obsidian API/runtime facts
+- 产品层的 `src/bridge` 是 Obsidian 与 OpenCode 的互联互通代码边界，必须基于两边的金标准：OpenCode OpenAPI/source contract 和 Obsidian API/runtime facts
 - `OpenCodeBridge.ts` 是广义 bridge 层的代码入口。当前通过 Node 侧 `src/client/OpenCodeEventSource.ts` 接 OpenCode event，状态写入 runtime diagnostics
 - 具体实现类 `OpenCodeWebUiProxy.ts` 只负责 Web UI transport 和 HTML 注入。它可以透传 SSE 字节，但不能解析 OpenCode event 并维护插件状态
 - `BridgeProtocol.ts` 只定义本项目 iframe 本地消息，不加入 `session.*`、`permission.*`、`question.*` 或 `tui.*` 这类上游 event name

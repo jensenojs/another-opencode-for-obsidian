@@ -81,7 +81,7 @@ const EN_TEXT = {
     disabled: "Off",
     enableContextAssist: "Send context with prompts",
     contextAssistDesc:
-      "When you send an OpenCode message, included Obsidian context is sent with that same message. Use the status bar to skip or remove candidates before sending. Selected text clears after a successful send.",
+      "Included Obsidian context is added to the same OpenCode message when you send. Use the status bar to skip or remove candidates before sending. Selected text clears after a successful send.",
     contextAssistDisabledDesc:
       "Obsidian context is not collected or sent while context assist is off.",
     workspaceClues: "Workspace clues",
@@ -96,7 +96,7 @@ const EN_TEXT = {
     includeActiveLocationDesc: "Include the active note and line when available.",
     selectionSnippets: "Selected text",
     enableSelectionSnippets: "Enable selected text",
-    selectionSnippetsDesc: "Send recent Obsidian selections as one-shot context.",
+    selectionSnippetsDesc: "Recent Obsidian selections become one-shot candidates before you send.",
     selectionSnippetsDisabledDesc:
       "Selections are not watched or queued while selected text is off.",
     maxSelectionSnippets: "Recent selection count",
@@ -259,7 +259,7 @@ const ZH_CN_TEXT: PluginText = {
     disabled: "关",
     enableContextAssist: "发送时附加上下文",
     contextAssistDesc:
-      "发送 OpenCode 消息时，插件会把已包含的 Obsidian 上下文随同一条消息发送。状态栏里可以临时跳过或移除候选。选中文本发送成功后会自动清空。",
+      "发送 OpenCode 消息时，已包含的 Obsidian 上下文会随同一条消息发送。发送前可在状态栏临时跳过或移除候选。选中文本发送成功后会自动清空。",
     contextAssistDisabledDesc: "关闭后不会收集或发送 Obsidian 上下文。",
     workspaceClues: "工作区线索",
     enableWorkspaceClues: "启用工作区线索",

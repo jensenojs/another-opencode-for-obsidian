@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractPromptSessionId } from "../../src/proxy/OpenCodeWebUiProxy";
+import { extractPromptSessionId } from "../../src/bridge/OpenCodeWebUiProxy";
 
 describe("OpenCodeWebUiProxy prompt path helpers", () => {
   test("extracts session ids from legacy and v2 prompt paths", () => {

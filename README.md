@@ -19,9 +19,10 @@ _This is a third-party fork. It is not affiliated with OpenCode or Obsidian._
 
 Many Obsidian integrations stop at embedding a Web UI in a side pane. This
 plugin treats the Web UI as one surface inside a larger Obsidian workflow. The
-proxy is not only a port forwarder. It is the boundary where iframe-local
-OpenCode UI facts become Obsidian-side facts that can be validated against the
-vault, the workspace, and the plugin's own runtime diagnostics.
+bridge is where iframe-local OpenCode UI facts become Obsidian-side facts that
+can be validated against the vault, the workspace, and the plugin's own runtime
+diagnostics. The HTTP proxy is one bridge implementation detail: it carries the
+embedded Web UI, injected hooks, theme payloads, and local messages.
 
 The first visible result is navigation. When OpenCode shows a vault file, diff
 row, wikilink, heading, block, footnote, or markdown path, the plugin can route
@@ -206,10 +207,38 @@ Relevant upstream surfaces:
 
 ### Context Assist
 
-Automatic context is prompt-coupled. Sources produce local candidates inside the
-Obsidian plugin. The status bar shows what the next OpenCode message will
-include. When the user sends a prompt, included candidates are appended to that
-same OpenCode message as `synthetic` text parts.
+Automatic context is being re-centered on OpenCode's native prompt context
+cards. The plugin should keep the Obsidian-specific strategy work: discovering
+workspace clues, selected text, and future vault evidence. The OpenCode Web UI
+should own the visible "next message context" card whenever the context can be
+represented there.
+
+The bridge is still part of the product value. OpenCode owns its Web UI and
+Obsidian owns vault navigation, so this plugin can add narrow iframe hooks for
+actions that need both sides. A plugin-owned context card can render inside
+OpenCode's native prompt context area, while its click navigation can post back
+to Obsidian and open the existing vault file. Those hooks should preserve the
+boundary: iframe-side code captures or applies OpenCode UI actions, while
+context discovery and inclusion policy stay in the context layer.
+
+The earlier prompt-coupled path kept candidates in the Obsidian plugin status
+bar and appended included candidates as `synthetic` parts when the prompt was
+sent. That path is useful as a historical mechanism, but it should not keep
+expanding as the main user-facing control surface.
+
+Current bridge direction:
+
+- [bridge module guide](src/bridge/AGENTS.md) records the local Obsidian and
+  OpenCode source anchors.
+- `src/bridge/OpenCodePromptContextAdapter.ts` records the OpenCode native
+  prompt context card shape used by future integration work.
+- Short term: explicit add-to-prompt can use OpenCode prompt storage plus an
+  iframe reload.
+- Long term: use or upstream a live Web UI bridge that calls
+  `prompt.context.add(item)` inside OpenCode's `PromptProvider` tree.
+- Obsidian-owned cards should not fake OpenCode review comments. The native card
+  can show, remove, and submit them; navigation back to Obsidian belongs in the
+  plugin injection bridge.
 
 First-phase sources:
 
@@ -218,8 +247,9 @@ First-phase sources:
   after a successful send.
 
 The automatic path does not create a separate context message and does not use
-`noReply`. Missing or failed context injection does not block the user's prompt;
-the candidate remains visible with a failure reason.
+`noReply`. A successful send consumes one-shot selected text candidates while
+keeping dynamic workspace context available for later prompts. If the prompt
+request fails, included candidates stay local and are marked failed.
 
 Legacy/manual context messages can still be restored and removed. Restored
 context is treated carefully:

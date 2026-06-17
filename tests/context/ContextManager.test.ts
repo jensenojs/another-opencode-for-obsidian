@@ -185,7 +185,7 @@ describe("ContextManager", () => {
     expect(manager.getCandidates()).toEqual([]);
   });
 
-  test("prompt injection delegates to the prompt-coupled injector", () => {
+  test("keeps the legacy prompt injector behavior isolated from source discovery", () => {
     const manager = createManager({});
     const candidateRegistry = (manager as any).candidateRegistry;
     candidateRegistry.setSession("ses_1");

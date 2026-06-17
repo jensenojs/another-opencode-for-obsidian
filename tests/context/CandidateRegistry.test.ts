@@ -148,11 +148,10 @@ describe("CandidateRegistry", () => {
     expect(registry.snapshotIncluded()).toEqual([]);
   });
 
-  test("does not import OpenCode, proxy, bridge, or Obsidian resolver modules", () => {
+  test("does not import OpenCode, bridge, or Obsidian resolver modules", () => {
     const source = readFileSync("src/context/CandidateRegistry.ts", "utf8");
 
     expect(source).not.toContain("../client");
-    expect(source).not.toContain("../proxy");
     expect(source).not.toContain("../bridge");
     expect(source).not.toContain("obsidian");
     expect(source).not.toContain("ContextSyncer");

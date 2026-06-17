@@ -152,7 +152,7 @@ Commands:
   logs                  Print the XDG runtime log tail
   doctor                Run build and runtime checks
   bridge                Check bridge contracts against OpenCode and Obsidian declarations
-  theme                 Check the current proxy theme injection
+  theme                 Check the current bridge theme injection
 
 Options:
   --vault <path>        Vault path. Defaults to ANOTHER_OPENCODE_FOR_OBSIDIAN_VAULT or ~/obsidian
@@ -160,7 +160,7 @@ Options:
   --lines <n>           Log lines for logs/status. Default 80
   --force               Replace existing symlinks during install
   --skip-build          Skip build during doctor
-  --fixture             For theme: check current workspace proxy/theme code with a local HTML fixture
+  --fixture             For theme: check current workspace bridge/theme code with a local HTML fixture
   --full                For theme: print the full diagnostics payload
 `);
 }

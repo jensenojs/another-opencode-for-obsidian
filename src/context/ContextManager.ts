@@ -22,6 +22,8 @@ const WORKSPACE_CONTEXT_SOURCE = "Obsidian workspace";
 const WORKSPACE_SOURCE_ID = "workspace";
 const WORKSPACE_IDENTITY_KEY = "current";
 
+// Coordinates Obsidian context sources and local candidates. OpenCode UI
+// adapters receive already decided context from this layer.
 type ContextManagerDeps = {
   app: App;
   settings: OpenCodeSettings;
