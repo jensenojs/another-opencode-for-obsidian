@@ -230,12 +230,13 @@ Current bridge direction:
 
 - [bridge module guide](src/bridge/AGENTS.md) records the local Obsidian and
   OpenCode source anchors.
+- [native prompt context bridge design](docs/plans/2026-06-18-opencode-native-prompt-context-bridge.md)
+  records the live experiment, bridge API, and candidate-to-card sync design.
 - `src/bridge/OpenCodePromptContextAdapter.ts` records the OpenCode native
   prompt context card shape used by future integration work.
-- Short term: explicit add-to-prompt can use OpenCode prompt storage plus an
-  iframe reload.
-- Long term: use or upstream a live Web UI bridge that calls
-  `prompt.context.add(item)` inside OpenCode's `PromptProvider` tree.
+- Use a live Web UI bridge that calls `prompt.context.add(item)` inside
+  OpenCode's `PromptProvider` tree. Direct prompt storage writes are only useful
+  as debugging evidence because they do not update the current Solid store.
 - Obsidian-owned cards should not fake OpenCode review comments. The native card
   can show, remove, and submit them; navigation back to Obsidian belongs in the
   plugin injection bridge.

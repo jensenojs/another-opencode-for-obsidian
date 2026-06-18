@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { getRuntimePaths } from "../src/debug/RuntimeDiagnostics";
 import { buildBridgeReport, summarizeBridgeReport } from "./harness/bridgeReport";
 import { probeHealth } from "./harness/healthProbe";
+import { defaultDevtoolsListUrl, reloadObsidianPlugin } from "./harness/obsidianReload";
 import {
   CheckResult,
   defaultOpenCodeSourcePath,
@@ -30,7 +31,16 @@ import {
 } from "./harness/runtimeSummary";
 import { buildThemeReport, summarizeThemeReport } from "./harness/themeReport";
 
-type Command = "help" | "paths" | "install" | "status" | "logs" | "doctor" | "bridge" | "theme";
+type Command =
+  | "help"
+  | "paths"
+  | "install"
+  | "status"
+  | "logs"
+  | "doctor"
+  | "bridge"
+  | "theme"
+  | "reload";
 
 interface Args {
   command: Command;
@@ -41,6 +51,10 @@ interface Args {
   skipBuild: boolean;
   themeSource: "runtime" | "fixture";
   themeFull: boolean;
+  cdpPort: number;
+  reloadSettleMs: number;
+  reloadOpenView: boolean;
+  reloadRestartServer: boolean;
 }
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -80,6 +94,10 @@ async function main(): Promise<void> {
     await theme(args);
     return;
   }
+  if (args.command === "reload") {
+    await reload(args);
+    return;
+  }
 }
 
 function parseArgs(argv: string[]): Args {
@@ -93,6 +111,10 @@ function parseArgs(argv: string[]): Args {
     skipBuild: false,
     themeSource: "runtime",
     themeFull: false,
+    cdpPort: 9222,
+    reloadSettleMs: 1500,
+    reloadOpenView: true,
+    reloadRestartServer: true,
   };
 
   for (let index = 1; index < argv.length; index += 1) {
@@ -129,10 +151,28 @@ function parseArgs(argv: string[]): Args {
       args.themeFull = true;
       continue;
     }
+    if (part === "--cdp-port" && next) {
+      args.cdpPort = Math.max(1, Number.parseInt(next, 10) || args.cdpPort);
+      index += 1;
+      continue;
+    }
+    if (part === "--settle-ms" && next) {
+      args.reloadSettleMs = Math.max(0, Number.parseInt(next, 10) || args.reloadSettleMs);
+      index += 1;
+      continue;
+    }
+    if (part === "--no-open-view") {
+      args.reloadOpenView = false;
+      continue;
+    }
+    if (part === "--no-restart-server") {
+      args.reloadRestartServer = false;
+      continue;
+    }
   }
 
   if (
-    !["help", "paths", "install", "status", "logs", "doctor", "bridge", "theme"].includes(
+    !["help", "paths", "install", "status", "logs", "doctor", "bridge", "theme", "reload"].includes(
       args.command
     )
   ) {
@@ -153,6 +193,7 @@ Commands:
   doctor                Run build and runtime checks
   bridge                Check bridge contracts against OpenCode and Obsidian declarations
   theme                 Check the current bridge theme injection
+  reload                Reload the Obsidian plugin through Chrome DevTools
 
 Options:
   --vault <path>        Vault path. Defaults to ANOTHER_OPENCODE_FOR_OBSIDIAN_VAULT or ~/obsidian
@@ -162,6 +203,10 @@ Options:
   --skip-build          Skip build during doctor
   --fixture             For theme: check current workspace bridge/theme code with a local HTML fixture
   --full                For theme: print the full diagnostics payload
+  --cdp-port <n>        For reload: Chrome DevTools port. Default 9222
+  --settle-ms <n>       For reload: wait after server start/view open. Default 1500
+  --no-open-view        For reload: do not execute open-opencode-view after reload
+  --no-restart-server   For reload: do not call plugin.startServer() after reload
 `);
 }
 
@@ -257,6 +302,35 @@ async function theme(args: Args): Promise<void> {
   });
   console.log(JSON.stringify(args.themeFull ? report : summarizeThemeReport(report), null, 2));
   if (!report.ok) {
+    process.exitCode = 1;
+  }
+}
+
+async function reload(args: Args): Promise<void> {
+  const report = await reloadObsidianPlugin({
+    devtoolsListUrl: defaultDevtoolsListUrl(args.cdpPort),
+    settleMs: args.reloadSettleMs,
+    openView: args.reloadOpenView,
+    restartServer: args.reloadRestartServer,
+  });
+  const runtimeStatus = readJson(getRuntimePaths().statusFile);
+  const healthProbe = runtimeStatus?.healthUrl ? await probeHealth(runtimeStatus.healthUrl) : null;
+
+  console.log(
+    JSON.stringify(
+      {
+        ...report,
+        runtime: {
+          status: runtimeStatus ? summarizeRuntimeStatus(runtimeStatus) : null,
+          healthProbe,
+        },
+      },
+      null,
+      2
+    )
+  );
+
+  if (!report.ok || healthProbe?.healthy === false) {
     process.exitCode = 1;
   }
 }
