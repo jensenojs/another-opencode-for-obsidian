@@ -61,7 +61,7 @@ describe("AutoSelectionContextSource", () => {
     });
   });
 
-  test("ignores disabled and empty selections without clearing the queue", () => {
+  test("ignores disabled selections and empty selections", () => {
     let enabled = true;
     const source = new AutoSelectionContextSource({
       isEnabled: () => enabled,

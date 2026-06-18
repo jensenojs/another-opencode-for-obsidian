@@ -73,6 +73,8 @@ describe("PromptContextSurfaceTrace", () => {
       unexpectedWebUiKeys: ["file:/vault/orphan.md:undefined:undefined"],
       duplicateExpectedKeys: [],
       duplicateWebUiKeys: [],
+      failedNativeSyncProjectionIds: [],
+      failedNativeSyncKeys: [],
     });
     expect(trace.statusBar.candidates[0]).toMatchObject({
       sourceKind: "workspace",
@@ -84,6 +86,47 @@ describe("PromptContextSurfaceTrace", () => {
       path: "/vault/orphan.md",
       selection: null,
     });
+  });
+
+  test("records inconsistency when a native projection fails to sync", () => {
+    const projection = makeProjection();
+    const trace = buildPromptContextSurfaceTrace({
+      reason: "candidates-changed",
+      checkedAt: new Date("2026-06-18T00:00:00.000Z"),
+      candidates: [makeCandidate()],
+      nativeProjections: [projection],
+      projectionFailures: [],
+      nativeSyncResults: [
+        {
+          projectionId: projection.projectionId,
+          candidateId: projection.candidateId,
+          key: "file:/vault/a.md:2:2",
+          status: "failed",
+          reason: "prompt context command timed out",
+        },
+      ],
+      webUiItems: [],
+    });
+
+    expect(trace.consistent).toBe(false);
+    expect(trace.statusBar.nativeSyncFailureCount).toBe(1);
+    expect(trace.statusBar.nativeSyncFailures).toEqual([
+      {
+        projectionId: projection.projectionId,
+        candidateId: projection.candidateId,
+        key: "file:/vault/a.md:2:2",
+        status: "failed",
+        reason: "prompt context command timed out",
+      },
+    ]);
+    expect(trace.mismatch).toMatchObject({
+      expectedNativeCardCount: 1,
+      webUiItemCount: 0,
+      missingExpectedKeys: ["file:/vault/a.md:2:2"],
+      failedNativeSyncProjectionIds: [projection.projectionId],
+      failedNativeSyncKeys: ["file:/vault/a.md:2:2"],
+    });
+    expect(summarizePromptContextSurfaceTrace(trace).statusBar.nativeSyncFailureCount).toBe(1);
   });
 
   test("does not share mismatch objects between summary and full trace", () => {

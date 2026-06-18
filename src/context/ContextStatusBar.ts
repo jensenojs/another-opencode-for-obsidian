@@ -11,6 +11,14 @@ import { getText } from "../i18n";
 import { OPENCODE_ICON_NAME } from "../icons";
 import type { PromptContextProjectionFailure } from "./PromptContextProjection";
 
+export interface ContextStatusBarNativeSyncFailure {
+  projectionId: string;
+  candidateId: string | null;
+  key: string | null;
+  status: string;
+  reason: string | null;
+}
+
 interface ContextStatusBarDeps {
   addStatusBarItem: () => HTMLElement;
   getItems: () => ContextItem[];
@@ -18,6 +26,7 @@ interface ContextStatusBarDeps {
   getCandidates?: () => ContextCandidate[];
   onCandidatesChanged?: (callback: (items: ContextCandidate[]) => void) => () => void;
   getProjectionFailures?: () => PromptContextProjectionFailure[];
+  getNativeSyncFailures?: () => ContextStatusBarNativeSyncFailure[];
   toggleCandidate?: (candidateId: string) => ContextCandidate | null;
   removeCandidate?: (candidateId: string) => ContextCandidate | null;
   resolveItem: (item: ContextStatusBarSource) => ContextNavigationResolution;
@@ -59,15 +68,21 @@ export class ContextStatusBar {
     const text = getText();
     const total = items.length + candidates.length;
     const includedCandidates = candidates.filter((candidate) => candidate.included).length;
+    const nativeSyncFailures = this.getNativeSyncFailures();
     const statusCount = candidates.length > 0 ? includedCandidates : items.length;
     this.statusEl.empty();
     this.statusEl.toggleClass("is-active", total > 0);
+    this.statusEl.toggleClass("is-warning", nativeSyncFailures.length > 0);
     this.renderStatusLabel(text.context.statusText(statusCount));
-    this.statusEl.title = text.context.statusTitle(
+    const statusTitle = text.context.statusTitle(
       includedCandidates,
       candidates.length,
       items.length
     );
+    this.statusEl.title =
+      nativeSyncFailures.length > 0
+        ? `${statusTitle}. ${text.context.nativeSyncFailureSummary(nativeSyncFailures.length)}`
+        : statusTitle;
     if (this.popoverEl) {
       this.renderPopover(items, candidates);
     }
@@ -188,21 +203,32 @@ export class ContextStatusBar {
     const failures = new Map(
       (this.deps.getProjectionFailures?.() ?? []).map((failure) => [failure.candidateId, failure])
     );
+    const nativeSyncFailures = new Map(
+      this.getNativeSyncFailures()
+        .filter((failure) => failure.candidateId)
+        .map((failure) => [failure.candidateId as string, failure])
+    );
     for (const candidate of candidates) {
-      this.renderCandidateRow(listEl, candidate, failures.get(candidate.id));
+      this.renderCandidateRow(
+        listEl,
+        candidate,
+        failures.get(candidate.id),
+        nativeSyncFailures.get(candidate.id)
+      );
     }
   }
 
   private renderCandidateRow(
     listEl: HTMLElement,
     candidate: ContextCandidate,
-    projectionFailure?: PromptContextProjectionFailure
+    projectionFailure?: PromptContextProjectionFailure,
+    nativeSyncFailure?: ContextStatusBarNativeSyncFailure
   ): void {
     const rowEl = listEl.createDiv({ cls: "opencode-ctx-item opencode-ctx-candidate" });
     const resolution = this.deps.resolveItem(candidate);
     rowEl.toggleClass("is-unresolved", resolution.status === "unresolved");
     rowEl.toggleClass("is-excluded", !candidate.included);
-    rowEl.toggleClass("is-failed", candidate.status === "failed");
+    rowEl.toggleClass("is-failed", candidate.status === "failed" || Boolean(nativeSyncFailure));
     rowEl.setAttribute("role", "button");
     rowEl.setAttribute("tabindex", "0");
     rowEl.setAttribute("aria-pressed", String(candidate.included));
@@ -228,9 +254,9 @@ export class ContextStatusBar {
     const bodyEl = rowEl.createDiv({ cls: "opencode-ctx-item-body" });
     bodyEl.createDiv({ cls: "opencode-ctx-item-label", text: candidate.label });
     bodyEl.createDiv({ cls: "opencode-ctx-item-source", text: this.formatSource(candidate) });
-    this.renderCandidatePills(bodyEl, candidate, resolution, projectionFailure);
+    this.renderCandidatePills(bodyEl, candidate, resolution, projectionFailure, nativeSyncFailure);
 
-    if (resolution.status === "unresolved" || candidate.status === "failed") {
+    if (resolution.status === "unresolved" || candidate.status === "failed" || nativeSyncFailure) {
       rowEl.createSpan({
         cls: "opencode-ctx-warning",
         text: "!",
@@ -536,7 +562,8 @@ export class ContextStatusBar {
     bodyEl: HTMLElement,
     candidate: ContextCandidate,
     resolution: ContextNavigationResolution,
-    projectionFailure?: PromptContextProjectionFailure
+    projectionFailure?: PromptContextProjectionFailure,
+    nativeSyncFailure?: ContextStatusBarNativeSyncFailure
   ): void {
     const detailsEl = bodyEl.createDiv({ cls: "opencode-ctx-item-details" });
     detailsEl.createSpan({
@@ -561,10 +588,20 @@ export class ContextStatusBar {
         text: `native card skipped: ${projectionFailure.reason}`,
       });
     }
+    if (nativeSyncFailure) {
+      detailsEl.createSpan({
+        cls: "opencode-ctx-pill is-warning",
+        text: getText().context.nativeSyncFailed(nativeSyncFailure.reason),
+      });
+    }
   }
 
   private getCandidates(): ContextCandidate[] {
     return this.deps.getCandidates?.() ?? [];
+  }
+
+  private getNativeSyncFailures(): ContextStatusBarNativeSyncFailure[] {
+    return this.deps.getNativeSyncFailures?.() ?? [];
   }
 }
 

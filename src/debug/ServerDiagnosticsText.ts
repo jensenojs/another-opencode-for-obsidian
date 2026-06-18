@@ -1,9 +1,11 @@
 import type { ServerDiagnostics } from "../server/ServerManager";
+import type { RuntimeDiagnosticsSnapshot } from "./RuntimeDiagnostics";
 import { getText } from "../i18n";
 
 export type ServerDiagnosticsSnapshot = ServerDiagnostics & {
   logFile: string;
   statusFile: string;
+  runtimeDiagnostics?: RuntimeDiagnosticsSnapshot;
 };
 
 export function formatServerDiagnosticsForClipboard(
@@ -29,6 +31,7 @@ export function formatServerDiagnosticsForClipboard(
       processEnvironment: diagnostics.processEnvironment,
       lastSpawnEnvironment: diagnostics.lastSpawnEnvironment,
       lastResolvedExecutable: diagnostics.lastResolvedExecutable,
+      runtimeDiagnostics: diagnostics.runtimeDiagnostics,
       logFile: diagnostics.logFile,
       statusFile: diagnostics.statusFile,
     },

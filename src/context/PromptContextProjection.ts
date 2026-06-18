@@ -197,7 +197,7 @@ function buildNativeFileProjection(
   candidate: ContextCandidate,
   resolver: OpenCodeContextPathResolver
 ): PromptContextProjectionBuildResult {
-  if (candidate.sourceKind === "workspace" && !hasWorkspaceActiveLocation(candidate)) {
+  if (candidate.sourceKind === "workspace" && !candidate.navigationSourceFile) {
     return {
       projections: [
         {
@@ -263,14 +263,6 @@ function buildNativeFileProjection(
     ],
     failures: [],
   };
-}
-
-function hasWorkspaceActiveLocation(candidate: ContextCandidate): boolean {
-  return Boolean(
-    candidate.navigationSourceFile &&
-    Number.isInteger(candidate.startLine) &&
-    Number.isInteger(candidate.endLine)
-  );
 }
 
 function buildNativeCommentProjection(

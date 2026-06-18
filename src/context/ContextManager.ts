@@ -246,6 +246,10 @@ export class ContextManager {
         selection,
       })
     );
+    const leaf = this.getLeafForRefresh();
+    if (leaf) {
+      await this.refreshContext(leaf);
+    }
   }
 
   private getLeafForRefresh(): WorkspaceLeaf | null {

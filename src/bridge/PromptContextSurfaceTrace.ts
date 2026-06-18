@@ -3,6 +3,7 @@ import type {
   PromptContextProjectionFailure,
 } from "../context/PromptContextProjection";
 import type { ContextCandidate } from "../types";
+import type { NativePromptContextProjectionSyncResult } from "./NativePromptContextBridge";
 import {
   openCodePromptContextItemKey,
   type OpenCodeFileContextItem,
@@ -19,9 +20,11 @@ export interface PromptContextSurfaceTrace {
     includedCandidateCount: number;
     nativeProjectionCount: number;
     projectionFailureCount: number;
+    nativeSyncFailureCount: number;
     candidates: PromptContextCandidateTrace[];
     nativeProjections: PromptContextNativeProjectionTrace[];
     projectionFailures: PromptContextProjectionFailureTrace[];
+    nativeSyncFailures: PromptContextNativeSyncFailureTrace[];
   };
   webUi: {
     itemCount: number;
@@ -40,6 +43,7 @@ export interface PromptContextSurfaceTraceSummary {
     includedCandidateCount: number;
     nativeProjectionCount: number;
     projectionFailureCount: number;
+    nativeSyncFailureCount: number;
   };
   webUi: {
     itemCount: number;
@@ -82,6 +86,14 @@ export interface PromptContextProjectionFailureTrace {
   sourcePath: string;
 }
 
+export interface PromptContextNativeSyncFailureTrace {
+  projectionId: string;
+  candidateId: string | null;
+  key: string | null;
+  status: NativePromptContextProjectionSyncResult["status"];
+  reason: string | null;
+}
+
 export interface PromptContextWebUiItemTrace {
   key: string;
   path: string;
@@ -99,6 +111,8 @@ export interface PromptContextSurfaceMismatch {
   unexpectedWebUiKeys: string[];
   duplicateExpectedKeys: string[];
   duplicateWebUiKeys: string[];
+  failedNativeSyncProjectionIds: string[];
+  failedNativeSyncKeys: string[];
 }
 
 export interface PromptContextSurfaceCleanupPlan {
@@ -118,13 +132,18 @@ export function buildPromptContextSurfaceTrace(input: {
   candidates: ContextCandidate[];
   nativeProjections: NativePromptContextProjection[];
   projectionFailures: PromptContextProjectionFailure[];
+  nativeSyncResults?: NativePromptContextProjectionSyncResult[];
   webUiItems: OpenCodePromptContextItem[];
 }): PromptContextSurfaceTrace {
   const nativeProjections = input.nativeProjections.map(summarizeNativeProjection);
   const webUiItems = input.webUiItems.map(summarizeWebUiItem);
+  const nativeSyncFailures = summarizeNativeSyncFailures(
+    input.nativeSyncResults ?? [],
+    nativeProjections
+  );
   const expectedKeys = nativeProjections.map((projection) => projection.key);
   const webUiKeys = webUiItems.map((item) => item.key);
-  const mismatch = buildMismatch(expectedKeys, webUiKeys);
+  const mismatch = buildMismatch(expectedKeys, webUiKeys, nativeSyncFailures);
 
   return {
     reason: input.reason,
@@ -136,9 +155,11 @@ export function buildPromptContextSurfaceTrace(input: {
       includedCandidateCount: input.candidates.filter((candidate) => candidate.included).length,
       nativeProjectionCount: nativeProjections.length,
       projectionFailureCount: input.projectionFailures.length,
+      nativeSyncFailureCount: nativeSyncFailures.length,
       candidates: input.candidates.map(summarizeCandidate),
       nativeProjections,
       projectionFailures: input.projectionFailures.map(summarizeProjectionFailure),
+      nativeSyncFailures,
     },
     webUi: {
       itemCount: webUiItems.length,
@@ -161,6 +182,7 @@ export function summarizePromptContextSurfaceTrace(
       includedCandidateCount: trace.statusBar.includedCandidateCount,
       nativeProjectionCount: trace.statusBar.nativeProjectionCount,
       projectionFailureCount: trace.statusBar.projectionFailureCount,
+      nativeSyncFailureCount: trace.statusBar.nativeSyncFailureCount,
     },
     webUi: {
       itemCount: trace.webUi.itemCount,
@@ -239,6 +261,29 @@ function summarizeProjectionFailure(
   };
 }
 
+function summarizeNativeSyncFailures(
+  results: NativePromptContextProjectionSyncResult[],
+  nativeProjections: PromptContextNativeProjectionTrace[]
+): PromptContextNativeSyncFailureTrace[] {
+  const expectedProjectionIds = new Set(
+    nativeProjections.map((projection) => projection.projectionId)
+  );
+  return results
+    .filter((result) => {
+      if (!expectedProjectionIds.has(result.projectionId)) {
+        return false;
+      }
+      return result.status !== "synced" && result.status !== "unchanged";
+    })
+    .map((result) => ({
+      projectionId: result.projectionId,
+      candidateId: result.candidateId ?? null,
+      key: result.key ?? null,
+      status: result.status,
+      reason: result.reason ?? null,
+    }));
+}
+
 function summarizeWebUiItem(item: OpenCodePromptContextItem): PromptContextWebUiItemTrace {
   return {
     key: item.key || openCodePromptContextItemKey(item),
@@ -253,12 +298,17 @@ function summarizeWebUiItem(item: OpenCodePromptContextItem): PromptContextWebUi
 
 function buildMismatch(
   expectedKeys: string[],
-  webUiKeys: string[]
+  webUiKeys: string[],
+  nativeSyncFailures: PromptContextNativeSyncFailureTrace[]
 ): PromptContextSurfaceMismatch | null {
   const missingExpectedKeys = multisetDifference(expectedKeys, webUiKeys);
   const unexpectedWebUiKeys = multisetDifference(webUiKeys, expectedKeys);
   const duplicateExpectedKeys = duplicateKeys(expectedKeys);
   const duplicateWebUiKeys = duplicateKeys(webUiKeys);
+  const failedNativeSyncProjectionIds = nativeSyncFailures.map((failure) => failure.projectionId);
+  const failedNativeSyncKeys = nativeSyncFailures
+    .map((failure) => failure.key)
+    .filter((key): key is string => Boolean(key));
   const countMismatch = expectedKeys.length !== webUiKeys.length;
 
   if (
@@ -266,7 +316,8 @@ function buildMismatch(
     missingExpectedKeys.length === 0 &&
     unexpectedWebUiKeys.length === 0 &&
     duplicateExpectedKeys.length === 0 &&
-    duplicateWebUiKeys.length === 0
+    duplicateWebUiKeys.length === 0 &&
+    failedNativeSyncProjectionIds.length === 0
   ) {
     return null;
   }
@@ -278,6 +329,8 @@ function buildMismatch(
     unexpectedWebUiKeys,
     duplicateExpectedKeys,
     duplicateWebUiKeys,
+    failedNativeSyncProjectionIds,
+    failedNativeSyncKeys,
   };
 }
 
@@ -289,6 +342,8 @@ function cloneMismatch(mismatch: PromptContextSurfaceMismatch): PromptContextSur
     unexpectedWebUiKeys: [...mismatch.unexpectedWebUiKeys],
     duplicateExpectedKeys: [...mismatch.duplicateExpectedKeys],
     duplicateWebUiKeys: [...mismatch.duplicateWebUiKeys],
+    failedNativeSyncProjectionIds: [...mismatch.failedNativeSyncProjectionIds],
+    failedNativeSyncKeys: [...mismatch.failedNativeSyncKeys],
   };
 }
 

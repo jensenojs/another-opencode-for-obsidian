@@ -136,6 +136,56 @@ describe("ContextManager", () => {
     });
   });
 
+  test("collapsed cursor ranges keep queued selected ranges and refresh workspace active location", async () => {
+    await withContextManagerDom(async (window) => {
+      const activeView = createMarkdownView("note.md", "selected", 1, 1, 1);
+      const { app, handlers } = createAppWithEvents({
+        activeLeaf: createOpenCodeLeaf(),
+        activeMarkdownView: activeView,
+        markdownLeaves: [{ view: activeView }],
+      });
+      const settings = createSettings();
+      const manager = createManager({ app, settings });
+      manager.updateSettings(settings);
+
+      handlers["editor-change"]?.(null, activeView);
+      await tick();
+      expect(manager.getCandidates()).toMatchObject([
+        {
+          sourceId: "selection",
+          sourceKind: "selection",
+          text: "selected",
+        },
+      ]);
+
+      activeView.editor = createMarkdownView("note.md", "", 9, 9, 9, true).editor;
+      document.dispatchEvent(new window.Event("selectionchange") as unknown as Event);
+      await delay(160);
+
+      expect(manager.getCandidates()).toMatchObject([
+        {
+          sourceId: "selection",
+          sourceKind: "selection",
+          text: "selected",
+          lifetime: "one-shot",
+        },
+        {
+          sourceId: "workspace",
+          sourceKind: "workspace",
+          identityKey: "current",
+          navigationSourceFile: "note.md",
+          startLine: 9,
+          endLine: 9,
+          lifetime: "dynamic",
+        },
+      ]);
+
+      const disabled = createSettings();
+      disabled.contextAssist.enabled = false;
+      manager.updateSettings(disabled);
+    });
+  });
+
   test("selection polling stops when the selection source is disabled", async () => {
     await withContextManagerDom(async (window) => {
       const activeView = createMarkdownView("active.md", "selected from editor", 4, 6);

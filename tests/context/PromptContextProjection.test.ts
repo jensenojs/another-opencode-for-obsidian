@@ -47,7 +47,7 @@ describe("PromptContextProjection", () => {
     });
   });
 
-  test("keeps workspace aggregate synthetic when it has no active line", () => {
+  test("projects workspace to a native file card when it has a file target without an active line", () => {
     const result = buildPromptContextProjections(
       [
         makeCandidate({
@@ -58,6 +58,41 @@ describe("PromptContextProjection", () => {
           lifetime: "dynamic",
           sourceFile: "Obsidian workspace",
           navigationSourceFile: "notes/active.md",
+          startLine: undefined,
+          endLine: undefined,
+        }),
+      ],
+      resolver()
+    );
+
+    expect(filterNativeFileCardProjections(result.projections)).toHaveLength(1);
+    expect(filterSyntheticTextProjections(result.projections)).toHaveLength(0);
+    expect(result.projections[0]).toMatchObject({
+      kind: "native-file-card",
+      projectionId: "native:workspace:current",
+      native: {
+        item: {
+          type: "file",
+          path: "/vault/notes/active.md",
+          selection: undefined,
+        },
+        clickAction: { type: "obsidian-open", path: "notes/active.md" },
+      },
+    });
+    expect(result.failures).toEqual([]);
+  });
+
+  test("keeps workspace aggregate synthetic when it has no concrete file target", () => {
+    const result = buildPromptContextProjections(
+      [
+        makeCandidate({
+          id: "workspace",
+          sourceId: "workspace",
+          sourceKind: "workspace",
+          identityKey: "current",
+          lifetime: "dynamic",
+          sourceFile: "Obsidian workspace",
+          navigationSourceFile: undefined,
           startLine: undefined,
           endLine: undefined,
         }),

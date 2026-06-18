@@ -416,6 +416,56 @@ describe("ContextStatusBar", () => {
     });
   });
 
+  test("warns when an included candidate failed to attach as a native OpenCode card", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [],
+        onItemsChanged: (callback) => {
+          callback([]);
+          return () => {};
+        },
+        getCandidates: () => [candidateItem],
+        onCandidatesChanged: (callback) => {
+          callback([candidateItem]);
+          return () => {};
+        },
+        getNativeSyncFailures: () => [
+          {
+            projectionId: "native:selection:latest",
+            candidateId: candidateItem.id,
+            key: "file:/vault/candidate.md:7:9",
+            status: "failed",
+            reason: "prompt context command timed out",
+          },
+        ],
+        toggleCandidate: () => null,
+        resolveItem: (item) => ({ status: "resolved", path: item.sourceFile, line: null }),
+        openItem: async (item) => ({ status: "opened", path: item.sourceFile, line: null }),
+        removeItem: async () => true,
+      });
+
+      expect(statusEl.textContent).toBe("1");
+      expect(statusEl.classList.contains("is-warning")).toBe(true);
+      expect(statusEl.title).toContain("1 OpenCode context card failed to attach");
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(
+        window.document.querySelector(".opencode-ctx-candidate")?.classList.contains("is-failed")
+      ).toBe(true);
+      expect(window.document.body.textContent).toContain(
+        "OpenCode card failed: prompt context command timed out"
+      );
+      expect(window.document.querySelectorAll(".opencode-ctx-warning")).toHaveLength(1);
+
+      statusBar.destroy();
+    });
+  });
+
   test("candidate toggle delegates locally and does not remove committed context", async () => {
     await withContextStatusBarDom(async (window) => {
       const statusEl = window.document.createElement("div");
