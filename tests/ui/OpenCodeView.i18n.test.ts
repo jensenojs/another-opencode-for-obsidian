@@ -111,12 +111,14 @@ function withViewDom(run: (window: Window) => void | Promise<void>): void | Prom
 
 function ensureViewContentEl(view: OpenCodeViewClass, window: Window): void {
   const existing = (view as any).contentEl;
-  if (existing) {
-    return;
+  if (!existing) {
+    const contentEl = window.document.createElement("div");
+    window.document.body.append(contentEl);
+    (view as any).contentEl = contentEl;
   }
-  const contentEl = window.document.createElement("div");
-  window.document.body.append(contentEl);
-  (view as any).contentEl = contentEl;
+  if (typeof (view as any).registerDomEvent !== "function") {
+    (view as any).registerDomEvent = () => {};
+  }
 }
 
 function installObsidianElementHelpers(window: Window): void {
