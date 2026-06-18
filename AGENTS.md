@@ -614,7 +614,6 @@ Obsidian 命令面板中的 `Copy OpenCode diagnostics` 会复制同一份 serve
 
 <!-- bv-agent-instructions-v2 -->
 
-
 ## Beads Workflow Integration
 
 This project uses [beads_rust](https://github.com/Dicklesworthstone/beads_rust) (`br`) for issue tracking and [beads_viewer](https://github.com/Dicklesworthstone/beads_viewer) (`bv`) for graph-aware triage. Issues are stored in `.beads/` and tracked in git.
@@ -694,4 +693,3 @@ br sync --flush-only  # Export DB to JSONL
 - **Priority**: P0=critical, P1=high, P2=medium, P3=low, P4=backlog (use numbers 0-4, not words)
 - **Types**: task, bug, feature, epic, chore, docs, question
 - **Blocking**: `br dep add <issue> <depends-on>` to add dependencies
-
