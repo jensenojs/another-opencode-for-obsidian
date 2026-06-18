@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "path";
 import {
   buildPromptContextProjections,
   createOpenCodeContextPathResolver,
@@ -34,7 +35,7 @@ describe("PromptContextProjection", () => {
       native: {
         item: {
           type: "file",
-          path: "/vault/notes/active.md",
+          path: join("/vault", "notes/active.md"),
           selection: {
             startLine: 12,
             startChar: 0,
@@ -73,7 +74,7 @@ describe("PromptContextProjection", () => {
       native: {
         item: {
           type: "file",
-          path: "/vault/notes/active.md",
+          path: join("/vault", "notes/active.md"),
           selection: undefined,
         },
         clickAction: { type: "obsidian-open", path: "notes/active.md" },
@@ -111,7 +112,7 @@ describe("PromptContextProjection", () => {
     expect(result.failures).toEqual([]);
     expect(filterNativeFileCardProjections(result.projections)[0].native.item).toEqual({
       type: "file",
-      path: "/vault/notes/example.md",
+      path: join("/vault", "notes/example.md"),
       selection: {
         startLine: 3,
         startChar: 0,

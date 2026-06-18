@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "os";
-import { join } from "path";
+import { join, sep } from "path";
 import {
   defaultOpenCodeSourcePath,
   defaultVaultPath,
@@ -18,7 +18,7 @@ describe("harness path helpers", () => {
   });
 
   test("formatHomePath prints user-local paths with ~", () => {
-    expect(formatHomePath(join(homedir(), "obsidian"))).toBe("~/obsidian");
+    expect(formatHomePath(join(homedir(), "obsidian"))).toBe(`~${sep}obsidian`);
     expect(formatHomePath("/tmp/obsidian")).toBe("/tmp/obsidian");
   });
 
@@ -34,6 +34,8 @@ describe("harness path helpers", () => {
   });
 
   test("pluginDir remains the single vault plugin path constructor", () => {
-    expect(pluginDir("/vault")).toBe("/vault/.obsidian/plugins/another-opencode-for-obsidian");
+    expect(pluginDir("/vault")).toBe(
+      join("/vault", ".obsidian", "plugins", "another-opencode-for-obsidian")
+    );
   });
 });

@@ -14,7 +14,7 @@ _这是第三方 fork。它不隶属于 OpenCode 或 Obsidian。_
 
 ## 亮点
 
-- **两种视图**：`Mod+Shift+O` 打开侧边栏，`Mod+Shift+L` 打开主编辑区 deep view。
+- **两种视图**：OpenCode 可以放在侧边栏，也可以用 `Mod+Shift+L` 打开主编辑区 deep view。
 - **贴近 Obsidian 的 Web UI**：可选 Obsidian 派生外观，不 patch OpenCode 组件 class name。
 - **快捷键冲突控制**：Obsidian 和 OpenCode 快捷键会放进同一份 index，冲突在插件设置页处理。
 - **从 OpenCode 回到 vault**：file path、wikilink、heading、block、footnote、diff row 和 markdown path 都可以打开已有 Obsidian 笔记。
@@ -61,7 +61,7 @@ GraphIndex 已经通过 Obsidian `Vault` 和 `MetadataCache` 给插件提供 vau
 - 从 Obsidian 启动或 attach 到 OpenCode server。
 - 在侧边栏或主编辑区打开 OpenCode Web UI。
 - 使用 OpenCode 原生外观，或使用 Obsidian 派生外观。
-- 使用 `Mod+Shift+O` 打开侧边栏，使用 `Mod+Shift+L` 打开 deep view。
+- 可以在侧边栏打开 OpenCode，也可以用 `Mod+Shift+L` 打开 deep view。
 - 在插件设置页查看快捷键冲突，并选择由 Obsidian 或 OpenCode 处理。
 - 把 included Obsidian workspace / selection candidates 随同一条 OpenCode prompt 发送为 synthetic text parts。
 - 避免把自动 context 写进可见 OpenCode transcript，也避免制造单独的空 context message。
@@ -134,7 +134,7 @@ macOS 和 Linux 上，通过 GUI 启动的 Obsidian 可能拿不到 terminal 里
 ## 基本使用
 
 - 用 ribbon icon 或 command palette 打开 OpenCode pane。
-- 用 `Mod+Shift+O` 切换侧边栏。
+- 用 ribbon icon、command palette 或 Obsidian hotkeys 切换侧边栏。
 - 用 `Mod+Shift+L` 在主编辑区切换 deep view。
 - 从插件控件启动 OpenCode server，或配置 auto-start。
 - 正常使用 OpenCode Web UI。

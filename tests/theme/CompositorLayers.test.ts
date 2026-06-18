@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 
 describe("Obsidian appearance compositor layers", () => {
   test("keeps editor backdrop layers out of the Obsidian host", () => {
-    const styles = readFileSync("styles.css", "utf8");
+    const styles = normalizeLineEndings(readFileSync("styles.css", "utf8"));
 
     expect(styles).toContain(".opencode-appearance-obsidian::before");
     expect(styles).not.toContain("contain: paint");
@@ -23,7 +23,7 @@ describe("Obsidian appearance compositor layers", () => {
   });
 
   test("keeps the iframe element from painting a black Obsidian appearance backdrop", () => {
-    const styles = readFileSync("styles.css", "utf8");
+    const styles = normalizeLineEndings(readFileSync("styles.css", "utf8"));
     const viewSource = readFileSync("src/ui/OpenCodeView.ts", "utf8");
     const defaultIframeRule = ".opencode-iframe {\n  width: 100%;";
     const obsidianIframeRule =
@@ -36,3 +36,7 @@ describe("Obsidian appearance compositor layers", () => {
     expect(viewSource).not.toContain('allowtransparency: "true"');
   });
 });
+
+function normalizeLineEndings(input: string): string {
+  return input.replace(/\r\n/g, "\n");
+}

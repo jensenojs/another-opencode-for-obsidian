@@ -17,8 +17,7 @@ _This is a third-party fork. It is not affiliated with OpenCode or Obsidian._
 
 ## Highlights
 
-- **Two view modes**: side pane with `Mod+Shift+O`, main editor deep view with
-  `Mod+Shift+L`.
+- **Two view modes**: open OpenCode in the sidebar, or use `Mod+Shift+L` for main editor deep view.
 - **Obsidian-aware Web UI**: optional Obsidian-derived appearance without
   patching OpenCode component class names.
 - **Shortcut conflict control**: Obsidian and OpenCode shortcuts are indexed
@@ -70,7 +69,7 @@ Works today:
 - Start or attach to an OpenCode server from Obsidian.
 - Open the OpenCode Web UI in the sidebar or main editor area.
 - Use either OpenCode's native appearance or an Obsidian-derived appearance.
-- Use `Mod+Shift+O` for the side pane and `Mod+Shift+L` for deep view.
+- Open OpenCode in the sidebar, or use `Mod+Shift+L` for deep view.
 - See keyboard conflicts in plugin settings and choose whether Obsidian or
   OpenCode owns each conflicting shortcut.
 - Send included Obsidian workspace and selection candidates with the same
@@ -157,7 +156,7 @@ terminal. If OpenCode or local MCP tools cannot be found, prefer an absolute
 ## Basic Usage
 
 - Use the ribbon icon or command palette to open the OpenCode pane.
-- Use `Mod+Shift+O` to toggle the side pane.
+- Use the ribbon icon, command palette, or Obsidian hotkeys to toggle the side pane.
 - Use `Mod+Shift+L` to toggle deep view in the main editor area.
 - Start the OpenCode server from the plugin controls, or configure auto-start.
 - Use the OpenCode Web UI normally.
