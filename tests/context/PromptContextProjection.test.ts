@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "path";
+import { join, normalize } from "path";
 import {
   buildPromptContextProjections,
   createOpenCodeContextPathResolver,
@@ -211,7 +211,8 @@ describe("PromptContextProjection", () => {
 function resolver() {
   return createOpenCodeContextPathResolver({
     vaultBasePath: "/vault",
-    fileExists: (path) => path === "notes/example.md" || path === "notes/active.md",
+    fileExists: (path) =>
+      path === normalize("notes/example.md") || path === normalize("notes/active.md"),
   });
 }
 

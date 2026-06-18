@@ -1,4 +1,4 @@
-import { isAbsolute, join, normalize } from "path";
+import { isAbsolute, join, normalize, sep } from "path";
 import type { ContextCandidate } from "../types";
 import type { OpenCodeFileContextItem } from "../bridge/OpenCodePromptContextAdapter";
 
@@ -393,7 +393,7 @@ function normalizeVaultRelativePath(value: string): string | null {
   }
 
   const normalized = normalize(trimmed);
-  if (!isAbsolute(normalized) && (normalized === ".." || normalized.startsWith(`..${"/"}`))) {
+  if (!isAbsolute(normalized) && (normalized === ".." || normalized.startsWith(`..${sep}`))) {
     return null;
   }
   return normalized;
