@@ -103,7 +103,7 @@ jobs:
         with:
           name: Another OpenCode Plugin for Obsidian ${{ steps.get_version.outputs.tag }}
           body_path: release-notes/${{ steps.get_version.outputs.tag }}.md
-          prerelease: true
+          prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             manifest.json

@@ -40,6 +40,7 @@ describe("OpenCodeView i18n", () => {
     setPluginLanguageForTests("zh-CN");
     withViewDom((window) => {
       const view = new OpenCodeView({ app: {} } as any, fakePlugin() as any);
+      ensureViewContentEl(view, window);
 
       (view as any).renderStoppedState();
 
@@ -50,7 +51,7 @@ describe("OpenCodeView i18n", () => {
   });
 
   test("does not start the server when Obsidian restores the view", async () => {
-    await withViewDom(async () => {
+    await withViewDom(async (window) => {
       let startCount = 0;
       const view = new OpenCodeView(
         { app: {}, getRoot: () => null } as any,
@@ -60,6 +61,7 @@ describe("OpenCodeView i18n", () => {
           },
         }) as any
       );
+      ensureViewContentEl(view, window);
 
       await view.onOpen();
 
@@ -105,6 +107,16 @@ function withViewDom(run: (window: Window) => void | Promise<void>): void | Prom
     cleanup();
     throw error;
   }
+}
+
+function ensureViewContentEl(view: OpenCodeViewClass, window: Window): void {
+  const existing = (view as any).contentEl;
+  if (existing) {
+    return;
+  }
+  const contentEl = window.document.createElement("div");
+  window.document.body.append(contentEl);
+  (view as any).contentEl = contentEl;
 }
 
 function installObsidianElementHelpers(window: Window): void {
