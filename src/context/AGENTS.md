@@ -40,6 +40,13 @@ StatusBar and OpenCode native prompt context cards are two display/control surfa
 
 Do not add another local state store for StatusBar or native card visibility. If a UI needs to show whether something will be sent, derive that from `CandidateRegistry` plus bridge sync results.
 
+Workspace active cursor and selected text are different source facts:
+
+- Workspace owns active file/line. A collapsed editor cursor belongs under the workspace dynamic candidate and may project to one workspace native file card.
+- Selection owns explicit non-empty selected text. A one-line selection is valid only when the editor range is not collapsed; same line with different `ch` positions is still a real selection.
+- Do not turn plain click/cursor movement into one-shot selection candidates. If Obsidian briefly reports stale selected text while the editor range is already collapsed, ignore it as selection source input.
+- Repeated or overlapping real selections are upserted in `CandidateRegistry` and should restore `included=true`, because a fresh selection is a fresh user intent.
+
 Expected oc-ctx implementation shape:
 
 ```text

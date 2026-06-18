@@ -614,7 +614,6 @@ Obsidian 命令面板中的 `Copy OpenCode diagnostics` 会复制同一份 serve
 
 <!-- bv-agent-instructions-v2 -->
 
----
 
 ## Beads Workflow Integration
 
@@ -696,14 +695,3 @@ br sync --flush-only  # Export DB to JSONL
 - **Types**: task, bug, feature, epic, chore, docs, question
 - **Blocking**: `br dep add <issue> <depends-on>` to add dependencies
 
-### Session Protocol
-
-```bash
-git status              # Check what changed
-git add <files>         # Stage code changes
-br sync --flush-only    # Export beads changes to JSONL
-git commit -m "..."     # Commit everything
-git push                # Push to remote
-```
-
-<!-- end-bv-agent-instructions -->

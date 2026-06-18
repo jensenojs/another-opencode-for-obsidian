@@ -142,6 +142,44 @@ OpenCode server event stream
   -> RuntimeDiagnostics
 ```
 
+## Obsidian Appearance Baseline
+
+当前 OpenCode iframe 的 Obsidian 外观已经形成一组生产合同：
+
+- iframe document 自己拥有最终像素。不要恢复透明 iframe 依赖父窗口透出的路径。
+- Background 插件启用时，iframe 内部只允许 `body::before` 画一层 workspace background，合同是 `obsidian-workspace-background-v1`。
+- source variables 是父窗口事实，例如 `--obsidian-editor-background-*` / `--obsidian-workspace-background-*`；paint variables 是 iframe 内 `--another-opencode-for-obsidian-workspace-background-*`。桥接只做命名、过滤和派生。
+- 不把 active editor rect、iframe rect、负 offset、workspace union rect、父窗口大画布或 host pane background 写回生产绘制输入。
+- OpenCode v2 tokens 是主题桥接主面。legacy token 只能 alias 到 v2 token 或保持透明。
+- Obsidian appearance 下禁用 iframe 内 `backdrop-filter` 跨像素采样。允许 alpha surface、border、shadow、scrim，以及对 iframe 自己背景图做普通 `filter`。
+- Terminal 也走同一套 Obsidian theme hook。terminal canvas 背景保持透明，局部 textbox/material 从 Obsidian 派生。
+- theme diagnostics 和 harness theme check 必须能说明：root 背景、workspace background layer、large element samples、terminal bundle patch、backdrop-filter samples。
+
+这组规则的目的很窄：让 OpenCode 看起来像 Obsidian 里的工作面，同时避免 Electron iframe 透明合成、滚动采样和多层背景带来的残影或闪动。不要为了单张截图恢复旧实验路径。
+
+## Keyboard Bridge Inventory
+
+当前 iframe 快捷键桥接只有一个硬编码入口：
+
+```text
+BridgeInjection keydown
+  Cmd/Ctrl+L
+  -> BridgeProtocol view:toggle
+  -> OpenCodeView / ViewManager
+```
+
+这不是冲突感知系统。它不知道 Obsidian 当前有哪些 command hotkeys，也不知道 OpenCode 当前菜单、输入框、terminal 或 prompt composer 是否更应该消费该按键。
+
+下一阶段要做的 feature 是“快捷键冲突感知”，先按下面边界盘点：
+
+- Obsidian 稳定 API：`node_modules/obsidian/obsidian.d.ts` 里的 `Command.hotkeys`、`Hotkey`、`Keymap.pushScope/popScope`、`Scope.register()`。
+- 当前 `OpenCodeView` 没有给 iframe 请求 Obsidian command 的协议；`BridgeProtocol` 也没有 keyboard message。
+- iframe 内按键不会天然进入 Obsidian parent scope。若要调用 Obsidian 快捷键，iframe 必须把候选 key event 发给父窗口，由父窗口决定是否执行 Obsidian command。
+- 不要把更多快捷键硬编码成 `view:toggle` 同类逻辑。新增能力需要单独的 typed protocol，例如表达 key、modifiers、target hint、OpenCode claimed/ignored 状态、以及 parent 的 decision。
+- 不要用 OpenCode DOM selector 或 class name 来判断快捷键归属。可以使用 iframe 内稳定事实：active element tag/contenteditable、已知本地 port 状态、terminal/prompt focus 的公开或已 patch 出来的 typed state。
+- 冲突不是错误。Obsidian 是宿主，快捷键冲突默认由 Obsidian 处理；只有用户在插件设置页显式切到 OpenCode，才让 iframe 内 OpenCode 消费该按键。
+- 需要区分三类结果：OpenCode handled、Obsidian handled、unhandled passthrough。diagnostics 要记录冲突和决策摘要。
+
 ## Code Rule
 
 新增 bridge 能力时先标出它消费的本地来源：
