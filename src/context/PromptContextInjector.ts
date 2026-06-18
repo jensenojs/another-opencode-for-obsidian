@@ -1,5 +1,5 @@
-import type { ContextCandidate } from "../types";
-import type { CandidateRegistry } from "./CandidateRegistry";
+import type { CandidateRegistry, CandidateSnapshotRef } from "./CandidateRegistry";
+import type { PromptContextProjection } from "./PromptContextProjection";
 
 export interface PromptInjectionPlan {
   id: string;
@@ -10,7 +10,8 @@ export interface PromptInjectionPlan {
 
 interface StoredPromptInjectionPlan {
   sessionId: string;
-  candidateIds: string[];
+  candidateRefs: CandidateSnapshotRef[];
+  skippedDynamicRefs: CandidateSnapshotRef[];
 }
 
 interface PromptRequestBody {
@@ -25,45 +26,60 @@ export class PromptContextInjector {
 
   constructor(private candidates: CandidateRegistry) {}
 
-  prepare(sessionId: string, requestBody: unknown): PromptInjectionPlan | null {
-    const included = this.candidates.snapshotIncluded(sessionId);
+  prepare(
+    sessionId: string,
+    requestBody: unknown,
+    projections: PromptContextProjection[]
+  ): PromptInjectionPlan | null {
+    const synthetic = projections.filter(
+      (projection): projection is Extract<PromptContextProjection, { kind: "synthetic-text" }> =>
+        projection.kind === "synthetic-text"
+    );
+    const candidateIds = uniqueCandidateIds(
+      projections
+        .filter((projection) => projection.kind !== "status-only")
+        .map((projection) => projection.candidateId)
+    );
     const hasSkippedDynamic = this.candidates
       .getCandidates()
       .some((candidate) => candidate.lifetime === "dynamic" && !candidate.included);
-    if (included.length === 0 && !hasSkippedDynamic) {
+    if (candidateIds.length === 0 && !hasSkippedDynamic) {
       return null;
     }
 
-    if (!isPromptRequestBody(requestBody)) {
-      if (included.length > 0) {
-        this.candidates.markFailed(
-          included.map((candidate) => candidate.id),
-          "OpenCode prompt body did not expose a parts array"
-        );
-      }
+    if (synthetic.length > 0 && !isPromptRequestBody(requestBody)) {
+      this.candidates.markFailed(
+        synthetic.map((projection) => projection.candidateId),
+        "OpenCode prompt body did not expose a parts array"
+      );
       return null;
     }
 
     const planId = `prompt-plan:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-    const candidateParts = included.map((candidate) => ({
+    const candidateParts = synthetic.map((projection) => ({
       type: "text",
-      text: formatCandidateForPrompt(candidate),
+      text: projection.text,
       synthetic: true,
     }));
-    const nextBody: PromptRequestBody = {
-      ...requestBody,
-      parts: [...requestBody.parts, ...candidateParts],
-    };
+    const nextBody =
+      candidateParts.length > 0 && isPromptRequestBody(requestBody)
+        ? {
+            ...requestBody,
+            parts: [...requestBody.parts, ...candidateParts],
+          }
+        : requestBody;
 
+    const currentCandidates = this.candidates.getCandidates();
     this.plans.set(planId, {
       sessionId,
-      candidateIds: included.map((candidate) => candidate.id),
+      candidateRefs: snapshotCandidateRefs(currentCandidates, candidateIds),
+      skippedDynamicRefs: snapshotSkippedDynamicRefs(currentCandidates),
     });
 
     return {
       id: planId,
       sessionId,
-      candidateIds: included.map((candidate) => candidate.id),
+      candidateIds,
       requestBody: nextBody,
     };
   }
@@ -75,7 +91,12 @@ export class PromptContextInjector {
     }
 
     this.plans.delete(planId);
-    this.candidates.consumeSent(plan.candidateIds);
+    if (this.candidates.getSessionId() !== plan.sessionId) {
+      return;
+    }
+    this.candidates.consumeSent(plan.candidateRefs, {
+      restoreDynamicRefs: plan.skippedDynamicRefs,
+    });
   }
 
   fail(planId: string, reason: string): void {
@@ -85,7 +106,10 @@ export class PromptContextInjector {
     }
 
     this.plans.delete(planId);
-    this.candidates.markFailed(plan.candidateIds, reason);
+    if (this.candidates.getSessionId() !== plan.sessionId) {
+      return;
+    }
+    this.candidates.markFailed(plan.candidateRefs, reason);
   }
 }
 
@@ -97,27 +121,35 @@ function isPromptRequestBody(value: unknown): value is PromptRequestBody {
   );
 }
 
-function formatCandidateForPrompt(candidate: ContextCandidate): string {
-  const source = formatCandidateSource(candidate);
-  const header = source
-    ? `Obsidian context: ${candidate.label}\nSource: ${source}`
-    : `Obsidian context: ${candidate.label}`;
-  return `${header}\n\n${candidate.text}`;
+function uniqueCandidateIds(candidateIds: string[]): string[] {
+  return Array.from(new Set(candidateIds));
 }
 
-function formatCandidateSource(candidate: ContextCandidate): string | null {
-  const sourceFile = candidate.navigationSourceFile ?? candidate.sourceFile;
-  if (!sourceFile) {
-    return null;
-  }
+function snapshotCandidateRefs(
+  candidates: { id: string; identityKey: string; fingerprint: string }[],
+  candidateIds: string[]
+): CandidateSnapshotRef[] {
+  const candidateIdSet = new Set(candidateIds);
+  return candidates
+    .filter((candidate) => candidateIdSet.has(candidate.id))
+    .map((candidate) => ({
+      id: candidate.id,
+      identityKey: candidate.identityKey,
+      fingerprint: candidate.fingerprint,
+    }));
+}
 
-  if (candidate.startLine === undefined) {
-    return sourceFile;
-  }
-
-  if (candidate.endLine === undefined || candidate.startLine === candidate.endLine) {
-    return `${sourceFile}:L${candidate.startLine}`;
-  }
-
-  return `${sourceFile}:L${candidate.startLine}-L${candidate.endLine}`;
+function snapshotSkippedDynamicRefs(
+  candidates: {
+    id: string;
+    identityKey: string;
+    fingerprint: string;
+    lifetime: string;
+    included: boolean;
+  }[]
+): CandidateSnapshotRef[] {
+  const skippedDynamicIds = candidates
+    .filter((candidate) => candidate.lifetime === "dynamic" && !candidate.included)
+    .map((candidate) => candidate.id);
+  return snapshotCandidateRefs(candidates, skippedDynamicIds);
 }

@@ -69,6 +69,12 @@ describe("createOpenCodeWebViewTheme", () => {
     expect(theme.variables["--surface-raised-base"]).toBe("var(--v2-background-bg-layer-02)");
     expect(theme.variables["--surface-float-base"]).toBe("var(--v2-background-bg-layer-03)");
     expect(theme.variables["--input-base"]).toBe("var(--v2-background-bg-layer-01)");
+    expect(theme.variables["--another-opencode-for-obsidian-terminal-background"]).toBe(
+      "rgba(0, 0, 0, 0)"
+    );
+    expect(theme.variables["--another-opencode-for-obsidian-terminal-material"]).toBe(
+      "var(--v2-background-bg-base)"
+    );
     expect(theme.variables["--text-strong"]).toBe("var(--v2-text-text-base)");
     expect(theme.variables["--border-weak-base"]).toBe("var(--v2-border-border-muted)");
     expect(theme.variables["--text-interactive-base"]).toBe("var(--v2-text-text-accent)");

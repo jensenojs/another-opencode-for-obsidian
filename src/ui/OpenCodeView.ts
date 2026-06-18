@@ -1,5 +1,10 @@
 import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
-import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../bridge/BridgeProtocol";
+import {
+  BRIDGE_MESSAGES,
+  BRIDGE_NAMESPACE,
+  BRIDGE_VERSION,
+  type BridgeMessageType,
+} from "../bridge/BridgeProtocol";
 import { OPENCODE_VIEW_TYPE, type WebViewAppearance, type WebViewTheme } from "../types";
 import { OPENCODE_ICON_NAME } from "../icons";
 import type OpenCodePlugin from "../main";
@@ -161,7 +166,10 @@ export class OpenCodeView extends ItemView {
       cls: "opencode-iframe-container",
     });
 
-    const iframeUrl = this.plugin.getStoredIframeUrl() ?? this.plugin.getServerUrl();
+    const iframeUrl = resolveInitialOpenCodeIframeUrl(
+      this.plugin.getStoredIframeUrl(),
+      this.plugin.getServerUrl()
+    );
     this.logger.info("loading iframe", { url: iframeUrl });
 
     this.iframeEl = iframeContainer.createEl("iframe", {
@@ -282,6 +290,25 @@ export class OpenCodeView extends ItemView {
     });
     this.lastPostedThemeFingerprint = fingerprint;
     this.scheduleIframeDiagnostics(`theme-sync:${reason}`);
+  }
+
+  postBridgeMessage(type: BridgeMessageType, payload?: unknown): void {
+    if (!this.iframeEl?.contentWindow) {
+      return;
+    }
+    const proxyOrigin = this.plugin.getProxyOrigin();
+    if (!proxyOrigin) {
+      return;
+    }
+    this.iframeEl.contentWindow.postMessage(
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: BRIDGE_VERSION,
+        type,
+        payload,
+      },
+      proxyOrigin
+    );
   }
 
   private renderErrorState(): void {
@@ -834,6 +861,31 @@ export class OpenCodeView extends ItemView {
       height: Math.round(rect.height),
       area: Math.round(rect.width * rect.height),
     };
+  }
+}
+
+export function resolveInitialOpenCodeIframeUrl(
+  storedUrl: string | null,
+  serverUrl: string
+): string {
+  if (!storedUrl) {
+    return serverUrl;
+  }
+
+  try {
+    const stored = new URL(storedUrl);
+    const currentServer = new URL(serverUrl);
+    const sessionPath = stored.pathname.match(/\/session\/[^/?#]+\/?$/)?.[0];
+    if (!sessionPath) {
+      return serverUrl;
+    }
+
+    currentServer.pathname = `${currentServer.pathname.replace(/\/$/, "")}${sessionPath}`;
+    currentServer.search = stored.search;
+    currentServer.hash = stored.hash;
+    return currentServer.toString();
+  } catch {
+    return serverUrl;
   }
 }
 

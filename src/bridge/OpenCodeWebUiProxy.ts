@@ -1,9 +1,20 @@
 import * as http from "http";
+import * as net from "net";
 import { EventEmitter } from "events";
 import { createLogger } from "../debug/RuntimeDiagnostics";
 import { injectOpenCodeWebUiProxyHtml } from "./ProxyInjection";
 import type { BridgeInjectionOptions } from "./BridgeInjection";
 import type { WebViewAppearance, WebViewTheme } from "../types";
+import {
+  mergePromptContextBundlePatchDiagnostics,
+  patchOpenCodePromptContextBundle,
+  type PromptContextBundlePatchDiagnostics,
+} from "./OpenCodePromptContextBundlePatch";
+import {
+  mergeTerminalBundlePatchDiagnostics,
+  patchOpenCodeTerminalBundle,
+  type TerminalBundlePatchDiagnostics,
+} from "./OpenCodeTerminalBundlePatch";
 
 type WebViewThemeProvider = () => WebViewTheme | null;
 type WebViewThemeSource = WebViewTheme | WebViewThemeProvider | null;
@@ -44,6 +55,8 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   private logger = createLogger("proxy");
   private promptRequestHook: PromptRequestHook | null = null;
   private promptRequestOutcomeHook: PromptRequestOutcomeHook | null = null;
+  private promptContextBundlePatch: PromptContextBundlePatchDiagnostics | null = null;
+  private terminalBundlePatch: TerminalBundlePatchDiagnostics | null = null;
   private static readonly START_PORT = 4097;
   private static readonly MAX_ATTEMPTS = 10;
 
@@ -88,6 +101,14 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   ): void {
     this.promptRequestHook = hook;
     this.promptRequestOutcomeHook = outcomeHook;
+  }
+
+  getPromptContextBundlePatchDiagnostics(): PromptContextBundlePatchDiagnostics | null {
+    return this.promptContextBundlePatch;
+  }
+
+  getTerminalBundlePatchDiagnostics(): TerminalBundlePatchDiagnostics | null {
+    return this.terminalBundlePatch;
   }
 
   async start(): Promise<boolean> {
@@ -257,6 +278,17 @@ export class OpenCodeWebUiProxy extends EventEmitter {
           clientRes.writeHead(proxyRes.statusCode || 200, headers);
           clientRes.end(injected);
         });
+      } else if (this.shouldPatchJavaScriptAsset(clientReq.url ?? "", contentType)) {
+        let body = "";
+        proxyRes.on("data", (chunk: Buffer) => (body += chunk.toString()));
+        proxyRes.on("end", () => {
+          const patched = this.patchJavaScriptAsset(clientReq.url ?? "", body);
+          const headers = { ...proxyRes.headers };
+          delete headers["content-length"];
+          headers["content-length"] = String(Buffer.byteLength(patched));
+          clientRes.writeHead(proxyRes.statusCode || 200, headers);
+          clientRes.end(patched);
+        });
       } else {
         clientRes.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
         proxyRes.pipe(clientRes);
@@ -286,30 +318,24 @@ export class OpenCodeWebUiProxy extends EventEmitter {
 
   private handleUpgrade(
     clientReq: http.IncomingMessage,
-    clientSocket: import("net").Socket,
-    _clientHead: Buffer
+    clientSocket: net.Socket,
+    clientHead: Buffer
   ): void {
-    const options = {
-      hostname: this.targetHost,
-      port: this.targetPort,
-      path: clientReq.url,
-      method: clientReq.method,
-      headers: { ...clientReq.headers, host: `${this.targetHost}:${this.targetPort}` },
-    };
-
-    const proxyReq = http.request(options);
-    proxyReq.end();
-
-    proxyReq.on(
-      "upgrade",
-      (_proxyRes: http.IncomingMessage, proxySocket: import("net").Socket, _proxyHead: Buffer) => {
-        clientSocket.write("HTTP/1.1 101 Switching Protocols\r\n\r\n");
-        proxySocket.pipe(clientSocket);
-        clientSocket.pipe(proxySocket);
+    const targetSocket = net.createConnection(
+      { host: this.targetHost, port: this.targetPort },
+      () => {
+        forwardSocketData(targetSocket, clientSocket);
+        forwardSocketData(clientSocket, targetSocket);
+        targetSocket.write(
+          formatRawHttpUpgradeRequest(clientReq, `${this.targetHost}:${this.targetPort}`)
+        );
+        if (clientHead.length > 0) {
+          targetSocket.write(clientHead);
+        }
       }
     );
 
-    proxyReq.on("error", (error: Error) => {
+    targetSocket.on("error", (error: Error) => {
       this.logger.error("proxy upgrade failed", {
         error: error.message,
         targetHost: this.targetHost,
@@ -322,6 +348,67 @@ export class OpenCodeWebUiProxy extends EventEmitter {
 
   private shouldInject(contentType: string): boolean {
     return contentType.includes("text/html");
+  }
+
+  private shouldPatchJavaScriptAsset(path: string, contentType: string): boolean {
+    if (
+      !this.shouldPatchPromptContextBundle(path, contentType) &&
+      !this.shouldPatchTerminalBundle(path, contentType)
+    ) {
+      return false;
+    }
+    return (
+      contentType.includes("javascript") ||
+      contentType.includes("application/octet-stream") ||
+      contentType === ""
+    );
+  }
+
+  private shouldPatchPromptContextBundle(path: string, _contentType: string): boolean {
+    return /\/assets\/(?:index|session-composer-state)-[^/?]+\.js(?:$|[?#])/.test(path);
+  }
+
+  private shouldPatchTerminalBundle(path: string, _contentType: string): boolean {
+    return /\/assets\/session-(?!composer-state-)[^/?]+\.js(?:$|[?#])/.test(path);
+  }
+
+  private patchJavaScriptAsset(path: string, body: string): string {
+    let code = body;
+    if (this.shouldPatchPromptContextBundle(path, "")) {
+      const patched = patchOpenCodePromptContextBundle(code);
+      this.promptContextBundlePatch = mergePromptContextBundlePatchDiagnostics(
+        this.promptContextBundlePatch,
+        path,
+        patched
+      );
+      this.emit("promptContextBundlePatch", this.promptContextBundlePatch);
+      this.logger.info("prompt context bundle patch", {
+        status: this.promptContextBundlePatch.status,
+        patches: this.promptContextBundlePatch.patches,
+        assetStatus: patched.status,
+        assetPatches: patched.patches,
+        path,
+      });
+      code = patched.code;
+    }
+    if (this.shouldPatchTerminalBundle(path, "")) {
+      const patched = patchOpenCodeTerminalBundle(code);
+      this.terminalBundlePatch = mergeTerminalBundlePatchDiagnostics(
+        this.terminalBundlePatch,
+        path,
+        patched
+      );
+      this.emit("terminalBundlePatch", this.terminalBundlePatch);
+      this.logger.info("terminal bundle patch", {
+        status: this.terminalBundlePatch.status,
+        patches: this.terminalBundlePatch.patches,
+        assetStatus: patched.status,
+        assetPatches: patched.patches,
+        path,
+      });
+      code = patched.code;
+    }
+    return code;
   }
 
   private shouldHandlePromptRequest(clientReq: http.IncomingMessage): boolean {
@@ -375,4 +462,65 @@ function readRequestBody(request: http.IncomingMessage): Promise<Buffer> {
 
 function isSuccessStatus(statusCode: number | undefined): boolean {
   return typeof statusCode === "number" && statusCode >= 200 && statusCode < 300;
+}
+
+export function formatRawHttpUpgradeRequest(
+  request: http.IncomingMessage,
+  targetHostHeader: string
+): string {
+  const requestLine = `${request.method ?? "GET"} ${request.url ?? "/"} HTTP/${
+    request.httpVersion || "1.1"
+  }`;
+  const headers: string[] = [requestLine];
+  let wroteHost = false;
+  const rawHeaders =
+    request.rawHeaders.length > 0 ? request.rawHeaders : rawHeadersFromObject(request.headers);
+
+  for (let index = 0; index < rawHeaders.length; index += 2) {
+    const name = rawHeaders[index];
+    const value = rawHeaders[index + 1];
+    if (name.toLowerCase() === "host") {
+      headers.push(`Host: ${targetHostHeader}`);
+      wroteHost = true;
+      continue;
+    }
+    headers.push(`${name}: ${value}`);
+  }
+
+  if (!wroteHost) {
+    headers.push(`Host: ${targetHostHeader}`);
+  }
+
+  return `${headers.join("\r\n")}\r\n\r\n`;
+}
+
+function rawHeadersFromObject(headers: http.IncomingHttpHeaders): string[] {
+  const rawHeaders: string[] = [];
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        rawHeaders.push(name, item);
+      }
+      continue;
+    }
+    rawHeaders.push(name, String(value));
+  }
+  return rawHeaders;
+}
+
+function forwardSocketData(source: net.Socket, target: net.Socket): void {
+  source.resume();
+  source.on("data", (chunk) => {
+    if (!target.destroyed) {
+      target.write(chunk);
+    }
+  });
+  source.on("end", () => {
+    if (!target.destroyed) {
+      target.end();
+    }
+  });
 }

@@ -24,6 +24,10 @@ import { ExecutableResolver } from "./server/ExecutableResolver";
 import { OpenCodeWebUiProxy, extractPromptSessionId } from "./bridge/OpenCodeWebUiProxy";
 import { OpenCodeBridge } from "./bridge/OpenCodeBridge";
 import {
+  NativePromptContextBridge,
+  PostMessagePromptContextPort,
+} from "./bridge/NativePromptContextBridge";
+import {
   createLogger,
   getRuntimePaths,
   type RuntimeDiagnosticsSnapshot,
@@ -33,9 +37,44 @@ import {
   formatServerDiagnosticsForClipboard,
   formatStartFailureNotice,
 } from "./debug/ServerDiagnosticsText";
-import { BRIDGE_MESSAGES, isBridgeMessage, isVaultFileOpenPayload } from "./bridge/BridgeProtocol";
+import {
+  BRIDGE_MESSAGES,
+  isBridgeMessage,
+  isPromptContextActivatedPayload,
+  isPromptContextChangedPayload,
+  isPromptContextCommandPayload,
+  isPromptContextCommandResultPayload,
+  isPromptContextReadyPayload,
+  isPromptContextRemovedPayload,
+  isPromptContextUnavailablePayload,
+  isVaultFileOpenPayload,
+  type PromptContextCommandPayload,
+} from "./bridge/BridgeProtocol";
+import {
+  buildPromptContextSurfaceTrace,
+  planPromptContextSurfaceCleanup,
+  summarizePromptContextSurfaceTrace,
+  type PromptContextSurfaceCleanupSkippedItem,
+  type PromptContextSurfaceTrace,
+} from "./bridge/PromptContextSurfaceTrace";
+import type {
+  NativePromptContextProjection,
+  PromptContextClickAction,
+} from "./context/PromptContextProjection";
 import { captureObsidianWebViewTheme, findObsidianWebViewThemeSource } from "./theme/WebViewTheme";
 import { getText } from "./i18n";
+
+interface PromptContextSurfaceCleanupTrace {
+  reason: string;
+  checkedAt: string;
+  attempted: number;
+  removeKeys: string[];
+  removedKeys: string[];
+  missingKeys: string[];
+  skipped: PromptContextSurfaceCleanupSkippedItem[];
+  failed: Array<{ key: string; error: string }>;
+  results: Array<{ key: string; status: string }>;
+}
 
 export default class OpenCodePlugin extends Plugin {
   settings: OpenCodeSettings = DEFAULT_SETTINGS;
@@ -56,8 +95,13 @@ export default class OpenCodePlugin extends Plugin {
     theme: null,
     iframe: null,
     opencodeEvents: null,
+    promptContext: null,
   };
   private openCodeWebUiProxy: OpenCodeWebUiProxy;
+  private promptContextPort: PostMessagePromptContextPort;
+  private nativePromptContextBridge: NativePromptContextBridge;
+  private unsubscribeNativePromptContextSync: (() => void) | null = null;
+  private promptContextPortReady = false;
   private eventStatusWriteTimer: ReturnType<typeof setTimeout> | null = null;
   private logger = createLogger("plugin");
 
@@ -88,6 +132,24 @@ export default class OpenCodePlugin extends Plugin {
     if (!proxyStarted) {
       this.logger.error("proxy failed to start");
     }
+    this.promptContextPort = new PostMessagePromptContextPort((payload) =>
+      this.postPromptContextCommand(payload)
+    );
+    this.nativePromptContextBridge = new NativePromptContextBridge(this.promptContextPort);
+    this.openCodeWebUiProxy.on("promptContextBundlePatch", (payload) => {
+      this.runtimeDiagnostics.promptContext = {
+        ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
+        bundlePatch: summarizeDiagnosticPayload(payload),
+      };
+      this.writeStatus("prompt-context-bundle-patch");
+    });
+    this.openCodeWebUiProxy.on("terminalBundlePatch", (payload) => {
+      this.runtimeDiagnostics.theme = {
+        ...(asRecord(this.runtimeDiagnostics.theme) ?? {}),
+        terminalBundlePatch: summarizeDiagnosticPayload(payload),
+      };
+      this.writeStatus("terminal-bundle-patch");
+    });
 
     this.registerDomEvent(window, "message", (event: MessageEvent) => {
       if (event.origin !== this.openCodeWebUiProxy.getOrigin() || !isBridgeMessage(event.data)) {
@@ -98,7 +160,13 @@ export default class OpenCodePlugin extends Plugin {
         this.syncOpenCodeViewThemes("proxy-loaded");
       }
       if (event.data.type === BRIDGE_MESSAGES.themeDiagnostics) {
-        this.runtimeDiagnostics.theme = event.data.payload ?? null;
+        const terminalBundlePatch =
+          asRecord(this.runtimeDiagnostics.theme)?.terminalBundlePatch ??
+          summarizeDiagnosticPayload(this.openCodeWebUiProxy.getTerminalBundlePatchDiagnostics());
+        const nextThemeDiagnostics = asRecord(event.data.payload);
+        this.runtimeDiagnostics.theme = terminalBundlePatch
+          ? { ...(nextThemeDiagnostics ?? {}), terminalBundlePatch }
+          : (event.data.payload ?? null);
         this.logger.info(
           "theme diagnostics",
           summarizeDiagnosticPayload(this.runtimeDiagnostics.theme)
@@ -110,6 +178,73 @@ export default class OpenCodePlugin extends Plugin {
       }
       if (event.data.type === BRIDGE_MESSAGES.vaultFileOpen) {
         void this.openVaultFileFromBridge(event.data.payload);
+      }
+      if (event.data.type === BRIDGE_MESSAGES.promptContextReady) {
+        if (isPromptContextReadyPayload(event.data.payload)) {
+          this.promptContextPortReady = true;
+          this.runtimeDiagnostics.promptContext = {
+            ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
+            ready: event.data.payload,
+          };
+          this.syncNativePromptContext("prompt-context-ready");
+        } else {
+          this.promptContextPortReady = false;
+          this.runtimeDiagnostics.promptContext = {
+            ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
+            readyInvalid: summarizeDiagnosticPayload(event.data.payload),
+          };
+          this.writeStatus("prompt-context-ready-invalid");
+        }
+      }
+      if (event.data.type === BRIDGE_MESSAGES.promptContextUnavailable) {
+        if (isPromptContextUnavailablePayload(event.data.payload)) {
+          this.promptContextPortReady = false;
+          this.runtimeDiagnostics.promptContext = {
+            ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
+            unavailable: event.data.payload,
+          };
+          this.writeStatus("prompt-context-unavailable");
+        }
+      }
+      if (event.data.type === BRIDGE_MESSAGES.promptContextCommandResult) {
+        if (isPromptContextCommandResultPayload(event.data.payload)) {
+          this.nativePromptContextBridge.resolveCommandResult(event.data.payload);
+        }
+      }
+      if (event.data.type === BRIDGE_MESSAGES.promptContextChanged) {
+        if (isPromptContextChangedPayload(event.data.payload)) {
+          this.contextManager.reconcileOpenCodeNativeCommentCandidates(event.data.payload.items, {
+            removeMissing: event.data.payload.origin === "opencode-comment-delete",
+          });
+          this.runtimeDiagnostics.promptContext = {
+            ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
+            changed: {
+              origin: event.data.payload.origin,
+              itemCount: event.data.payload.items.length,
+              transactionId: event.data.payload.transactionId ?? null,
+            },
+          };
+          this.writeStatus("prompt-context-changed");
+        }
+      }
+      if (event.data.type === BRIDGE_MESSAGES.promptContextRemoved) {
+        if (isPromptContextRemovedPayload(event.data.payload)) {
+          const candidateId = this.nativePromptContextBridge.getCandidateIdForKey(
+            event.data.payload.key
+          );
+          if (candidateId) {
+            this.contextManager.setCandidateIncluded(candidateId, false);
+          } else {
+            this.contextManager.setNativePromptContextIncludedByKey(event.data.payload.key, false);
+          }
+          this.syncNativePromptContext("prompt-context-card-close");
+        }
+      }
+      if (event.data.type === BRIDGE_MESSAGES.promptContextActivated) {
+        if (isPromptContextActivatedPayload(event.data.payload)) {
+          const action = this.nativePromptContextBridge.getActivationAction(event.data.payload.key);
+          void this.executePromptContextClickAction(action);
+        }
       }
     });
 
@@ -157,6 +292,9 @@ export default class OpenCodePlugin extends Plugin {
       currentSession: this.currentContextSession,
       registerEvent: (ref) => this.registerEvent(ref),
     });
+    this.unsubscribeNativePromptContextSync = this.contextManager.onCandidatesChanged(() => {
+      this.syncNativePromptContext("candidates-changed");
+    });
     this.installPromptContextHook();
     this.contextItemNavigator = new ContextItemNavigator(this.app, this.graphIndex);
     this.contextStatusBar = new ContextStatusBar({
@@ -165,6 +303,7 @@ export default class OpenCodePlugin extends Plugin {
       onItemsChanged: (callback) => this.contextManager.onItemsChanged(callback),
       getCandidates: () => this.contextManager.getCandidates(),
       onCandidatesChanged: (callback) => this.contextManager.onCandidatesChanged(callback),
+      getProjectionFailures: () => this.contextManager.getPromptContextProjectionFailures(),
       toggleCandidate: (candidateId) => this.contextManager.toggleCandidate(candidateId),
       removeCandidate: (candidateId) => this.contextManager.removeCandidate(candidateId),
       resolveItem: (item) => this.contextItemNavigator.resolve(item),
@@ -320,7 +459,26 @@ export default class OpenCodePlugin extends Plugin {
       clearTimeout(this.eventStatusWriteTimer);
       this.eventStatusWriteTimer = null;
     }
+    try {
+      const clearResult = await this.nativePromptContextBridge?.clearOwner();
+      if (clearResult) {
+        this.runtimeDiagnostics.promptContext = {
+          ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
+          ownerClear: {
+            reason: "unload",
+            revision: clearResult.revision,
+            results: clearResult.results,
+          },
+        };
+      }
+    } catch (error) {
+      this.logger.warn("prompt context owner clear failed during unload", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     this.openCodeWebUiProxy?.stop();
+    this.unsubscribeNativePromptContextSync?.();
+    this.unsubscribeNativePromptContextSync = null;
     this.contextStatusBar?.destroy();
     this.contextManager.destroy();
     await this.stopServer();
@@ -603,6 +761,182 @@ export default class OpenCodePlugin extends Plugin {
     this.writeStatus("iframe-diagnostics");
   }
 
+  postPromptContextCommand(payload: PromptContextCommandPayload): void {
+    if (!isPromptContextCommandPayload(payload)) {
+      this.logger.warn(
+        "ignored invalid prompt context command",
+        summarizeDiagnosticPayload(payload)
+      );
+      return;
+    }
+    for (const leaf of this.app.workspace.getLeavesOfType(OPENCODE_VIEW_TYPE)) {
+      if (leaf.view instanceof OpenCodeView) {
+        leaf.view.postBridgeMessage(BRIDGE_MESSAGES.promptContextCommand, payload);
+      }
+    }
+  }
+
+  private syncNativePromptContext(reason: string): void {
+    if (!this.contextManager || !this.nativePromptContextBridge) {
+      return;
+    }
+
+    const projections = this.contextManager.getNativePromptContextProjections();
+    void this.nativePromptContextBridge
+      .sync(projections)
+      .then(async (result) => {
+        let surfaceTrace = await this.tracePromptContextSurfaceConsistency(
+          reason,
+          projections,
+          result.revision
+        );
+        const surfaceCleanup =
+          surfaceTrace && !surfaceTrace.consistent
+            ? await this.cleanupPromptContextSurfaceOrphans(reason, surfaceTrace)
+            : null;
+        if (surfaceCleanup && surfaceCleanup.attempted > 0) {
+          surfaceTrace = await this.tracePromptContextSurfaceConsistency(
+            `${reason}:after-surface-cleanup`,
+            projections,
+            result.revision
+          );
+        }
+        const surfaceSummary = surfaceTrace
+          ? summarizePromptContextSurfaceTrace(surfaceTrace)
+          : null;
+        this.runtimeDiagnostics.promptContext = {
+          ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
+          lastSync: {
+            reason,
+            revision: result.revision,
+            projections: projections.length,
+            results: result.results,
+          },
+          projectionFailures: this.contextManager.getPromptContextProjectionFailures(),
+          bundlePatch: summarizeDiagnosticPayload(
+            this.openCodeWebUiProxy.getPromptContextBundlePatchDiagnostics()
+          ),
+          surfaceConsistency: surfaceSummary,
+          surfaceTrace: surfaceTrace && !surfaceTrace.consistent ? surfaceTrace : undefined,
+          surfaceCleanup: surfaceCleanup ?? undefined,
+        };
+        this.writeStatus(
+          surfaceTrace?.consistent === false
+            ? "prompt-context-surface-mismatch"
+            : surfaceCleanup && surfaceCleanup.attempted > 0
+              ? "prompt-context-surface-cleaned"
+              : "prompt-context-sync"
+        );
+      })
+      .catch((error) => {
+        this.runtimeDiagnostics.promptContext = {
+          ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
+          lastSyncError: error instanceof Error ? error.message : String(error),
+        };
+        this.logger.warn("prompt context native sync failed", {
+          reason,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        this.writeStatus("prompt-context-sync-failed");
+      });
+  }
+
+  private async tracePromptContextSurfaceConsistency(
+    reason: string,
+    projections: NativePromptContextProjection[],
+    syncRevision: number
+  ) {
+    if (!this.promptContextPortReady) {
+      this.logger.info("prompt context surface consistency skipped", {
+        reason,
+        syncRevision,
+        portReady: false,
+      });
+      return null;
+    }
+
+    const trace = buildPromptContextSurfaceTrace({
+      reason,
+      syncRevision,
+      candidates: this.contextManager.getCandidates(),
+      nativeProjections: projections,
+      projectionFailures: this.contextManager.getPromptContextProjectionFailures(),
+      webUiItems: await this.nativePromptContextBridge.getWebUiItems(),
+    });
+    const summary = summarizePromptContextSurfaceTrace(trace);
+    if (trace.consistent) {
+      this.logger.info("prompt context surface consistency", summary);
+      return trace;
+    }
+
+    this.logger.warn("prompt context surface mismatch", trace);
+    return trace;
+  }
+
+  private async cleanupPromptContextSurfaceOrphans(
+    reason: string,
+    trace: PromptContextSurfaceTrace
+  ): Promise<PromptContextSurfaceCleanupTrace | null> {
+    const plan = planPromptContextSurfaceCleanup(trace);
+    if (plan.removeKeys.length === 0 && plan.skipped.length === 0) {
+      return null;
+    }
+
+    const cleanup: PromptContextSurfaceCleanupTrace = {
+      reason,
+      checkedAt: new Date().toISOString(),
+      attempted: plan.removeKeys.length,
+      removeKeys: [...plan.removeKeys],
+      removedKeys: [],
+      missingKeys: [],
+      skipped: [...plan.skipped],
+      failed: [],
+      results: [],
+    };
+
+    for (const key of plan.removeKeys) {
+      try {
+        const result = await this.nativePromptContextBridge.removeWebUiItem(key);
+        cleanup.results.push({ key, status: result.status });
+        if (result.status === "removed") {
+          cleanup.removedKeys.push(key);
+          continue;
+        }
+        cleanup.missingKeys.push(key);
+      } catch (error) {
+        cleanup.failed.push({
+          key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const logPayload = summarizeDiagnosticPayload(cleanup);
+    if (cleanup.failed.length > 0 || cleanup.skipped.length > 0) {
+      this.logger.warn("prompt context surface cleanup completed with caveats", logPayload);
+      return cleanup;
+    }
+
+    this.logger.info("prompt context surface cleanup completed", logPayload);
+    return cleanup;
+  }
+
+  private async executePromptContextClickAction(
+    action: PromptContextClickAction | null
+  ): Promise<void> {
+    if (!action || action.type === "none" || action.type === "opencode-open-comment") {
+      return;
+    }
+
+    const result = await this.contextItemNavigator.openSource(action.path, action.line);
+    this.logger.info("prompt context activation requested Obsidian navigation", result);
+    this.writeStatus(
+      result.status === "opened"
+        ? "prompt-context-activation-opened"
+        : "prompt-context-activation-unresolved"
+    );
+  }
+
   private async openVaultFileFromBridge(payload: unknown): Promise<void> {
     if (!isVaultFileOpenPayload(payload)) {
       this.logger.warn(
@@ -779,4 +1113,11 @@ function summarizeDiagnosticValue(value: unknown): unknown {
     return { keyCount: keys.length, keys: keys.slice(0, 16) };
   }
   return value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
 }

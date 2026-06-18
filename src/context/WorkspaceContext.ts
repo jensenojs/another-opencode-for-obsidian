@@ -4,7 +4,7 @@ import type {
   WorkspaceActiveLocation,
   WorkspaceContextSnapshot,
 } from "./ContextFormatter";
-import { getSelectionLineRange } from "./SelectionLineRange";
+import { getSelectionLineRange, hasSelectedEditorRange } from "./SelectionLineRange";
 
 export class WorkspaceContext {
   private app: App;
@@ -61,21 +61,16 @@ export class WorkspaceContext {
   private getSelectionContext(view: MarkdownView | null): SelectedTextContext | null {
     const sourcePath = view?.file?.path;
     const selection = view?.editor?.getSelection() ?? "";
+    const range = view?.editor?.listSelections()[0];
 
-    if (!view || !sourcePath || !selection.trim()) {
+    if (!view || !sourcePath || !selection.trim() || !hasSelectedEditorRange(range)) {
       return null;
     }
 
     return {
       text: selection,
       sourcePath,
-      ...this.getSelectionLineRange(view),
+      ...getSelectionLineRange(range),
     };
-  }
-
-  private getSelectionLineRange(
-    view: MarkdownView
-  ): Pick<SelectedTextContext, "selectionStartLine" | "selectionEndLine"> {
-    return getSelectionLineRange(view.editor.listSelections()[0]);
   }
 }

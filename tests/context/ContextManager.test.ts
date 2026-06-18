@@ -30,7 +30,10 @@ let MarkdownView: new (leaf: unknown) => {
   file?: { path: string };
   editor?: {
     getSelection: () => string;
-    listSelections: () => Array<{ anchor: { line: number }; head: { line: number } }>;
+    listSelections: () => Array<{
+      anchor: { line: number; ch?: number };
+      head: { line: number; ch?: number };
+    }>;
     getCursor: () => { line: number; ch: number };
   };
 };
@@ -115,6 +118,21 @@ describe("ContextManager", () => {
       const disabled = createSettings();
       disabled.contextAssist.selection.enabled = false;
       manager.updateSettings(disabled);
+    });
+  });
+
+  test("collapsed cursor ranges do not become one-shot selection candidates", async () => {
+    await withContextManagerDom(async (window) => {
+      const activeView = createMarkdownView("active.md", "stale selected text", 6, 6, 6, true);
+      const { app } = createAppWithEvents({ activeMarkdownView: activeView });
+      const settings = createSettings();
+      const manager = createManager({ app, settings });
+      manager.updateSettings(settings);
+
+      document.dispatchEvent(new window.Event("selectionchange") as unknown as Event);
+      await delay(160);
+
+      expect(manager.getCandidates()).toEqual([]);
     });
   });
 
@@ -312,13 +330,19 @@ function createMarkdownView(
   selection: string,
   startLine: number,
   endLine: number,
-  cursorLine = startLine
+  cursorLine = startLine,
+  collapsedSelection = false
 ): any {
   const view = new MarkdownView({});
   view.file = { path };
   view.editor = {
     getSelection: () => selection,
-    listSelections: () => [{ anchor: { line: startLine - 1 }, head: { line: endLine - 1 } }],
+    listSelections: () => [
+      {
+        anchor: { line: startLine - 1, ch: 0 },
+        head: { line: endLine - 1, ch: collapsedSelection ? 0 : Math.max(1, selection.length) },
+      },
+    ],
     getCursor: () => ({ line: cursorLine - 1, ch: 0 }),
   };
   return view;

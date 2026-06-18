@@ -15,12 +15,23 @@ function createObsidianAppearanceStyle(): string {
     ) !important;
   }
 
-  #root {
-    background: transparent !important;
-  }
+    #root {
+      background: transparent !important;
+    }
 
-    html,
-    body {
+    html[data-another-opencode-for-obsidian-appearance="obsidian"] #terminal-panel [role="textbox"][aria-label="Terminal input"] {
+      background: var(
+        --another-opencode-for-obsidian-terminal-material,
+        var(--v2-background-bg-base)
+      ) !important;
+      background-color: var(
+        --another-opencode-for-obsidian-terminal-material,
+        var(--v2-background-bg-base)
+      ) !important;
+    }
+  
+      html,
+      body {
   min-height: 100%;
 }
 
@@ -144,6 +155,19 @@ function createThemeInjection(theme: WebViewTheme | null): string {
         var pendingBodyMutationDiagnostics = null;
         var appliedThemeVariableNames = [];
         var appliedAliasVariableNames = [];
+        window.__anotherOpenCodeForObsidianTerminalTheme = function(input) {
+          if (!input || typeof input !== 'object') return input;
+          var style = getComputedStyle(document.documentElement);
+          var background = style.getPropertyValue(
+            '--another-opencode-for-obsidian-terminal-background'
+          ).trim() || 'rgba(0, 0, 0, 0)';
+          var next = {};
+          Object.keys(input).forEach(function(key) {
+            next[key] = input[key];
+          });
+          next.background = background;
+          return next;
+        };
         function applyTheme() {
           themeApplyCount += 1;
           var root = document.documentElement;
@@ -219,6 +243,8 @@ function createThemeInjection(theme: WebViewTheme | null): string {
         '--background-bg-layer-01',
         '--surface-raised-base',
         '--input-base',
+        '--another-opencode-for-obsidian-terminal-background',
+        '--another-opencode-for-obsidian-terminal-material',
         '--text-text-base',
         '--border-border-base'
       ])));

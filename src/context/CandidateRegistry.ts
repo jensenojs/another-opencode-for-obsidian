@@ -2,6 +2,14 @@ import type { ContextCandidate } from "../types";
 
 type CandidateChangeCallback = (items: ContextCandidate[]) => void;
 
+export interface CandidateSnapshotRef {
+  id: string;
+  identityKey: string;
+  fingerprint: string;
+}
+
+type CandidateRef = string | CandidateSnapshotRef;
+
 // Local pre-send candidate store. It owns identity, included/skipped state,
 // source clearing, bounded queues, one-shot consumption, and failure status.
 export class CandidateRegistry {
@@ -53,7 +61,10 @@ export class CandidateRegistry {
   }
 
   upsert(candidate: ContextCandidate): ContextCandidate {
-    const index = this.findIdentityIndex(candidate.sourceId, candidate.identityKey);
+    const identityIndex = this.findIdentityIndex(candidate.sourceId, candidate.identityKey);
+    const overlappingSelectionIndexes = this.findOverlappingSelectionIndexes(candidate);
+    const index = identityIndex >= 0 ? identityIndex : (overlappingSelectionIndexes[0] ?? -1);
+
     if (index < 0) {
       this.candidates = [...this.candidates, copyCandidate(candidate)];
       this.applySourceLimit(candidate.sourceId);
@@ -62,17 +73,35 @@ export class CandidateRegistry {
     }
 
     const existing = this.candidates[index];
-    if (matchesSourceSnapshot(existing, candidate)) {
+    const duplicateSelectionIndexes = new Set(
+      overlappingSelectionIndexes.filter((itemIndex) => itemIndex !== index)
+    );
+    if (duplicateSelectionIndexes.size === 0 && matchesSourceSnapshot(existing, candidate)) {
+      if (shouldRestoreIncludedOnUpsert(candidate) && !existing.included) {
+        const restored: ContextCandidate = {
+          ...existing,
+          included: true,
+          createdAt: candidate.createdAt,
+          updatedAt: candidate.updatedAt,
+        };
+        this.candidates = replaceAt(this.candidates, index, restored);
+        this.emitCandidatesChanged();
+        return copyCandidate(restored);
+      }
       return copyCandidate(existing);
     }
 
     const next: ContextCandidate = {
       ...candidate,
       id: existing.id,
-      included: existing.included,
-      createdAt: existing.createdAt,
+      included: shouldRestoreIncludedOnUpsert(candidate) ? true : existing.included,
+      createdAt: shouldRestoreIncludedOnUpsert(candidate)
+        ? candidate.createdAt
+        : existing.createdAt,
     };
-    this.candidates = replaceAt(this.candidates, index, copyCandidate(next));
+    this.candidates = replaceAt(this.candidates, index, copyCandidate(next)).filter(
+      (_item, itemIndex) => !duplicateSelectionIndexes.has(itemIndex)
+    );
     this.applySourceLimit(candidate.sourceId);
     this.emitCandidatesChanged();
     return copyCandidate(next);
@@ -123,13 +152,12 @@ export class CandidateRegistry {
     return copyCandidate(candidate);
   }
 
-  markFailed(candidateIds: string[], reason: string): ContextCandidate[] {
-    const idSet = new Set(candidateIds);
+  markFailed(candidateRefs: CandidateRef[], reason: string): ContextCandidate[] {
     const marked: ContextCandidate[] = [];
     let changed = false;
 
     this.candidates = this.candidates.map((candidate) => {
-      if (!idSet.has(candidate.id)) {
+      if (!matchesAnyCandidateRef(candidateRefs, candidate)) {
         return candidate;
       }
       if (candidate.status === "failed" && candidate.statusReason === reason) {
@@ -187,20 +215,27 @@ export class CandidateRegistry {
     return this.candidates.filter((candidate) => candidate.included).map(copyCandidate);
   }
 
-  consumeSent(candidateIds: string[]): ContextCandidate[] {
-    const sentIds = new Set(candidateIds);
+  consumeSent(
+    candidateRefs: CandidateRef[],
+    options: { restoreDynamicRefs?: CandidateRef[] } = {}
+  ): ContextCandidate[] {
     const changed: ContextCandidate[] = [];
     const next: ContextCandidate[] = [];
     let mutated = false;
+    const restoreDynamicRefs = options.restoreDynamicRefs ?? [];
 
     for (const candidate of this.candidates) {
-      if (sentIds.has(candidate.id) && candidate.lifetime === "one-shot") {
+      if (matchesAnyCandidateRef(candidateRefs, candidate) && candidate.lifetime === "one-shot") {
         changed.push(copyCandidate(candidate));
         mutated = true;
         continue;
       }
 
-      if (candidate.lifetime === "dynamic" && !candidate.included) {
+      if (
+        candidate.lifetime === "dynamic" &&
+        !candidate.included &&
+        matchesAnyCandidateRef(restoreDynamicRefs, candidate)
+      ) {
         const reset: ContextCandidate = {
           ...candidate,
           included: true,
@@ -255,6 +290,23 @@ export class CandidateRegistry {
     );
   }
 
+  private findOverlappingSelectionIndexes(candidate: ContextCandidate): number[] {
+    if (candidate.sourceKind !== "selection") {
+      return [];
+    }
+
+    return this.candidates
+      .map((existing, index) => ({ existing, index }))
+      .filter(
+        ({ existing }) =>
+          existing.sourceId === candidate.sourceId &&
+          existing.sourceKind === "selection" &&
+          sameNavigationPath(existing, candidate) &&
+          lineRangesOverlap(existing, candidate)
+      )
+      .map(({ index }) => index);
+  }
+
   private emitCandidatesChanged(): void {
     const candidates = this.getCandidates();
     for (const callback of this.changeCallbacks) {
@@ -283,11 +335,59 @@ export class CandidateRegistry {
 }
 
 function copyCandidate(candidate: ContextCandidate): ContextCandidate {
-  return { ...candidate };
+  return {
+    ...candidate,
+    sourceData: candidate.sourceData ? JSON.parse(JSON.stringify(candidate.sourceData)) : undefined,
+  };
 }
 
 function replaceAt<T>(items: T[], index: number, item: T): T[] {
   return [...items.slice(0, index), item, ...items.slice(index + 1)];
+}
+
+function shouldRestoreIncludedOnUpsert(candidate: ContextCandidate): boolean {
+  return candidate.sourceKind === "selection";
+}
+
+function matchesAnyCandidateRef(refs: CandidateRef[], candidate: ContextCandidate): boolean {
+  return refs.some((ref) => matchesCandidateRef(ref, candidate));
+}
+
+function matchesCandidateRef(ref: CandidateRef, candidate: ContextCandidate): boolean {
+  if (typeof ref === "string") {
+    return candidate.id === ref;
+  }
+  return (
+    candidate.id === ref.id &&
+    candidate.identityKey === ref.identityKey &&
+    candidate.fingerprint === ref.fingerprint
+  );
+}
+
+function sameNavigationPath(a: ContextCandidate, b: ContextCandidate): boolean {
+  return (a.navigationSourceFile ?? a.sourceFile) === (b.navigationSourceFile ?? b.sourceFile);
+}
+
+function lineRangesOverlap(a: ContextCandidate, b: ContextCandidate): boolean {
+  const rangeA = lineRange(a);
+  const rangeB = lineRange(b);
+  if (!rangeA || !rangeB) {
+    return false;
+  }
+  return rangeA.start <= rangeB.end && rangeB.start <= rangeA.end;
+}
+
+function lineRange(candidate: ContextCandidate): { start: number; end: number } | null {
+  if (!Number.isInteger(candidate.startLine) || !Number.isInteger(candidate.endLine)) {
+    return null;
+  }
+  if (!candidate.startLine || !candidate.endLine) {
+    return null;
+  }
+  return {
+    start: Math.min(candidate.startLine, candidate.endLine),
+    end: Math.max(candidate.startLine, candidate.endLine),
+  };
 }
 
 function matchesSourceSnapshot(a: ContextCandidate, b: ContextCandidate): boolean {
@@ -304,6 +404,7 @@ function matchesSourceSnapshot(a: ContextCandidate, b: ContextCandidate): boolea
     a.startLine === b.startLine &&
     a.endLine === b.endLine &&
     a.status === b.status &&
-    a.statusReason === b.statusReason
+    a.statusReason === b.statusReason &&
+    JSON.stringify(a.sourceData ?? null) === JSON.stringify(b.sourceData ?? null)
   );
 }

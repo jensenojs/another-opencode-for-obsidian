@@ -36,9 +36,33 @@ export type ContextCandidateSourceKind =
   | "selection"
   | "manual"
   | "graph"
-  | "diagnostic";
+  | "diagnostic"
+  | "opencode-native-comment";
 export type CandidateLifetime = "dynamic" | "one-shot";
 export type ContextCandidateStatus = "active" | "failed";
+
+export interface ContextCandidateFileSelection {
+  startLine: number;
+  startChar: number;
+  endLine: number;
+  endChar: number;
+}
+
+export interface OpenCodeNativeCommentCandidateSourceData {
+  kind: "opencode-native-comment";
+  key: string;
+  item: {
+    type: "file";
+    path: string;
+    selection?: ContextCandidateFileSelection;
+    comment: string;
+    commentID: string;
+    commentOrigin?: "review" | "file";
+    preview?: string;
+  };
+}
+
+export type ContextCandidateSourceData = OpenCodeNativeCommentCandidateSourceData;
 
 export interface ContextItem {
   id: string;
@@ -72,6 +96,7 @@ export interface ContextCandidate {
   lifetime: CandidateLifetime;
   status: ContextCandidateStatus;
   statusReason?: string;
+  sourceData?: ContextCandidateSourceData;
   createdAt: number;
   updatedAt: number;
 }

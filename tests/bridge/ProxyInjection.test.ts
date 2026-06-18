@@ -899,6 +899,12 @@ describe("ProxyInjection", () => {
     expect(body).toContain("body {");
     expect(body).toContain("position: relative;");
     expect(body).toContain("isolation: isolate;");
+    expect(body).toContain(
+      'html[data-another-opencode-for-obsidian-appearance="obsidian"] #terminal-panel [role="textbox"][aria-label="Terminal input"]'
+    );
+    expect(body).toContain("--another-opencode-for-obsidian-terminal-material");
+    expect(body).toContain("window.__anotherOpenCodeForObsidianTerminalTheme");
+    expect(body).toContain("--another-opencode-for-obsidian-terminal-background");
     expect(body).toContain("--another-opencode-for-obsidian-page-background,");
     expect(body).toContain("var(--another-opencode-for-obsidian-background-primary, transparent)");
     expect(body).toContain("#root {");
@@ -1017,5 +1023,35 @@ describe("ProxyInjection", () => {
     );
     expect(root.hasAttribute("data-opencode-obsidian-appearance")).toBe(false);
     expect(root.hasAttribute("data-opencode-obsidian-workspace-background")).toBe(false);
+  });
+
+  test("publishes an Obsidian terminal theme hook with transparent canvas background", () => {
+    const body = injectOpenCodeWebUiProxyHtml(html, "obsidian", {
+      colorScheme: "dark",
+      variables: {
+        "--another-opencode-for-obsidian-workspace-background-state": "enabled",
+        "--another-opencode-for-obsidian-terminal-background": "rgba(0, 0, 0, 0)",
+        "--another-opencode-for-obsidian-terminal-material":
+          "color-mix(in srgb, #2e261f 40%, transparent)",
+      },
+    });
+
+    const window = runInjectedTheme(body);
+    const hook = (window as any).__anotherOpenCodeForObsidianTerminalTheme;
+
+    expect(typeof hook).toBe("function");
+    expect(
+      hook({
+        background: "#11151c",
+        foreground: "#ebdbb2",
+        cursor: "#ebdbb2",
+        selectionBackground: "rgba(235, 219, 178, 0.25)",
+      })
+    ).toEqual({
+      background: "rgba(0, 0, 0, 0)",
+      foreground: "#ebdbb2",
+      cursor: "#ebdbb2",
+      selectionBackground: "rgba(235, 219, 178, 0.25)",
+    });
   });
 });

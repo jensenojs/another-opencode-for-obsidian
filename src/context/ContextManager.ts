@@ -15,12 +15,22 @@ import { ContextSyncer } from "./ContextSyncer";
 import { CurrentContextSession } from "./ContextSessionResolver";
 import type { ContextCandidateInput, ContextSourceResult } from "./ContextSourceDriver";
 import { PromptContextInjector, type PromptInjectionPlan } from "./PromptContextInjector";
+import {
+  buildPromptContextProjections,
+  createOpenCodeContextPathResolver,
+  filterNativeFileCardProjections,
+  type NativePromptContextProjection,
+  type PromptContextProjection,
+  type PromptContextProjectionFailure,
+} from "./PromptContextProjection";
+import type { OpenCodePromptContextItem } from "../bridge/OpenCodePromptContextAdapter";
 import type { ServerState } from "../server/types";
 
 const WORKSPACE_CONTEXT_LABEL = "Workspace context";
 const WORKSPACE_CONTEXT_SOURCE = "Obsidian workspace";
 const WORKSPACE_SOURCE_ID = "workspace";
 const WORKSPACE_IDENTITY_KEY = "current";
+const OPENCODE_NATIVE_COMMENT_SOURCE_ID = "opencode-native-comment";
 
 // Coordinates Obsidian context sources and local candidates. OpenCode UI
 // adapters receive already decided context from this layer.
@@ -308,9 +318,23 @@ export class ContextManager {
     return this.candidateRegistry.remove(candidateId);
   }
 
+  getPromptContextProjections(): PromptContextProjection[] {
+    return this.buildPromptContextProjectionResult().projections;
+  }
+
+  getNativePromptContextProjections(): NativePromptContextProjection[] {
+    return filterNativeFileCardProjections(this.getPromptContextProjections()).map(
+      (projection) => projection.native
+    );
+  }
+
+  getPromptContextProjectionFailures(): PromptContextProjectionFailure[] {
+    return this.buildPromptContextProjectionResult().failures;
+  }
+
   preparePromptContext(sessionId: string, requestBody: unknown): PromptInjectionPlan | null {
     this.candidateRegistry.setSession(sessionId);
-    return this.promptInjector.prepare(sessionId, requestBody);
+    return this.promptInjector.prepare(sessionId, requestBody, this.getPromptContextProjections());
   }
 
   completePromptContext(planId: string): void {
@@ -319,6 +343,85 @@ export class ContextManager {
 
   failPromptContext(planId: string, reason: string): void {
     this.promptInjector.fail(planId, reason);
+  }
+
+  upsertOpenCodeNativeCommentCandidate(item: OpenCodePromptContextItem): ContextCandidate | null {
+    if (!item.commentID || !item.comment?.trim()) {
+      return null;
+    }
+
+    return this.candidateRegistry.upsert(
+      this.createCandidate({
+        sourceId: OPENCODE_NATIVE_COMMENT_SOURCE_ID,
+        sourceKind: "opencode-native-comment",
+        identityKey: `opencode-comment:${item.path}:${item.commentID}`,
+        fingerprint: JSON.stringify({
+          key: item.key,
+          path: item.path,
+          selection: item.selection ?? null,
+          comment: item.comment,
+          commentID: item.commentID,
+          commentOrigin: item.commentOrigin ?? null,
+          preview: item.preview ?? null,
+        }),
+        label: formatOpenCodeNativeCommentLabel(item),
+        text: item.comment,
+        sourceFile: item.path,
+        navigationSourceFile: item.path,
+        startLine: item.selection?.startLine,
+        endLine: item.selection?.endLine,
+        lifetime: "one-shot",
+        sourceData: {
+          kind: "opencode-native-comment",
+          key: item.key,
+          item: {
+            type: "file",
+            path: item.path,
+            selection: item.selection ? { ...item.selection } : undefined,
+            comment: item.comment,
+            commentID: item.commentID,
+            commentOrigin: item.commentOrigin,
+            preview: item.preview,
+          },
+        },
+      })
+    );
+  }
+
+  reconcileOpenCodeNativeCommentCandidates(
+    items: OpenCodePromptContextItem[],
+    options: { removeMissing: boolean } = { removeMissing: false }
+  ): void {
+    const liveIdentities = new Set<string>();
+    for (const item of items) {
+      if (!item.commentID || !item.comment?.trim()) {
+        continue;
+      }
+      this.upsertOpenCodeNativeCommentCandidate(item);
+      liveIdentities.add(`opencode-comment:${item.path}:${item.commentID}`);
+    }
+
+    if (!options.removeMissing) {
+      return;
+    }
+
+    for (const candidate of this.candidateRegistry.getCandidates()) {
+      if (candidate.sourceId !== OPENCODE_NATIVE_COMMENT_SOURCE_ID) {
+        continue;
+      }
+      if (!liveIdentities.has(candidate.identityKey)) {
+        this.candidateRegistry.remove(candidate.id);
+      }
+    }
+  }
+
+  setNativePromptContextIncludedByKey(key: string, included: boolean): ContextCandidate | null {
+    const candidate = this.candidateRegistry
+      .getCandidates()
+      .find(
+        (item) => item.sourceData?.kind === "opencode-native-comment" && item.sourceData.key === key
+      );
+    return candidate ? this.candidateRegistry.setIncluded(candidate.id, included) : null;
   }
 
   async addManual(
@@ -499,9 +602,28 @@ export class ContextManager {
       included: true,
       lifetime: input.lifetime,
       status: "active",
+      sourceData: input.sourceData,
       createdAt: now,
       updatedAt: now,
     };
+  }
+
+  private buildPromptContextProjectionResult(): {
+    projections: PromptContextProjection[];
+    failures: PromptContextProjectionFailure[];
+  } {
+    return buildPromptContextProjections(
+      this.candidateRegistry.getCandidates(),
+      createOpenCodeContextPathResolver({
+        vaultBasePath: this.getVaultBasePath(),
+        fileExists: (path) => Boolean(this.app.vault?.getFileByPath?.(path)),
+      })
+    );
+  }
+
+  private getVaultBasePath(): string | null {
+    const adapter = this.app.vault?.adapter as { getBasePath?: () => string } | undefined;
+    return adapter?.getBasePath?.() ?? null;
   }
 
   private async addItem(params: {
@@ -648,4 +770,10 @@ export class ContextManager {
   destroy(): void {
     this.clearListeners();
   }
+}
+
+function formatOpenCodeNativeCommentLabel(item: OpenCodePromptContextItem): string {
+  const line = item.selection?.startLine;
+  const suffix = line ? `:${line}` : "";
+  return `OpenCode comment: ${item.path}${suffix}`;
 }

@@ -50,6 +50,7 @@ export interface RuntimeDiagnosticsSnapshot {
   theme: unknown | null;
   iframe: unknown | null;
   opencodeEvents: unknown | null;
+  promptContext: unknown | null;
 }
 
 const LOG_MAX_BYTES = 1024 * 1024;

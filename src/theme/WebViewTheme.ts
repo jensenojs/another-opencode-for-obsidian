@@ -474,6 +474,9 @@ function createV2ObsidianVariables(obsidian: ObsidianThemeValues): ThemeVariable
     "--v2-illustration-illustration-layer-02": "var(--v2-background-bg-layer-02)",
     "--v2-illustration-illustration-layer-03": "var(--v2-background-bg-layer-03)",
     "--v2-font-family-sans": obsidian.fontInterface,
+
+    "--another-opencode-for-obsidian-terminal-background": "rgba(0, 0, 0, 0)",
+    "--another-opencode-for-obsidian-terminal-material": "var(--v2-background-bg-base)",
   };
 }
 

@@ -401,6 +401,328 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
     var payload = click.line ? { path: click.path, line: click.line } : { path: click.path };
     post(messages.vaultFileOpen, payload);
   }
+    var promptContextGetter = null;
+    var promptContextActivationEntries = Object.create(null);
+    var promptContextLastFingerprint = null;
+    var promptContextLastItems = [];
+    var promptContextPollTimer = null;
+  function clonePromptContextItem(item) {
+    if (!item || typeof item !== 'object') return item;
+    var clone = {};
+    for (var key in item) clone[key] = item[key];
+    if (item.selection) {
+      clone.selection = {};
+      for (var selectionKey in item.selection) clone.selection[selectionKey] = item.selection[selectionKey];
+    }
+    return clone;
+  }
+  function checksumPromptContextComment(value) {
+    var hash = 2166136261;
+    for (var i = 0; i < value.length; i += 1) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16);
+  }
+  function promptContextItemKey(item) {
+    if (!item || item.type !== 'file') return item && item.type ? item.type : '';
+    var selection = item.selection || {};
+    var key = item.type + ':' + item.path + ':' + selection.startLine + ':' + selection.endLine;
+    if (item.commentID) return key + ':c=' + item.commentID;
+    var comment = typeof item.comment === 'string' ? item.comment.trim() : '';
+    if (!comment) return key;
+    return key + ':c=' + checksumPromptContextComment(comment).slice(0, 8);
+  }
+    function promptContextItems() {
+      if (!promptContextGetter) return [];
+      var context = promptContextGetter();
+      if (!context || typeof context.items !== 'function') return [];
+      return context.items().map(clonePromptContextItem);
+    }
+    function promptContextCommentKey(item) {
+      if (!item || item.type !== 'file' || !item.commentID || !item.comment) return null;
+      return item.path + '\\n' + item.commentID;
+    }
+    function classifyPromptContextChange(previousItems, nextItems) {
+      var previousComments = Object.create(null);
+      var nextComments = Object.create(null);
+      for (var i = 0; i < previousItems.length; i += 1) {
+        var previousKey = promptContextCommentKey(previousItems[i]);
+        if (previousKey) previousComments[previousKey] = true;
+      }
+      for (var j = 0; j < nextItems.length; j += 1) {
+        var nextKey = promptContextCommentKey(nextItems[j]);
+        if (nextKey) nextComments[nextKey] = true;
+      }
+      for (var added in nextComments) {
+        if (!previousComments[added]) return 'opencode-comment-add';
+      }
+      for (var removed in previousComments) {
+        if (!nextComments[removed]) return 'opencode-comment-delete';
+      }
+      if (previousItems.length > 0 && nextItems.length === 0) return 'opencode-submit-clear';
+      return 'unknown';
+    }
+  function findPromptContextItemByKey(key) {
+    var items = promptContextItems();
+    for (var i = 0; i < items.length; i += 1) {
+      if (items[i].key === key) return items[i];
+    }
+    return null;
+  }
+  function findPromptContextComment(path, commentID) {
+    var items = promptContextItems();
+    for (var i = 0; i < items.length; i += 1) {
+      var item = items[i];
+      if (item.type === 'file' && item.path === path && item.commentID === commentID) return item;
+    }
+    return null;
+  }
+  function promptContextPortUnavailable(reason, message) {
+    post(messages.promptContextUnavailable, {
+      reason: reason,
+      message: message || undefined
+    });
+  }
+  function getPromptContextStore() {
+    if (!promptContextGetter) return null;
+    var context = promptContextGetter();
+    if (!context || typeof context.items !== 'function') return null;
+    return context;
+  }
+    function emitPromptContextChanged(origin, transactionId) {
+      var items = promptContextItems();
+      promptContextLastItems = items.map(clonePromptContextItem);
+      promptContextLastFingerprint = promptContextFingerprint();
+      post(messages.promptContextChanged, {
+        origin: origin || 'unknown',
+        items: items,
+        transactionId: transactionId || undefined
+      });
+    }
+  function promptContextFingerprint() {
+    try {
+      return JSON.stringify(promptContextItems());
+    } catch (_error) {
+      return '';
+    }
+  }
+    function startPromptContextPolling() {
+      if (promptContextPollTimer) return;
+      promptContextLastItems = promptContextItems();
+      promptContextLastFingerprint = promptContextFingerprint();
+      promptContextPollTimer = window.setInterval(function() {
+        if (!promptContextGetter) return;
+        var next = promptContextFingerprint();
+        if (next === promptContextLastFingerprint) return;
+        var previousItems = promptContextLastItems.map(clonePromptContextItem);
+        var nextItems = promptContextItems();
+        promptContextLastFingerprint = next;
+        promptContextLastItems = nextItems.map(clonePromptContextItem);
+        emitPromptContextChanged(classifyPromptContextChange(previousItems, nextItems));
+      }, 500);
+    }
+    function runPromptContextCommand(command) {
+      var context = getPromptContextStore();
+      if (!context) {
+        return { ok: false, error: 'prompt context port is not loaded' };
+      }
+    if (command.action === 'items') {
+      return { ok: true, result: promptContextItems(), items: promptContextItems() };
+    }
+    if (command.action === 'add') {
+      var item = clonePromptContextItem(command.item);
+      var key = promptContextItemKey(item);
+      var existing = findPromptContextItemByKey(key);
+      if (existing) {
+        var existingEntry = promptContextActivationEntries[key];
+        if (existingEntry && existingEntry.projectionId === command.projectionId) {
+          return {
+            ok: true,
+            result: { status: 'already-owned', key: key, item: existing, projectionId: command.projectionId },
+            items: promptContextItems()
+          };
+        }
+        return {
+          ok: true,
+          result: {
+            status: 'conflict',
+            key: key,
+            existing: existing,
+            reason: existingEntry ? 'key-owned-by-other-projection' : 'key-owned-by-opencode'
+          },
+          items: promptContextItems()
+        };
+      }
+      context.add(item);
+      var inserted = findPromptContextItemByKey(key) || Object.assign({ key: key }, item);
+      promptContextActivationEntries[key] = {
+        projectionId: command.projectionId,
+        clickAction: command.clickAction || { type: 'none' }
+      };
+      emitPromptContextChanged('bridge-sync', command.transactionId);
+      return {
+        ok: true,
+        result: { status: 'inserted', key: key, item: inserted },
+        items: promptContextItems()
+      };
+    }
+    if (command.action === 'remove') {
+      var removed = findPromptContextItemByKey(command.key);
+      context.remove(command.key);
+      delete promptContextActivationEntries[command.key];
+      emitPromptContextChanged('bridge-sync', command.transactionId);
+      return {
+        ok: true,
+        result: removed ? { status: 'removed', key: command.key, item: removed } : { status: 'missing', key: command.key },
+        items: promptContextItems()
+      };
+    }
+    if (command.action === 'removeComment') {
+      var comment = findPromptContextComment(command.path, command.commentID);
+      if (comment) delete promptContextActivationEntries[comment.key];
+      context.removeComment(command.path, command.commentID);
+      emitPromptContextChanged('bridge-sync', command.transactionId);
+      return {
+        ok: true,
+        result: comment ? { status: 'removed', key: comment.key, item: comment } : { status: 'missing', key: '' },
+        items: promptContextItems()
+      };
+    }
+    if (command.action === 'updateComment') {
+      var previous = findPromptContextComment(command.path, command.commentID);
+      context.updateComment(command.path, command.commentID, command.next || {});
+      var updated = findPromptContextComment(command.path, command.commentID);
+      if (!previous || !updated) {
+        return {
+          ok: true,
+          result: { status: 'missing', path: command.path, commentID: command.commentID },
+          items: promptContextItems()
+        };
+      }
+      var entry = promptContextActivationEntries[previous.key];
+      if (entry) {
+        delete promptContextActivationEntries[previous.key];
+        promptContextActivationEntries[updated.key] = entry;
+      }
+      emitPromptContextChanged('bridge-sync', command.transactionId);
+      return {
+        ok: true,
+        result: { status: 'updated', key: updated.key, previous: previous, item: updated },
+        items: promptContextItems()
+      };
+    }
+    if (command.action === 'replaceComments') {
+      context.replaceComments(command.items || []);
+      emitPromptContextChanged('bridge-sync', command.transactionId);
+      return {
+        ok: true,
+        result: { status: 'replaced', keys: promptContextItems().map(function(item) { return item.key; }) },
+        items: promptContextItems()
+      };
+      }
+      return { ok: false, error: 'unknown prompt context command' };
+    }
+    function directPromptContextCommand(action, payload) {
+      var command = Object.assign(
+        {
+          action: action,
+          transactionId: 'direct:' + Date.now() + ':' + Math.random().toString(36).slice(2)
+        },
+        payload || {}
+      );
+      return runPromptContextCommand(command);
+    }
+    window.__anotherOpenCodeForObsidianPromptContext = {
+      items: function() {
+        return promptContextItems();
+      },
+      add: function(item, projectionId, clickAction) {
+        return directPromptContextCommand('add', {
+          item: item,
+          projectionId: projectionId || 'direct',
+          clickAction: clickAction || { type: 'none' }
+        }).result;
+      },
+      remove: function(key) {
+        return directPromptContextCommand('remove', { key: key }).result;
+      },
+      removeComment: function(path, commentID) {
+        return directPromptContextCommand('removeComment', { path: path, commentID: commentID }).result;
+      },
+      updateComment: function(path, commentID, next) {
+        return directPromptContextCommand('updateComment', {
+          path: path,
+          commentID: commentID,
+          next: next || {}
+        }).result;
+      },
+      replaceComments: function(items) {
+        return directPromptContextCommand('replaceComments', { items: items || [] }).result;
+      }
+    };
+    window.__anotherOpenCodeForObsidianInstallPromptContextPort = function(getContext) {
+      promptContextGetter = typeof getContext === 'function' ? getContext : null;
+      if (!promptContextGetter) {
+        promptContextPortUnavailable('port-not-loaded', 'Prompt context getter was not callable');
+      return;
+    }
+    post(messages.promptContextReady, {
+      available: true,
+      itemCount: promptContextItems().length
+    });
+    emitPromptContextChanged('bridge-sync');
+    startPromptContextPolling();
+  };
+  window.__anotherOpenCodeForObsidianPromptContextHooks = {
+      activated: function(item) {
+        var key = item && item.key ? item.key : promptContextItemKey(item);
+        var entry = promptContextActivationEntries[key];
+        post(messages.promptContextActivated, {
+          key: key,
+          item: clonePromptContextItem(item)
+        });
+        return !(entry && entry.clickAction && entry.clickAction.type === 'obsidian-open');
+      },
+    removed: function(item) {
+      var key = item && item.key ? item.key : promptContextItemKey(item);
+      delete promptContextActivationEntries[key];
+      post(messages.promptContextRemoved, {
+        key: key,
+        origin: 'card-close',
+        item: clonePromptContextItem(item)
+      });
+      return true;
+    }
+  };
+  function promptContextCommandHandler(event) {
+    var data = event.data;
+    if (!data || data.ns !== ns || data.version !== version || data.type !== messages.promptContextCommand) return;
+    var command = data.payload;
+    if (!command || typeof command.transactionId !== 'string' || typeof command.action !== 'string') return;
+    try {
+      var result = runPromptContextCommand(command);
+      post(messages.promptContextCommandResult, {
+        transactionId: command.transactionId,
+        action: command.action,
+        ok: !!result.ok,
+        result: result.result,
+        items: result.items,
+        error: result.error
+      });
+    } catch (error) {
+      post(messages.promptContextCommandResult, {
+        transactionId: command.transactionId,
+        action: command.action,
+        ok: false,
+        error: error && error.message ? error.message : String(error)
+      });
+    }
+  }
+  window.addEventListener('message', promptContextCommandHandler, true);
+  window.setTimeout(function() {
+    if (!promptContextGetter) promptContextPortUnavailable('port-not-loaded', 'Prompt context port did not load');
+  }, 5000);
   post(messages.proxyLoaded);
   function toggleHandler(e) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'l') {

@@ -11,7 +11,6 @@ interface AutoSelectionContextSourceDeps {
 
 export class AutoSelectionContextSource implements ContextSourceDriver {
   readonly sourceId = SELECTION_SOURCE_ID;
-  private lastFingerprint: string | null = null;
 
   constructor(private deps: AutoSelectionContextSourceDeps) {}
 
@@ -35,11 +34,6 @@ export class AutoSelectionContextSource implements ContextSourceDriver {
     }
 
     const fingerprint = this.createFingerprint(selection);
-    if (fingerprint === this.lastFingerprint) {
-      return null;
-    }
-
-    this.lastFingerprint = fingerprint;
     const text = truncateText(selection.text, this.deps.maxCharsPerSnippet());
     const identityKey = `selection:${hashFingerprint(fingerprint)}`;
     return {
@@ -60,9 +54,7 @@ export class AutoSelectionContextSource implements ContextSourceDriver {
     };
   }
 
-  reset(): void {
-    this.lastFingerprint = null;
-  }
+  reset(): void {}
 
   private createFingerprint(selection: SelectedTextContext): string {
     return [

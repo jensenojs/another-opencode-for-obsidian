@@ -9,6 +9,7 @@ import {
 } from "./ContextItemNavigator";
 import { getText } from "../i18n";
 import { OPENCODE_ICON_NAME } from "../icons";
+import type { PromptContextProjectionFailure } from "./PromptContextProjection";
 
 interface ContextStatusBarDeps {
   addStatusBarItem: () => HTMLElement;
@@ -16,6 +17,7 @@ interface ContextStatusBarDeps {
   onItemsChanged: (callback: (items: ContextItem[]) => void) => () => void;
   getCandidates?: () => ContextCandidate[];
   onCandidatesChanged?: (callback: (items: ContextCandidate[]) => void) => () => void;
+  getProjectionFailures?: () => PromptContextProjectionFailure[];
   toggleCandidate?: (candidateId: string) => ContextCandidate | null;
   removeCandidate?: (candidateId: string) => ContextCandidate | null;
   resolveItem: (item: ContextStatusBarSource) => ContextNavigationResolution;
@@ -183,12 +185,19 @@ export class ContextStatusBar {
       text: `${candidates.filter((candidate) => candidate.included).length}/${candidates.length}`,
     });
     const listEl = sectionEl.createDiv({ cls: "opencode-ctx-list" });
+    const failures = new Map(
+      (this.deps.getProjectionFailures?.() ?? []).map((failure) => [failure.candidateId, failure])
+    );
     for (const candidate of candidates) {
-      this.renderCandidateRow(listEl, candidate);
+      this.renderCandidateRow(listEl, candidate, failures.get(candidate.id));
     }
   }
 
-  private renderCandidateRow(listEl: HTMLElement, candidate: ContextCandidate): void {
+  private renderCandidateRow(
+    listEl: HTMLElement,
+    candidate: ContextCandidate,
+    projectionFailure?: PromptContextProjectionFailure
+  ): void {
     const rowEl = listEl.createDiv({ cls: "opencode-ctx-item opencode-ctx-candidate" });
     const resolution = this.deps.resolveItem(candidate);
     rowEl.toggleClass("is-unresolved", resolution.status === "unresolved");
@@ -219,7 +228,7 @@ export class ContextStatusBar {
     const bodyEl = rowEl.createDiv({ cls: "opencode-ctx-item-body" });
     bodyEl.createDiv({ cls: "opencode-ctx-item-label", text: candidate.label });
     bodyEl.createDiv({ cls: "opencode-ctx-item-source", text: this.formatSource(candidate) });
-    this.renderCandidatePills(bodyEl, candidate, resolution);
+    this.renderCandidatePills(bodyEl, candidate, resolution, projectionFailure);
 
     if (resolution.status === "unresolved" || candidate.status === "failed") {
       rowEl.createSpan({
@@ -526,7 +535,8 @@ export class ContextStatusBar {
   private renderCandidatePills(
     bodyEl: HTMLElement,
     candidate: ContextCandidate,
-    resolution: ContextNavigationResolution
+    resolution: ContextNavigationResolution,
+    projectionFailure?: PromptContextProjectionFailure
   ): void {
     const detailsEl = bodyEl.createDiv({ cls: "opencode-ctx-item-details" });
     detailsEl.createSpan({
@@ -543,6 +553,12 @@ export class ContextStatusBar {
       detailsEl.createSpan({
         cls: "opencode-ctx-pill is-warning",
         text: formatNavigationResolution(resolution),
+      });
+    }
+    if (projectionFailure) {
+      detailsEl.createSpan({
+        cls: "opencode-ctx-pill is-warning",
+        text: `native card skipped: ${projectionFailure.reason}`,
       });
     }
   }
@@ -577,6 +593,7 @@ export function formatContextDiagnostics(
         lifetime: candidate.lifetime,
         status: candidate.status,
         statusReason: candidate.statusReason ?? null,
+        sourceData: summarizeCandidateSourceData(candidate),
         textLength: candidate.text.length,
         navigation: resolveItem ? serializeNavigationResolution(resolveItem(candidate)) : null,
         createdAt: new Date(candidate.createdAt).toISOString(),
@@ -601,6 +618,25 @@ export function formatContextDiagnostics(
     null,
     2
   );
+}
+
+function summarizeCandidateSourceData(candidate: ContextCandidate): Record<string, unknown> | null {
+  if (candidate.sourceData?.kind !== "opencode-native-comment") {
+    return null;
+  }
+  return {
+    kind: candidate.sourceData.kind,
+    key: candidate.sourceData.key,
+    item: {
+      type: candidate.sourceData.item.type,
+      path: candidate.sourceData.item.path,
+      selection: candidate.sourceData.item.selection ?? null,
+      commentID: candidate.sourceData.item.commentID,
+      commentOrigin: candidate.sourceData.item.commentOrigin ?? null,
+      previewLength: candidate.sourceData.item.preview?.length ?? null,
+      commentLength: candidate.sourceData.item.comment.length,
+    },
+  };
 }
 
 function serializeNavigationResolution(

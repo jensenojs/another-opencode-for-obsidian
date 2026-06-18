@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { AutoSelectionContextSource } from "../../src/context/AutoSelectionContextSource";
 
 describe("AutoSelectionContextSource", () => {
-  test("returns one-shot upsert results for changed selections and skips duplicate fingerprints", () => {
+  test("returns one-shot upsert results for repeated selections so the registry can restore intent", () => {
     const source = new AutoSelectionContextSource({
       isEnabled: () => true,
       maxCharsPerSnippet: () => 2000,
@@ -43,7 +43,14 @@ describe("AutoSelectionContextSource", () => {
     expect(
       first?.type === "upsert" ? first.candidate.identityKey.startsWith("selection:") : false
     ).toBe(true);
-    expect(duplicate).toBeNull();
+    expect(duplicate).toMatchObject({
+      type: "upsert",
+      candidate: {
+        identityKey: first?.type === "upsert" ? first.candidate.identityKey : "",
+        fingerprint: first?.type === "upsert" ? first.candidate.fingerprint : "",
+        text: "selected text",
+      },
+    });
     expect(changed).toMatchObject({
       type: "upsert",
       candidate: {

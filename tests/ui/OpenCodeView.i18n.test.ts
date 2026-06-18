@@ -23,10 +23,11 @@ mock.module("obsidian", () => ({
 }));
 
 let OpenCodeView: typeof OpenCodeViewClass;
+let resolveInitialOpenCodeIframeUrl: (storedUrl: string | null, serverUrl: string) => string;
 let setPluginLanguageForTests: (language: string | null) => void;
 
 beforeAll(async () => {
-  ({ OpenCodeView } = await import("../../src/ui/OpenCodeView"));
+  ({ OpenCodeView, resolveInitialOpenCodeIframeUrl } = await import("../../src/ui/OpenCodeView"));
   ({ setPluginLanguageForTests } = await import("../../src/i18n"));
 });
 
@@ -65,6 +66,15 @@ describe("OpenCodeView i18n", () => {
       expect(startCount).toBe(0);
       expect(document.body.textContent).toContain("OpenCode is stopped");
     });
+  });
+
+  test("restores stored sessions through the current proxy origin", () => {
+    expect(
+      resolveInitialOpenCodeIframeUrl(
+        "http://127.0.0.1:4097/project/session/ses_old",
+        "http://127.0.0.1:4098/project"
+      )
+    ).toBe("http://127.0.0.1:4098/project/session/ses_old");
   });
 });
 
