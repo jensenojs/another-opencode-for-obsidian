@@ -4,15 +4,27 @@ AI 编码代理在 Another OpenCode for Obsidian 插件上工作的指南。
 
 ## 项目概述
 
-这个插件把 OpenCode 接进 Obsidian，但产品中心不是 iframe 里的 Web UI。Web UI 只是一个入口。插件真正负责的是 Obsidian-native evidence/control：把当前 session 使用了哪些 vault context 说清楚，保留 provenance，用安全导航回到已有笔记，提供 GraphIndex 事实层和 XDG diagnostics，让终端 OpenCode TUI 仍可作为主要对话入口。
+这个插件把 OpenCode 接进 Obsidian。当前主目标已经收敛为：让 OpenCode 在
+Obsidian 里可日常使用，同时保留 OpenCode 自己的 Web UI。插件负责 Obsidian
+才能判断的部分：视图位置、主题适配、快捷键归属、vault 安全导航、context
+provenance、runtime diagnostics，以及 status bar / Web UI context surface 的一致性。
 
-当前第一阶段的产品顺序：
+当前产品边界：
 
-1. Safe context navigation：context source 只能跳到已有 vault 内容，不能通过 Obsidian link 语义创建文件。
-2. Context provenance/control：当前 OpenCode session 的 context 必须可见、可诊断、可显式移除或排除候选。
-3. GraphIndex：消费 Obsidian Vault + MetadataCache，提供 vault link graph 的事实 read model。
-4. GraphRAG derived layer：在 GraphIndex 之上做派生证据和候选关系，不把推荐策略塞进 GraphIndex。
-5. OpenCode event bridge：上游稳定 event surface 是 OpenCode dev 的 `GET /api/event` / `v2.event.subscribe`。第一阶段只接 read-only session diagnostics，不复制 Web UI 已有的 permission/question 弹窗。
+1. OpenCode in Obsidian usability：OpenCode server 管理、侧边栏视图、主编辑区 deep
+   view、Obsidian 外观、快捷键桥接、设置页冲突控制。
+2. Safe vault navigation：context source 和 OpenCode iframe 里的 vault path 只能跳到已有
+   vault 内容，不能通过 Obsidian link 语义创建文件。
+3. Context provenance/control：当前 OpenCode session 的 context 必须可见、可诊断、可显式移除或排除候选。
+4. GraphIndex：消费 Obsidian Vault + MetadataCache，提供 vault link graph 的事实 read
+   model，供导航和以后可能的 graph 实验使用。
+5. OpenCode event bridge：上游稳定 event surface 是 OpenCode dev 的 `GET /api/event` /
+   `v2.event.subscribe`。当前只接 read-only session diagnostics，不复制 Web UI 已有的
+   permission/question 弹窗。
+
+GraphRAG 是可能的个人探索方向，不是当前产品主线。除非用户明确要求，不要主动把
+GraphRAG 排进实现计划。任何 graph-derived source 都必须消费 GraphIndex facts，不能替代
+Obsidian resolver，也不能绕过 CandidateRegistry 直接写 OpenCode session。
 
 产品定位文档：
 
@@ -58,8 +70,10 @@ src/
 │   ├── ProxyInjection.ts  # HTML/CSS/JS 注入入口
 │   ├── BridgeInjection.ts # iframe 内 UI hook 安装
 │   ├── BridgeProtocol.ts  # 本项目自己的 iframe -> Obsidian postMessage 协议
+│   ├── KeyboardShortcutIndex.ts # Obsidian/OpenCode 快捷键归一化、冲突和 policy
+│   ├── OpenCodeKeyboardBundlePatch.ts # OpenCode command/keybind port bundle patch
 │   ├── OpenCodeBridge.ts  # OpenCode server event diagnostics
-│   └── OpenCodePromptContextAdapter.ts # future native prompt context card adapter contract
+│   └── OpenCodePromptContextAdapter.ts # native prompt context card adapter contract
 ├── debug/
 │   └── RuntimeDiagnostics.ts # XDG 日志、status.json、运行时路径
 ├── context/
@@ -124,13 +138,13 @@ scripts/
   OpenCode package exports、`@opencode-ai/plugin` hooks、TUI API、SDK generated
   client、Web UI app exports。官方文档用于确认版本背景。
 - 生产代码 owner map：
-  - `src/context/*` 拥有 Obsidian context source、candidate lifecycle、GraphRAG 派生入口、
+  - `src/context/*` 拥有 Obsidian context source、candidate lifecycle、可选 graph-derived source、
     Obsidian link/subpath resolution 和 safe navigation。
   - `src/bridge/*` 拥有 OpenCode Web UI transport、HTML 注入、iframe 内 UI hook 安装、
-    iframe 本地 message shape、OpenCode server event diagnostics 和 future Web UI bridge 执行点。
-  - `OpenCodePromptContextAdapter` 是 future OpenCode Web UI prompt context adapter 的
-    生产类型位置；它表达 Web UI `PromptProvider` / `prompt.context.add(item)` 这类
-    internal source contract，并把 internal shape 集中在一个代码入口。
+    iframe 本地 message shape、keyboard bridge、OpenCode server event diagnostics 和 Web UI bridge 执行点。
+  - `OpenCodePromptContextAdapter` 是 OpenCode Web UI prompt context adapter 的生产类型位置；
+    它表达 Web UI `PromptProvider` / `prompt.context.add(item)` 这类 internal source
+    contract，并把 internal shape 集中在一个代码入口。
 - harness 的角色是本地 OpenCode/Obsidian 版本漂移检查。生产边界由上面的 owner map、
   TypeScript imports 和 adapter 类型表达。
 
@@ -139,13 +153,13 @@ scripts/
 - 启动本地代理服务器（端口从 4097 起自动检测）
 - 转发请求到 opencode 服务器，同时在响应中:
   1. **剥离 Content-Security-Policy 头**——否则注入的脚本会被浏览器阻止执行
-  2. **注入键盘监听脚本**——拦截 iframe 内的 `Cmd+L` / `Ctrl+L`，通过 `BridgeProtocol.ts` 定义的 `postMessage` 协议发送到父窗口
+  2. **注入键盘桥接脚本**——iframe 根据父窗口下发的 normalized policy 同步决定是否拦截快捷键；不要恢复 `Cmd/Ctrl+L` 特判
   3. **注入文件点击监听脚本**——只从 OpenCode iframe DOM 中提取用户点击的 vault path 字符串，并发送 `vault-file:open` 本地 bridge message；proxy 不解析 wikilink，不判断文件是否存在
 - 注入层 UI hook 是插件的产品能力之一。它用于承接“事实发生在 OpenCode iframe
   里，但结果需要 Obsidian API 或 vault 事实完成”的动作，例如插件拥有的
   context card 点击后跳回 Obsidian。hook 可以捕获 iframe 里的 UI 事实，也可以在
   iframe/Web UI bridge 中执行已经由 context 层决定好的 OpenCode UI 动作，例如
-  future `prompt.context.add(item)`。hook 不能拥有 context source 策略、GraphRAG
+  `prompt.context.add(item)`。hook 不能拥有 context source 策略、graph-derived source
   策略、link resolver、selection queue 或 OpenCode prompt 写入策略。
 - OpenCode 原生 review / diff comment card 继续交给 OpenCode 自己处理。本插件
   写入的 Obsidian-owned card 不允许伪造 `commentID` 或 `commentOrigin: "review"`；
@@ -203,6 +217,8 @@ scripts/
   1. 侧边栏已展开 且 opencode 活跃 → 折叠侧边栏
   2. 侧边栏已展开 但其他 leaf 活跃 → 切换到 opencode leaf
   3. 侧边栏已折叠 → 展开侧边栏 + 聚焦 opencode iframe
+- deep view 使用 `toggle-opencode-deep-view`，默认快捷键 `Mod+Shift+L`。它把 OpenCode
+  放到主编辑区；再次触发时返回进入 deep view 前的编辑/content leaf。
 - `previousEditorLeaf`: 聚焦 opencode 前保存编辑器的 leaf，折叠时恢复焦点到编辑器
 - `lastSessionUrl`: 保存会话 URL 到插件设置，重启时恢复；同时通过时间戳比较查询服务器最新会话
 - `toggle-opencode-view` 保留给用户快捷键；harness 和调试脚本使用 `open-opencode-view`，它只调用 `activateView()`，不会因为当前 leaf 已经活跃而折叠右侧栏
@@ -217,7 +233,7 @@ scripts/
 - `contextAssist.enabled` 是 oc-ctx 总开关；关闭时必须清空全部 candidate 并停止 source 监听
 - `contextAssist.workspace.enabled` 控制动态 workspace candidate。workspace candidate 只包含打开笔记列表和可选活动位置；活动位置属于 workspace，不再有顶层 cursor source
 - `contextAssist.selection.enabled` 控制 one-shot selection candidate。选区 source 只产候选，registry 负责最近 N 条 FIFO 队列
-- 第一阶段不维护 backlinks source，不监听 metadata resolvedLinks，不把 backlinks 当默认候选。GraphRAG、块引用、链接证据以后必须作为新的 source driver 产出 candidate
+- 当前不维护 backlinks source，不监听 metadata resolvedLinks，不把 backlinks 当默认候选。GraphRAG、块引用、链接证据只有在用户明确要求时才作为新的 source driver 产出 candidate
 - 关闭任一 source 时，`ContextManager.updateSettings()` 必须清掉该 source 已有候选；关闭总开关时必须清空 CandidateRegistry，避免已禁用来源随 prompt 发送
 - oc-ctx 演进必须按 source driver → CandidateRegistry → PromptContextInjector → OpenCode prompt request parts 的链路收拢。source driver 不能直接写 OpenCode session。
 - candidate 是本地 Obsidian 插件状态，没有 `messageId` / `partId`，toggle included/excluded 时不能调用 OpenCode API。committed context 才是 `ContextItem`，只属于 legacy/manual context message 生命周期。
@@ -225,7 +241,7 @@ scripts/
 - source driver 输出必须表达 `upsert`、`remove`、`clear-source`、`failed`。不要把 source 消失、刷新失败或内容未变硬塞进 `ContextManager` 的临时分支。
 - ContextStatusBar 是当前自动 oc-ctx 的用户可见控制面。用户在状态栏切换 included/skipped 或移除 one-shot 候选；发送成功后，PromptContextInjector 消费 one-shot candidates 并恢复临时跳过的 dynamic candidates。
 - 旧 `ContextSuggestion` 不能和 `ContextCandidate` 作为两套运行时候选模型长期并存。实现 candidate 层时必须删除、迁移或明确降级它。
-- oc-ctx 注入策略属于 `src/context`。source driver、CandidateRegistry、GraphRAG candidate lifecycle 留在 context 层；`src/bridge` 提供 Web UI transport、HTML 注入、iframe hook、本地 message protocol、prompt request hook 和 future native prompt context card adapter。
+- oc-ctx 注入策略属于 `src/context`。source driver、CandidateRegistry、可选 graph-derived candidate lifecycle 留在 context 层；`src/bridge` 提供 Web UI transport、HTML 注入、iframe hook、本地 message protocol、prompt request hook 和 native prompt context card adapter。
 - 当前行为合同见 [docs/plans/2026-06-17-oc-ctx-prompt-coupled-behavior-design.md](docs/plans/2026-06-17-oc-ctx-prompt-coupled-behavior-design.md)。
 
 ### `PromptContextInjector.ts` — 自动 oc-ctx 到 prompt request
@@ -253,7 +269,7 @@ scripts/
 ### Obsidian resolution contract
 
 - Obsidian 已提供解析能力时，本项目优先消费 Obsidian API，不手写第二套 wikilink、heading、block、footnote resolver。
-- GraphIndex 是 Obsidian Vault + MetadataCache 的事实层。GraphRAG 是它之上的派生层，只能消费 GraphIndex facts，不能替代 Obsidian resolver。
+- GraphIndex 是 Obsidian Vault + MetadataCache 的事实层。GraphRAG 只是它之上的可选派生层，只能消费 GraphIndex facts，不能替代 Obsidian resolver。
 - UI surface、StatusBar、OpenCodeBridge、Web UI proxy 和 iframe bridge 不解析 wikilink，不维护独立 resolver，不从渲染文本里倒推 vault path。
 - 解析和导航的生产路径是：Obsidian metadata/link API → GraphIndex facts → `ContextItemNavigator` → 已解析到的 `TFile` → `WorkspaceLeaf.openFile()`。
 - API 面必须优先使用：
@@ -426,7 +442,7 @@ opencode 服务器默认启动不带 `--cors` 参数，意味着它不会返回 
 
 opencode 的 HTML 响应携带严格的 Content-Security-Policy，禁止内联脚本执行。代理在转发前剥离 CSP 头，从而可以注入自定义脚本：
 
-- **键盘监听**: 拦截 `Cmd+L`（macOS）/ `Ctrl+L`（Windows/Linux），发送 `postMessage` 到 Obsidian 父窗口
+- **键盘桥接**: 从 Obsidian hotkeys 和 OpenCode command keybinds 生成 normalized policy；iframe 只拦截 policy 归 Obsidian 的快捷键，并通过 `keyboard:dispatch` 发回父窗口
 - **自动端口检测**: 从 4097 开始递增尝试，找到第一个可用端口
 - **协议来源**: `BridgeProtocol.ts` 是 message namespace、version、type 的唯一来源；父窗口只接受来自当前 proxy origin 的协议消息
 

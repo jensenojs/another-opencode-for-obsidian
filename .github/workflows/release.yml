@@ -53,6 +53,15 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracted version: $VERSION"
 
+      - name: Verify release notes exist
+        run: |
+          NOTES="release-notes/${{ steps.get_version.outputs.tag }}.md"
+          if [ ! -f "$NOTES" ]; then
+            echo "Error: missing release notes at $NOTES"
+            exit 1
+          fi
+          echo "Release notes: $NOTES"
+
       - name: Verify manifest version matches tag
         run: |
           MANIFEST_VERSION=$(jq -r '.version' manifest.json)
@@ -63,13 +72,37 @@ jobs:
           fi
           echo "✓ manifest.json version matches tag: $TAG_VERSION"
 
+      - name: Verify versions.json contains tag version
+        run: |
+          TAG_VERSION=${{ steps.get_version.outputs.version }}
+          MIN_APP_VERSION=$(jq -r --arg version "$TAG_VERSION" '.[$version] // empty' versions.json)
+          MANIFEST_MIN_APP_VERSION=$(jq -r '.minAppVersion' manifest.json)
+          if [ -z "$MIN_APP_VERSION" ]; then
+            echo "Error: versions.json does not contain $TAG_VERSION"
+            exit 1
+          fi
+          if [ "$MIN_APP_VERSION" != "$MANIFEST_MIN_APP_VERSION" ]; then
+            echo "Error: versions.json maps $TAG_VERSION to $MIN_APP_VERSION, but manifest.json minAppVersion is $MANIFEST_MIN_APP_VERSION"
+            exit 1
+          fi
+          echo "✓ versions.json maps $TAG_VERSION to Obsidian $MIN_APP_VERSION"
+
       - name: Build plugin
         run: bun run build
+
+      - name: Verify release assets
+        run: |
+          test -s manifest.json
+          test -s main.js
+          test -s styles.css
+          echo "Release assets ready:"
+          ls -lh manifest.json main.js styles.css
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          name: ${{ steps.get_version.outputs.version }}
+          name: Another OpenCode Plugin for Obsidian ${{ steps.get_version.outputs.tag }}
+          body_path: release-notes/${{ steps.get_version.outputs.tag }}.md
           prerelease: true
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |

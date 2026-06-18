@@ -1,57 +1,84 @@
 # Another OpenCode for Obsidian
 
-Another OpenCode for Obsidian embeds [OpenCode](https://opencode.ai/) in
-Obsidian and adds Obsidian-native context, provenance, navigation, and
-diagnostics around the running OpenCode session.
+[English](README.md) · [简体中文](README_CN.md)
 
-The current goal is practical: make OpenCode usable from inside Obsidian without
-turning this plugin into a second chat client. The OpenCode Web UI remains the
-main conversation surface. The plugin adds the Obsidian-side facts that the Web
-UI does not know by itself: which vault context was sent, where it came from,
-whether it can be restored safely, and how to get back to the source note.
+Run [OpenCode](https://opencode.ai/) inside Obsidian without giving up the parts
+that make Obsidian useful: panes, theme, hotkeys, links, context, and local
+diagnostics.
 
-This fork is beta software. It is ready for local use and BRAT installation, but
-larger GraphRAG features are still research and design work.
+The upstream plugin proves the simple idea: OpenCode's Web UI can run inside an
+Obsidian pane. This fork keeps that idea and fills in the parts needed for daily
+use: view placement, Obsidian theme fit, shortcut ownership, vault navigation,
+context provenance, and diagnostics.
+
+This fork is beta software. It is ready for local use and BRAT installation.
 
 _This is a third-party fork. It is not affiliated with OpenCode or Obsidian._
 
+## Highlights
+
+- **Two view modes**: side pane with `Mod+Shift+O`, main editor deep view with
+  `Mod+Shift+L`.
+- **Obsidian-aware Web UI**: optional Obsidian-derived appearance without
+  patching OpenCode component class names.
+- **Shortcut conflict control**: Obsidian and OpenCode shortcuts are indexed
+  together and conflicts are handled in plugin settings.
+- **Vault navigation from OpenCode**: file paths, wikilinks, headings, blocks,
+  footnotes, diff rows, and markdown paths open existing Obsidian notes.
+- **Context with provenance**: workspace and selection context keep source
+  metadata, restore state, and safe navigation targets.
+- **Useful diagnostics**: server, bridge, keyboard, theme, and context state are
+  available from the plugin and XDG status files.
+
+## Quick Links
+
+- [Installation](#installation)
+- [Basic Usage](#basic-usage)
+- [Settings](#settings)
+- [Diagnostics](#diagnostics)
+- [Possible Future Work](#possible-future-work)
+
 ## What This Plugin Does Differently
 
-Many Obsidian integrations stop at embedding a Web UI in a side pane. This
-plugin treats the Web UI as one surface inside a larger Obsidian workflow. The
-bridge is where iframe-local OpenCode UI facts become Obsidian-side facts that
-can be validated against the vault, the workspace, and the plugin's own runtime
-diagnostics. The HTTP proxy is one bridge implementation detail: it carries the
-embedded Web UI, injected hooks, theme payloads, and local messages.
+### OpenCode is usable inside Obsidian
 
-The first visible result is navigation. When OpenCode shows a vault file, diff
-row, wikilink, heading, block, footnote, or markdown path, the plugin can route
-that click back to the existing Obsidian note. Hover feedback uses the same
-detection path as click handling, so the UI only hints when the same element can
-actually request navigation. Missing targets fail silently and never create new
-files.
+The main work in this fork is integration. OpenCode remains OpenCode: its Web UI is still the conversation surface, and the plugin does not replace it with a custom chat view. The plugin handles the parts that only Obsidian can know.
 
-The same bridge shape is meant to carry more than navigation. Context is tracked
-as Obsidian evidence with provenance, restore state, source metadata, and safe
-navigation targets. OpenCode events are consumed as read-only diagnostics before
-they become UI controls. Future hooks, permission surfaces, TUI coexistence, and
-GraphRAG-derived suggestions should follow the same rule: OpenCode exposes what
-happened, Obsidian resolves it against vault facts, and the plugin presents the
-smallest native control surface needed for the user to inspect or act.
+| Area               | What changed in this fork                                                                                                                                                                                             | Why it matters in Obsidian                                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| View placement     | OpenCode can open in the sidebar or in the main editor area. The deep view command defaults to `Mod+Shift+L` and returns to the previous editor leaf when toggled again.                                              | You can use OpenCode as a side panel while reading, or as a focused editor view without losing your previous note.                        |
+| Theme fit          | The embedded Web UI can use OpenCode's own appearance or an Obsidian-derived appearance. Obsidian mode maps stable theme variables and avoids patching OpenCode component class names.                                | The iframe does not feel like a separate app pasted over the vault, and theme fixes stay tied to stable token surfaces.                   |
+| Keyboard ownership | Obsidian hotkeys and OpenCode keybinds are normalized into one shortcut index. Conflicts appear in the plugin settings panel and can be assigned to Obsidian or OpenCode.                                             | Shortcuts such as the pane toggle, deep view, OpenCode sidebar toggle, and app settings can coexist without hardcoded special cases.      |
+| Click navigation   | Vault paths, wikilinks, headings, blocks, footnotes, diff rows, and markdown paths shown inside OpenCode can open the existing Obsidian note. Missing targets do not create files.                                    | File references shown by OpenCode become usable vault navigation, while Obsidian remains the source of truth for whether a target exists. |
+| Context visibility | Workspace and selection context carry source metadata, provenance, restore state, and safe navigation targets. The status bar and OpenCode context surface are kept in sync where the Web UI exposes the needed port. | You can see what context may affect the next prompt, where it came from, and whether it can be opened again.                              |
+| Diagnostics        | Runtime diagnostics include server launch state, bridge state, shortcut policy, context projection state, theme state, and XDG log/status paths.                                                                      | When something breaks, the plugin can report the relevant Obsidian/OpenCode boundary instead of only saying that the iframe failed.       |
+
+The bridge is limited to the places where iframe state must cross into
+Obsidian: theme payloads, shortcut decisions, vault navigation requests, prompt
+context cards, and diagnostics.
+
+### GraphRAG is possible future work
+
+GraphIndex already gives the plugin a factual view of vault links through Obsidian `Vault` and `MetadataCache`. GraphRAG can sit above that later, but the plugin does not depend on it being built.
+
+For now, the product is complete enough without a ranking layer. Future GraphRAG work should be treated as personal exploration unless it directly improves the existing OpenCode-in-Obsidian workflow.
 
 ## Current Status
 
 Works today:
 
 - Start or attach to an OpenCode server from Obsidian.
-- Open the OpenCode Web UI in an Obsidian pane.
+- Open the OpenCode Web UI in the sidebar or main editor area.
 - Use either OpenCode's native appearance or an Obsidian-derived appearance.
+- Use `Mod+Shift+O` for the side pane and `Mod+Shift+L` for deep view.
+- See keyboard conflicts in plugin settings and choose whether Obsidian or
+  OpenCode owns each conflicting shortcut.
 - Send included Obsidian workspace and selection candidates with the same
   OpenCode prompt as synthetic text parts.
 - Keep automatic context out of the visible OpenCode transcript while avoiding
   separate empty context messages.
-- Show next-message context candidates in an Obsidian status bar surface, with
-  local include, skip, and remove controls.
+- Show next-message context candidates in an Obsidian status bar surface and
+  sync native OpenCode context cards when available.
 - Navigate context items back to existing vault content without creating missing
   files.
 - Restore plugin context after session reload with `known` or `uncertain`
@@ -67,8 +94,8 @@ Still experimental:
   on Obsidian themes, Electron rendering, and OpenCode token changes.
 - Automatic context sources are useful for local workflows, but they are still
   conservative and visible by design.
-- GraphIndex exists as a factual vault-link read model. GraphRAG ranking and
-  derived knowledge discovery are not part of the first usable release.
+- GraphRAG ranking and derived knowledge discovery are not part of the current
+  product surface.
 
 ## Installation
 
@@ -130,11 +157,14 @@ terminal. If OpenCode or local MCP tools cannot be found, prefer an absolute
 ## Basic Usage
 
 - Use the ribbon icon or command palette to open the OpenCode pane.
+- Use `Mod+Shift+O` to toggle the side pane.
+- Use `Mod+Shift+L` to toggle deep view in the main editor area.
 - Start the OpenCode server from the plugin controls, or configure auto-start.
 - Use the OpenCode Web UI normally.
 - Add current note or selection context from Obsidian commands.
 - Use the status bar context surface to inspect, navigate, or ignore sent
   context.
+- Use the plugin settings panel to inspect keyboard shortcut conflicts.
 
 The plugin does not create missing vault files when navigating context sources.
 If a source cannot be resolved, it is reported as unresolved instead of using
@@ -147,9 +177,9 @@ vault paths, wikilinks, headings, blocks, and footnotes through Obsidian APIs an
 the GraphIndex fact layer, then opens the resolved `TFile` with
 `WorkspaceLeaf.openFile()`.
 
-This keeps one resolver contract for current context navigation and future
-GraphRAG work. GraphRAG can rank or explain relationships above GraphIndex, but
-it should consume the same vault facts instead of building another link parser.
+This keeps one resolver contract for context navigation and any later graph
+experiments. Future graph features should consume the same vault facts instead
+of building another link parser.
 
 Relevant Obsidian API references:
 
@@ -165,11 +195,41 @@ Relevant Obsidian API references:
 
 ### Server Startup
 
-The default path mode resolves and runs `opencode serve` directly.
+The default path mode resolves and runs `opencode serve` directly. It does not
+start a shell, and it does not read `.zshrc`, `.bashrc`, PowerShell profiles, or
+other shell startup files.
 
-Enable **Use custom command** when you need shell-specific setup, a wrapper
-script, a patched OpenCode binary, or a managed runtime. The command is a shell
-template and should include `{hostname}` and `{port}`.
+The OpenCode server inherits the environment of the Obsidian desktop process,
+with `NODE_USE_SYSTEM_CA=1` added by the plugin. This is a common source of
+startup problems. Obsidian is a GUI app, so the environment visible to the
+plugin may be smaller or different than the environment in your terminal. If
+`opencode serve` works in Terminal but fails from Obsidian, check whether the
+Obsidian process can see the same `PATH`, Node version manager, proxy variables,
+MCP tool paths, and API token variables.
+
+Path mode is usually best when one of these is true:
+
+- `opencode` is installed in a common location that the plugin can resolve;
+- the OpenCode executable path is configured as an absolute path;
+- OpenCode does not need shell-only setup before `serve` starts.
+
+If path mode fails, copy diagnostics and compare:
+
+- `processEnvironment.pathEntries`: PATH entries visible to Obsidian;
+- `processEnvironment.envKeys`: environment variable names visible to
+  Obsidian;
+- `lastSpawnEnvironment.pathEntries`: PATH entries passed to the OpenCode
+  server;
+- `lastSpawnEnvironment.envKeys`: environment variable names passed to the
+  OpenCode server;
+- `lastDisplayCommand`: the final command after placeholders were expanded;
+- `lastResolvedExecutable`: the executable path used by path mode;
+- `lastStderr` and `lastHealthError`: what failed after launch.
+
+Enable **Use custom command** only when path mode cannot provide the environment
+OpenCode needs, or when OpenCode must be launched through a version manager,
+wrapper script, shell profile, proxy setup, or managed runtime. The command is a
+shell template and should include `{hostname}` and `{port}`.
 
 Available placeholders:
 
@@ -178,14 +238,49 @@ Available placeholders:
 - `{cors}` expands to `app://obsidian.md`
 - `{projectDirectory}`
 
-Example:
+Basic example:
 
 ```bash
 opencode serve --hostname {hostname} --port {port} --cors {cors}
 ```
 
-Custom command mode is explicit. The plugin does not automatically source
-`.zshrc`, `.bashrc`, PowerShell profiles, or other shell startup files.
+Recommended macOS/Linux template when you know the executable path:
+
+```bash
+zsh -lc 'exec "$HOME/.local/bin/opencode" serve --hostname {hostname} --port {port} --cors {cors}'
+```
+
+Template when `opencode` is provided by a shell setup file:
+
+```bash
+zsh -lc 'source "$HOME/.zshrc"; exec opencode serve --hostname {hostname} --port {port} --cors {cors}'
+```
+
+Template with explicit environment variables:
+
+```bash
+zsh -lc 'export HTTPS_PROXY=http://127.0.0.1:7890; export NO_PROXY=127.0.0.1,localhost; exec "$HOME/.local/bin/opencode" serve --hostname {hostname} --port {port} --cors {cors}'
+```
+
+Template with an extra OpenCode server flag:
+
+```bash
+zsh -lc 'exec "$HOME/.local/bin/opencode" serve --hostname {hostname} --port {port} --cors {cors} --shutdown-after-last-client'
+```
+
+Use extra flags only when your installed OpenCode version supports them. The
+important part of the template is the explicit process environment: the shell
+entry, the binary path or sourced setup file, and the `serve` placeholders.
+
+Windows template:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\path\to\opencode.exe' serve --hostname {hostname} --port {port} --cors {cors}"
+```
+
+Custom command mode is explicit. It still starts from Obsidian's process
+environment, so write the missing executable path, profile source, proxy
+variables, MCP paths, or token setup into the template.
 
 ### Web View Appearance
 
@@ -260,8 +355,9 @@ context is treated carefully:
 - uncertain context is shown as coming from the OpenCode session, not from a
   trusted vault file.
 
-Future GraphRAG, backlink, block-reference, and summary sources should use the
-same candidate lifecycle instead of writing directly to the OpenCode session.
+Future backlink, block-reference, summary, or graph-derived sources should use
+the same candidate lifecycle instead of writing directly to the OpenCode
+session.
 
 ## Diagnostics
 
@@ -310,27 +406,33 @@ tests.
 Some tests start temporary HTTP servers on `127.0.0.1`. In sandboxed agent
 environments this may require explicit permission for loopback listening.
 
-## Product Direction
+## Possible Future Work
 
-The first product milestone is a stable OpenCode-in-Obsidian workflow:
+The main product milestone is a stable OpenCode-in-Obsidian workflow:
 
 - OpenCode remains the text interaction surface.
 - Obsidian provides visible context, vault evidence, safe navigation, and
   diagnostics.
 - The user can see what context was sent and where it came from.
 
-The next research direction is GraphRAG over the Obsidian vault:
+That milestone is the current focus. Possible future work includes GraphRAG over
+the Obsidian vault:
 
 - GraphIndex is the factual layer over Obsidian `Vault` and `MetadataCache`.
-- Derived GraphRAG indexes should help discover useful relationships, gaps, and
-  context candidates.
+- Derived indexes could help discover useful relationships, gaps, and context
+  candidates.
 - Recommendation and ranking policy should stay above GraphIndex, not inside it.
 
-That future layer should help new knowledge emerge from the user's notes. It
-should not silently auto-inject context or turn the vault graph into a hidden
-echo chamber.
+This is optional research work. It should not silently auto-inject context or
+turn the vault graph into a hidden ranking system.
 
-## Reporting Issues
+## Troubleshooting and Issue Reports
+
+The plugin tries to keep startup and bridge failures observable. If OpenCode
+does not start, the view and settings panel show the mode, command, working
+directory, health check result, stderr, log path, and status path. The **Copy
+diagnostics** command includes the same fields plus a short process environment
+summary. It does not copy full note text.
 
 When reporting a problem, include:
 
@@ -338,8 +440,20 @@ When reporting a problem, include:
 - OpenCode version.
 - Plugin version.
 - Start mode: path mode or custom command.
-- The exact custom command or executable path if relevant.
+- If you use path mode, include the configured OpenCode path and whether
+  **Autodetect** found anything.
+- If you use custom command mode, include the exact custom command.
+- Whether the OpenCode pane restored an existing session or created a new one.
 - The copied diagnostics from the plugin UI or `status.json`.
 - Relevant recent lines from the XDG log.
 
-Diagnostics intentionally avoid copying full note text.
+Common startup failures are usually visible in these fields:
+
+- `lastDisplayCommand`: what the plugin tried to run;
+- `lastResolvedExecutable`: the resolved executable path, when path mode is
+  used;
+- `lastCwd`: the vault/project directory used as the process working directory;
+- `lastStderr`: stderr from the OpenCode process;
+- `lastHealthError`: why the configured health endpoint was not accepted;
+- `processEnvironment` and `lastSpawnEnvironment`: PATH and shell information
+  visible to Obsidian and to the spawned process.
