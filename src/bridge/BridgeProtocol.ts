@@ -5,6 +5,12 @@ import {
   type OpenCodePromptContextItem,
 } from "./OpenCodePromptContextAdapter";
 import type { PromptContextClickAction } from "../context/PromptContextProjection";
+import type { KeyboardBridgeShortcutOwner } from "../types";
+import {
+  isNormalizedShortcutSignature,
+  type KeyboardPolicyEntry,
+  type OpenCodeKeyboardCatalogItem,
+} from "./KeyboardShortcutIndex";
 
 // Local iframe protocol for plugin-owned facts captured inside the OpenCode Web
 // UI and consumed by the Obsidian plugin main thread.
@@ -13,10 +19,15 @@ export const BRIDGE_VERSION = 1;
 
 export const BRIDGE_MESSAGES = {
   proxyLoaded: "proxy:loaded",
-  viewToggle: "view:toggle",
   themeDiagnostics: "theme:diagnostics",
   themeUpdate: "theme:update",
   vaultFileOpen: "vault-file:open",
+  keyboardReady: "keyboard:ready",
+  keyboardUnavailable: "keyboard:unavailable",
+  keyboardCatalogChanged: "keyboard:catalog-changed",
+  keyboardPolicyUpdate: "keyboard:policy-update",
+  keyboardDispatch: "keyboard:dispatch",
+  keyboardDecision: "keyboard:decision",
   promptContextReady: "prompt-context:ready",
   promptContextUnavailable: "prompt-context:unavailable",
   promptContextChanged: "prompt-context:changed",
@@ -106,6 +117,44 @@ export interface PromptContextCommandResultPayload {
   result?: unknown;
   items?: OpenCodePromptContextItem[];
   error?: string;
+}
+
+export interface KeyboardCatalogPayload {
+  available: true;
+  options: OpenCodeKeyboardCatalogItem[];
+  catalog: OpenCodeKeyboardCatalogItem[];
+}
+
+export interface KeyboardUnavailablePayload {
+  reason:
+    | "missing-anchor"
+    | "ambiguous-anchor"
+    | "port-not-loaded"
+    | "iframe-not-ready"
+    | "command-failed";
+  bundle?: string;
+  anchorCount?: number;
+  message?: string;
+}
+
+export interface KeyboardPolicyUpdatePayload {
+  revision: number;
+  entries: KeyboardPolicyEntry[];
+}
+
+export interface KeyboardDispatchPayload {
+  signature: string;
+  commandId: string;
+  display?: string;
+}
+
+export interface KeyboardDecisionPayload {
+  signature: string;
+  commandId?: string;
+  owner: KeyboardBridgeShortcutOwner;
+  handled: boolean;
+  reason: string;
+  at: number;
 }
 
 export function isBridgeMessage(value: unknown): value is BridgeMessage {
@@ -277,6 +326,84 @@ export function isPromptContextCommandResultPayload(
   );
 }
 
+export function isKeyboardCatalogPayload(value: unknown): value is KeyboardCatalogPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<KeyboardCatalogPayload>;
+  return (
+    candidate.available === true &&
+    Array.isArray(candidate.options) &&
+    candidate.options.every(isOpenCodeKeyboardCatalogItem) &&
+    Array.isArray(candidate.catalog) &&
+    candidate.catalog.every(isOpenCodeKeyboardCatalogItem)
+  );
+}
+
+export function isKeyboardUnavailablePayload(value: unknown): value is KeyboardUnavailablePayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<KeyboardUnavailablePayload>;
+  return (
+    typeof candidate.reason === "string" &&
+    [
+      "missing-anchor",
+      "ambiguous-anchor",
+      "port-not-loaded",
+      "iframe-not-ready",
+      "command-failed",
+    ].includes(candidate.reason) &&
+    (candidate.bundle === undefined || typeof candidate.bundle === "string") &&
+    (candidate.anchorCount === undefined || Number.isInteger(candidate.anchorCount)) &&
+    (candidate.message === undefined || typeof candidate.message === "string")
+  );
+}
+
+export function isKeyboardPolicyUpdatePayload(
+  value: unknown
+): value is KeyboardPolicyUpdatePayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<KeyboardPolicyUpdatePayload>;
+  return (
+    Number.isInteger(candidate.revision) &&
+    typeof candidate.revision === "number" &&
+    candidate.revision >= 0 &&
+    Array.isArray(candidate.entries) &&
+    candidate.entries.every(isKeyboardPolicyEntry)
+  );
+}
+
+export function isKeyboardDispatchPayload(value: unknown): value is KeyboardDispatchPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<KeyboardDispatchPayload>;
+  return (
+    isNormalizedShortcutSignature(candidate.signature) &&
+    typeof candidate.commandId === "string" &&
+    candidate.commandId.trim().length > 0 &&
+    (candidate.display === undefined || typeof candidate.display === "string")
+  );
+}
+
+export function isKeyboardDecisionPayload(value: unknown): value is KeyboardDecisionPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<KeyboardDecisionPayload>;
+  return (
+    isNormalizedShortcutSignature(candidate.signature) &&
+    (candidate.commandId === undefined || typeof candidate.commandId === "string") &&
+    (candidate.owner === "obsidian" || candidate.owner === "opencode") &&
+    typeof candidate.handled === "boolean" &&
+    typeof candidate.reason === "string" &&
+    Number.isFinite(candidate.at)
+  );
+}
+
 function isPromptContextClickAction(value: unknown): value is PromptContextClickAction {
   if (!value || typeof value !== "object") {
     return false;
@@ -291,5 +418,38 @@ function isPromptContextClickAction(value: unknown): value is PromptContextClick
     candidate.path.trim().length > 0 &&
     (candidate.line === undefined || Number.isInteger(candidate.line)) &&
     (candidate.endLine === undefined || Number.isInteger(candidate.endLine))
+  );
+}
+
+function isOpenCodeKeyboardCatalogItem(value: unknown): value is OpenCodeKeyboardCatalogItem {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<OpenCodeKeyboardCatalogItem>;
+  return (
+    typeof candidate.id === "string" &&
+    candidate.id.trim().length > 0 &&
+    (candidate.title === undefined || typeof candidate.title === "string") &&
+    (candidate.description === undefined || typeof candidate.description === "string") &&
+    (candidate.category === undefined || typeof candidate.category === "string") &&
+    (candidate.keybind === undefined || typeof candidate.keybind === "string") &&
+    (candidate.disabled === undefined || typeof candidate.disabled === "boolean") &&
+    (candidate.hidden === undefined || typeof candidate.hidden === "boolean")
+  );
+}
+
+function isKeyboardPolicyEntry(value: unknown): value is KeyboardPolicyEntry {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<KeyboardPolicyEntry>;
+  return (
+    isNormalizedShortcutSignature(candidate.signature) &&
+    typeof candidate.display === "string" &&
+    (candidate.owner === "obsidian" || candidate.owner === "opencode") &&
+    (candidate.commandId === undefined || typeof candidate.commandId === "string") &&
+    (candidate.reason === "bridge-owned" ||
+      candidate.reason === "user-conflict-policy" ||
+      candidate.reason === "default-obsidian")
   );
 }

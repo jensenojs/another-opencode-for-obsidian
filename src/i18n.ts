@@ -6,6 +6,7 @@ const EN_TEXT = {
   commands: {
     ribbonTooltip: "OpenCode",
     togglePanel: "Toggle OpenCode panel",
+    toggleDeepView: "Toggle OpenCode deep view",
     openPanel: "Open OpenCode panel",
     copyDiagnostics: "Copy OpenCode diagnostics",
     addSelectionToContext: "Add selection to OpenCode context",
@@ -72,9 +73,26 @@ const EN_TEXT = {
     webViewAppearance: "Web view appearance",
     webViewAppearanceDesc:
       "Use Obsidian to inherit the active vault theme, or switch to OpenCode to keep the web UI's native styling.",
-    webUiVaultNavigationPrimaryClick: "Open vault files with primary click",
-    webUiVaultNavigationPrimaryClickDesc:
-      "When on, primary click opens matching vault files in Obsidian and secondary click is left to OpenCode. Turn off to reverse them.",
+    keyboardBridge: "Shortcut conflicts",
+    keyboardBridgeDesc:
+      "Choose who responds when the same shortcut exists in Obsidian and the embedded OpenCode view. Conflicts default to Obsidian.",
+    keyboardBridgeAvailable: "Available",
+    keyboardBridgeUnavailable: "Shortcut conflict detection is not available in this view.",
+    keyboardBridgeOpenCodeUnavailable: "OpenCode command port unavailable",
+    keyboardBridgeObsidianUnavailable: "Obsidian hotkey source unavailable",
+    keyboardBridgeCounts: (obsidian: number, opencode: number, conflicts: number) =>
+      `${obsidian} Obsidian shortcuts, ${opencode} OpenCode shortcuts, ${conflicts} conflicts`,
+    keyboardBridgeConflictsNeedReview: (count: number) =>
+      `${count} shortcut conflict${count === 1 ? "" : "s"} detected. Obsidian is selected by default.`,
+    keyboardBridgeNoConflicts: "No shortcut conflicts detected.",
+    keyboardBridgeConflictLine: (obsidian: string, opencode: string) =>
+      `Obsidian: ${obsidian} / OpenCode: ${opencode}`,
+    refreshKeyboardBridge: "Refresh",
+    ownerOpenCode: "OpenCode handles",
+    ownerObsidian: "Obsidian handles",
+    keyboardConflictOwnerLabel: "Shortcut handler",
+    switchToOpenCodeOwner: "Switch to OpenCode",
+    switchToObsidianOwner: "Switch to Obsidian",
     contextAssist: "Context assist",
     contextAssistPageDesc: "Control which Obsidian context is included with the next prompt.",
     enabled: "On",
@@ -166,6 +184,10 @@ const EN_TEXT = {
     included: "included",
     skipped: "skipped",
     failedStatus: (reason: string | null) => (reason ? `failed ${reason}` : "failed"),
+    nativeSyncFailureSummary: (count: number) =>
+      `${count} OpenCode context card${count === 1 ? "" : "s"} failed to attach`,
+    nativeSyncFailed: (reason: string | null) =>
+      reason ? `OpenCode card failed: ${reason}` : "OpenCode card failed",
     sourceResolved: "source resolved",
     sourceResolvedAtLine: (line: number) => `source resolved at line ${line}`,
     unresolved: {
@@ -188,6 +210,7 @@ const ZH_CN_TEXT: PluginText = {
   commands: {
     ribbonTooltip: "OpenCode",
     togglePanel: "切换 OpenCode 面板",
+    toggleDeepView: "切换 OpenCode 深聊视图",
     openPanel: "打开 OpenCode 面板",
     copyDiagnostics: "复制 OpenCode 诊断",
     addSelectionToContext: "将选中文本加入 OpenCode 上下文",
@@ -250,9 +273,26 @@ const ZH_CN_TEXT: PluginText = {
     webViewAppearance: "Web view 外观",
     webViewAppearanceDesc:
       "选择 Obsidian 时继承当前 vault 主题；选择 OpenCode 时保留 web UI 原生样式。",
-    webUiVaultNavigationPrimaryClick: "主点击打开 vault 文件",
-    webUiVaultNavigationPrimaryClickDesc:
-      "开启时，左键在 Obsidian 打开匹配的 vault 文件，右键交还给 OpenCode。关闭后两者反过来。",
+    keyboardBridge: "快捷键冲突",
+    keyboardBridgeDesc:
+      "同一个快捷键同时存在于 Obsidian 和 OpenCode 时，选择由谁响应。默认交给 Obsidian。",
+    keyboardBridgeAvailable: "可用",
+    keyboardBridgeUnavailable: "当前视图不可用快捷键冲突检测。",
+    keyboardBridgeOpenCodeUnavailable: "OpenCode command port 不可用",
+    keyboardBridgeObsidianUnavailable: "Obsidian 快捷键来源不可用",
+    keyboardBridgeCounts: (obsidian: number, opencode: number, conflicts: number) =>
+      `${obsidian} 个 Obsidian 快捷键，${opencode} 个 OpenCode 快捷键，${conflicts} 个冲突`,
+    keyboardBridgeConflictsNeedReview: (count: number) =>
+      `发现 ${count} 个快捷键冲突。默认由 Obsidian 响应，可按行改给 OpenCode。`,
+    keyboardBridgeNoConflicts: "没有检测到快捷键冲突。",
+    keyboardBridgeConflictLine: (obsidian: string, opencode: string) =>
+      `Obsidian：${obsidian} / OpenCode：${opencode}`,
+    refreshKeyboardBridge: "刷新",
+    ownerOpenCode: "OpenCode 处理",
+    ownerObsidian: "Obsidian 处理",
+    keyboardConflictOwnerLabel: "快捷键响应方",
+    switchToOpenCodeOwner: "改为 OpenCode",
+    switchToObsidianOwner: "改为 Obsidian",
     contextAssist: "上下文辅助",
     contextAssistPageDesc: "控制哪些 Obsidian 上下文会随下一条消息发送。",
     enabled: "开",
@@ -340,6 +380,9 @@ const ZH_CN_TEXT: PluginText = {
     included: "已包含",
     skipped: "已跳过",
     failedStatus: (reason: string | null) => (reason ? `失败 ${reason}` : "失败"),
+    nativeSyncFailureSummary: (count: number) => `${count} 个 OpenCode context card 附加失败`,
+    nativeSyncFailed: (reason: string | null) =>
+      reason ? `OpenCode card 附加失败：${reason}` : "OpenCode card 附加失败",
     sourceResolved: "来源已解析",
     sourceResolvedAtLine: (line: number) => `来源已解析到第 ${line} 行`,
     unresolved: {

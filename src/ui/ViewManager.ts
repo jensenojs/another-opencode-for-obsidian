@@ -1,5 +1,5 @@
 import { App, WorkspaceLeaf } from "obsidian";
-import { OPENCODE_VIEW_TYPE, type OpenCodeSettings } from "../types";
+import { OPENCODE_VIEW_TYPE, type OpenCodeSettings, type ViewLocation } from "../types";
 import { OpenCodeView } from "./OpenCodeView";
 import { OpenCodeClient } from "../client/OpenCodeClient";
 import { ContextManager } from "../context/ContextManager";
@@ -45,32 +45,113 @@ export class ViewManager {
     return leaves.length > 0 ? leaves[0] : null;
   }
 
+  private isSidebarLeaf(leaf: WorkspaceLeaf): boolean {
+    return leaf.getRoot() === this.app.workspace.rightSplit;
+  }
+
+  private rememberActiveLeafBeforeFocus(targetLeaf: WorkspaceLeaf): void {
+    const activeLeaf = this.app.workspace.activeLeaf;
+    if (activeLeaf && activeLeaf !== targetLeaf) {
+      this.previousEditorLeaf = activeLeaf;
+      return;
+    }
+
+    if (
+      this.previousEditorLeaf &&
+      this.previousEditorLeaf !== targetLeaf &&
+      this.previousEditorLeaf.view
+    ) {
+      return;
+    }
+
+    const mostRecentLeaf = this.app.workspace.getMostRecentLeaf();
+    if (mostRecentLeaf && mostRecentLeaf !== targetLeaf) {
+      this.previousEditorLeaf = mostRecentLeaf;
+    }
+  }
+
+  private restorePreviousEditorLeaf(): void {
+    if (this.previousEditorLeaf && this.previousEditorLeaf.view) {
+      this.app.workspace.setActiveLeaf(this.previousEditorLeaf, { focus: true });
+    }
+  }
+
+  private focusIframe(leaf: WorkspaceLeaf): void {
+    const view = leaf.view;
+    if (view instanceof OpenCodeView) {
+      requestAnimationFrame(() => view.focusIframe());
+    }
+  }
+
+  private revealLeaf(
+    leaf: WorkspaceLeaf,
+    options: { activate: boolean; focusIframe: boolean }
+  ): void {
+    this.app.workspace.revealLeaf(leaf);
+    if (options.activate) {
+      this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    }
+    this.startServerForUserActivation();
+    if (options.focusIframe) {
+      this.focusIframe(leaf);
+    }
+  }
+
+  private async createLeafAt(location: ViewLocation): Promise<WorkspaceLeaf | null> {
+    const leaf =
+      location === "main"
+        ? this.app.workspace.getLeaf("tab")
+        : this.app.workspace.getRightLeaf(false);
+
+    if (!leaf) {
+      return null;
+    }
+
+    await leaf.setViewState({
+      type: OPENCODE_VIEW_TYPE,
+      active: true,
+    });
+
+    return leaf;
+  }
+
+  private rememberLeafSessionUrl(leaf: WorkspaceLeaf): void {
+    const view = leaf.view;
+    if (!(view instanceof OpenCodeView)) {
+      return;
+    }
+
+    const iframeUrl = view.getIframeUrl();
+    if (iframeUrl) {
+      this.currentSession.rememberSessionUrl(iframeUrl);
+    }
+  }
+
+  private async openLeafAt(location: ViewLocation, options: { activate: boolean }): Promise<void> {
+    const leaf = await this.createLeafAt(location);
+    if (!leaf) {
+      return;
+    }
+
+    this.revealLeaf(leaf, { activate: options.activate, focusIframe: true });
+  }
+
+  private async replaceLeafAt(existingLeaf: WorkspaceLeaf, location: ViewLocation): Promise<void> {
+    this.rememberActiveLeafBeforeFocus(existingLeaf);
+    this.rememberLeafSessionUrl(existingLeaf);
+    existingLeaf.detach();
+    await this.openLeafAt(location, { activate: true });
+  }
+
   async activateView(): Promise<void> {
     const existingLeaf = this.getExistingLeaf();
 
     if (existingLeaf) {
-      this.app.workspace.revealLeaf(existingLeaf);
-      this.startServerForUserActivation();
+      this.revealLeaf(existingLeaf, { activate: false, focusIframe: false });
       return;
     }
 
-    const leaf =
-      this.settings.defaultViewLocation === "main"
-        ? this.app.workspace.getLeaf("tab")
-        : this.app.workspace.getRightLeaf(false);
-
-    if (leaf) {
-      await leaf.setViewState({
-        type: OPENCODE_VIEW_TYPE,
-        active: true,
-      });
-      this.app.workspace.revealLeaf(leaf);
-      this.startServerForUserActivation();
-      const view = leaf.view;
-      if (view instanceof OpenCodeView) {
-        requestAnimationFrame(() => view.focusIframe());
-      }
-    }
+    await this.openLeafAt(this.settings.defaultViewLocation, { activate: false });
   }
 
   private startServerForUserActivation(): void {
@@ -83,61 +164,60 @@ export class ViewManager {
     const existingLeaf = this.getExistingLeaf();
 
     if (existingLeaf) {
-      const isInSidebar = existingLeaf.getRoot() === this.app.workspace.rightSplit;
+      const isInSidebar = this.isSidebarLeaf(existingLeaf);
 
       if (isInSidebar) {
         const rightSplit = this.app.workspace.rightSplit;
         if (rightSplit && !rightSplit.collapsed) {
           if (this.app.workspace.activeLeaf === existingLeaf) {
             rightSplit.collapse();
-            if (this.previousEditorLeaf && this.previousEditorLeaf !== existingLeaf) {
-              this.app.workspace.setActiveLeaf(this.previousEditorLeaf, { focus: true });
-            }
+            this.restorePreviousEditorLeaf();
           } else {
-            this.app.workspace.revealLeaf(existingLeaf);
-            this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
-            this.startServerForUserActivation();
-            const view = existingLeaf.view;
-            if (view instanceof OpenCodeView) {
-              requestAnimationFrame(() => view.focusIframe());
-            }
+            this.rememberActiveLeafBeforeFocus(existingLeaf);
+            this.revealLeaf(existingLeaf, { activate: true, focusIframe: true });
           }
         } else {
-          const activeLeaf = this.app.workspace.activeLeaf;
-          if (activeLeaf && activeLeaf !== existingLeaf) {
-            this.previousEditorLeaf = activeLeaf;
-          }
-          this.app.workspace.revealLeaf(existingLeaf);
-          this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
-          this.startServerForUserActivation();
-          const view = existingLeaf.view;
-          if (view instanceof OpenCodeView) {
-            requestAnimationFrame(() => view.focusIframe());
-          }
+          this.rememberActiveLeafBeforeFocus(existingLeaf);
+          this.revealLeaf(existingLeaf, { activate: true, focusIframe: true });
         }
       } else {
-        if (this.app.workspace.activeLeaf === existingLeaf) {
-          existingLeaf.detach();
-          if (this.previousEditorLeaf && this.previousEditorLeaf.view) {
-            this.app.workspace.setActiveLeaf(this.previousEditorLeaf, { focus: true });
-          }
-        } else {
-          const activeLeaf = this.app.workspace.activeLeaf;
-          if (activeLeaf && activeLeaf !== existingLeaf) {
-            this.previousEditorLeaf = activeLeaf;
-          }
-          this.app.workspace.revealLeaf(existingLeaf);
-          this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
-          this.startServerForUserActivation();
-          const view = existingLeaf.view;
-          if (view instanceof OpenCodeView) {
-            requestAnimationFrame(() => view.focusIframe());
-          }
-        }
+        await this.replaceLeafAt(existingLeaf, "sidebar");
       }
     } else {
-      await this.activateView();
+      const activeLeaf = this.app.workspace.activeLeaf;
+      if (activeLeaf) {
+        this.previousEditorLeaf = activeLeaf;
+      }
+      await this.openLeafAt("sidebar", { activate: true });
     }
+  }
+
+  async toggleDeepView(): Promise<void> {
+    const existingLeaf = this.getExistingLeaf();
+
+    if (!existingLeaf) {
+      const activeLeaf = this.app.workspace.activeLeaf;
+      if (activeLeaf) {
+        this.previousEditorLeaf = activeLeaf;
+      }
+      await this.openLeafAt("main", { activate: true });
+      return;
+    }
+
+    if (this.isSidebarLeaf(existingLeaf)) {
+      await this.replaceLeafAt(existingLeaf, "main");
+      return;
+    }
+
+    if (this.app.workspace.activeLeaf === existingLeaf) {
+      this.rememberLeafSessionUrl(existingLeaf);
+      existingLeaf.detach();
+      this.restorePreviousEditorLeaf();
+      return;
+    }
+
+    this.rememberActiveLeafBeforeFocus(existingLeaf);
+    this.revealLeaf(existingLeaf, { activate: true, focusIframe: true });
   }
 
   async ensureSessionUrl(view: OpenCodeView): Promise<void> {

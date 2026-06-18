@@ -3,19 +3,13 @@ import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "./BridgeProto
 // Iframe-side hook installer. It captures OpenCode Web UI actions and emits
 // local bridge messages; future live Web UI actions should arrive here as typed
 // adapter commands from the context layer.
-export interface BridgeInjectionOptions {
-  webUiVaultNavigationPrimaryClick?: boolean;
-}
-
-export function createBridgeScript(options: BridgeInjectionOptions = {}): string {
-  const webUiVaultNavigationPrimaryClick = options.webUiVaultNavigationPrimaryClick !== false;
+export function createBridgeScript(): string {
   return `
 <script data-another-opencode-for-obsidian-bridge>
 (function() {
   var ns = ${JSON.stringify(BRIDGE_NAMESPACE)};
   var version = ${JSON.stringify(BRIDGE_VERSION)};
   var messages = ${JSON.stringify(BRIDGE_MESSAGES)};
-  var vaultNavigationPrimaryClick = ${JSON.stringify(webUiVaultNavigationPrimaryClick)};
   var vaultHoverInsetX = 3;
   var vaultHoverInsetY = 2;
   var vaultHoverRadius = 5;
@@ -351,7 +345,7 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
     return hoverIndicator;
   }
   function setPointerCursor(value) {
-    var cursor = value ? (vaultNavigationPrimaryClick ? 'pointer' : 'context-menu') : '';
+    var cursor = value ? 'pointer' : '';
     document.documentElement.style.cursor = cursor;
     if (document.body) document.body.style.cursor = cursor;
   }
@@ -386,10 +380,7 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
   }
   function shouldNavigateVaultFileForEvent(e) {
     if (e.defaultPrevented) return false;
-    if (vaultNavigationPrimaryClick) {
-      return e.type === 'click' && e.button === 0;
-    }
-    return e.type === 'contextmenu';
+    return e.type === 'click' && e.button === 0;
   }
   function vaultFileClickHandler(e) {
     if (!shouldNavigateVaultFileForEvent(e)) return;
@@ -400,12 +391,17 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
     e.stopImmediatePropagation();
     var payload = click.line ? { path: click.path, line: click.line } : { path: click.path };
     post(messages.vaultFileOpen, payload);
-  }
-    var promptContextGetter = null;
-    var promptContextActivationEntries = Object.create(null);
-    var promptContextLastFingerprint = null;
-    var promptContextLastItems = [];
-    var promptContextPollTimer = null;
+    }
+      var promptContextGetter = null;
+      var promptContextActivationEntries = Object.create(null);
+      var promptContextLastFingerprint = null;
+      var promptContextLastItems = [];
+      var promptContextPollTimer = null;
+      var keyboardCatalogGetter = null;
+      var keyboardLastFingerprint = null;
+      var keyboardPollTimer = null;
+      var keyboardPolicyRevision = 0;
+      var keyboardPolicy = Object.create(null);
   function clonePromptContextItem(item) {
     if (!item || typeof item !== 'object') return item;
     var clone = {};
@@ -674,10 +670,10 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
     emitPromptContextChanged('bridge-sync');
     startPromptContextPolling();
   };
-  window.__anotherOpenCodeForObsidianPromptContextHooks = {
-      activated: function(item) {
-        var key = item && item.key ? item.key : promptContextItemKey(item);
-        var entry = promptContextActivationEntries[key];
+    window.__anotherOpenCodeForObsidianPromptContextHooks = {
+        activated: function(item) {
+          var key = item && item.key ? item.key : promptContextItemKey(item);
+          var entry = promptContextActivationEntries[key];
         post(messages.promptContextActivated, {
           key: key,
           item: clonePromptContextItem(item)
@@ -692,13 +688,158 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
         origin: 'card-close',
         item: clonePromptContextItem(item)
       });
-      return true;
+        return true;
+      }
+    };
+    function cloneKeyboardCatalogItem(item) {
+      if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id.trim()) {
+        return null;
+      }
+      var clone = { id: item.id };
+      if (typeof item.title === 'string') clone.title = item.title;
+      if (typeof item.description === 'string') clone.description = item.description;
+      if (typeof item.category === 'string') clone.category = item.category;
+      if (typeof item.keybind === 'string') clone.keybind = item.keybind;
+      if (typeof item.disabled === 'boolean') clone.disabled = item.disabled;
+      if (typeof item.hidden === 'boolean') clone.hidden = item.hidden;
+      return clone;
     }
-  };
-  function promptContextCommandHandler(event) {
-    var data = event.data;
-    if (!data || data.ns !== ns || data.version !== version || data.type !== messages.promptContextCommand) return;
-    var command = data.payload;
+    function keyboardPortUnavailable(reason, message) {
+      post(messages.keyboardUnavailable, {
+        reason: reason,
+        message: message || undefined
+      });
+    }
+    function keyboardCatalogItemsFrom(value) {
+      var raw = typeof value === 'function' ? value() : value;
+      if (!Array.isArray(raw)) return [];
+      var items = [];
+      for (var i = 0; i < raw.length; i += 1) {
+        var item = cloneKeyboardCatalogItem(raw[i]);
+        if (item) items.push(item);
+      }
+      return items;
+    }
+    function keyboardCatalogSnapshot() {
+      if (!keyboardCatalogGetter) return null;
+      var port = keyboardCatalogGetter();
+      if (!port || typeof port !== 'object') return null;
+      return {
+        available: true,
+        options: keyboardCatalogItemsFrom(port.options),
+        catalog: keyboardCatalogItemsFrom(port.catalog)
+      };
+    }
+    function keyboardCatalogFingerprint() {
+      try {
+        return JSON.stringify(keyboardCatalogSnapshot());
+      } catch (_error) {
+        return '';
+      }
+    }
+    function emitKeyboardCatalogChanged() {
+      var snapshot = keyboardCatalogSnapshot();
+      if (!snapshot) {
+        keyboardPortUnavailable('port-not-loaded', 'Keyboard command catalog port is not loaded');
+        return;
+      }
+      post(messages.keyboardCatalogChanged, snapshot);
+    }
+    function startKeyboardCatalogPolling() {
+      if (keyboardPollTimer) return;
+      keyboardLastFingerprint = keyboardCatalogFingerprint();
+      keyboardPollTimer = window.setInterval(function() {
+        if (!keyboardCatalogGetter) return;
+        var next = keyboardCatalogFingerprint();
+        if (next === keyboardLastFingerprint) return;
+        keyboardLastFingerprint = next;
+        emitKeyboardCatalogChanged();
+      }, 1000);
+    }
+    window.__anotherOpenCodeForObsidianInstallKeyboardPort = function(getCatalog) {
+      keyboardCatalogGetter = typeof getCatalog === 'function' ? getCatalog : null;
+      if (!keyboardCatalogGetter) {
+        keyboardPortUnavailable('port-not-loaded', 'Keyboard catalog getter was not callable');
+        return;
+      }
+      var snapshot = keyboardCatalogSnapshot();
+      if (!snapshot) {
+        keyboardPortUnavailable('port-not-loaded', 'Keyboard command catalog was not callable');
+        return;
+      }
+      post(messages.keyboardReady, snapshot);
+      emitKeyboardCatalogChanged();
+      startKeyboardCatalogPolling();
+    };
+    function isNormalizedKeyboardSignature(value) {
+      if (typeof value !== 'string' || !value) return false;
+      return /^[a-z0-9._-]+(?:\\+[a-z0-9._-]+)*$/.test(value);
+    }
+    function applyKeyboardPolicyUpdate(payload) {
+      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.entries)) return;
+      if (typeof payload.revision !== 'number' || payload.revision < keyboardPolicyRevision) return;
+      var next = Object.create(null);
+      for (var i = 0; i < payload.entries.length; i += 1) {
+        var entry = payload.entries[i];
+        if (!entry || typeof entry !== 'object') continue;
+        if (!isNormalizedKeyboardSignature(entry.signature)) continue;
+        if (entry.owner !== 'obsidian' && entry.owner !== 'opencode') continue;
+        if (entry.commandId !== undefined && typeof entry.commandId !== 'string') continue;
+        next[entry.signature] = {
+          signature: entry.signature,
+          owner: entry.owner,
+          commandId: entry.commandId,
+          display: typeof entry.display === 'string' ? entry.display : entry.signature
+        };
+      }
+      keyboardPolicyRevision = payload.revision;
+      keyboardPolicy = next;
+    }
+    function normalizeKeyboardKey(value) {
+      if (typeof value !== 'string') return '';
+      if (value === ',') return 'comma';
+      if (value === '+') return 'plus';
+      if (value === ' ') return 'space';
+      if (value === 'Esc') return 'escape';
+      return value.toLowerCase();
+    }
+    function keyboardSignatureFromEvent(event) {
+      var key = normalizeKeyboardKey(event.key);
+      if (!key || key === 'control' || key === 'ctrl' || key === 'meta' || key === 'shift' || key === 'alt') {
+        return null;
+      }
+      var parts = [];
+      if (event.ctrlKey) parts.push('ctrl');
+      if (event.altKey) parts.push('alt');
+      if (event.shiftKey) parts.push('shift');
+      if (event.metaKey) parts.push('meta');
+      parts.push(key);
+      return parts.join('+');
+    }
+    function keyboardMessageHandler(event) {
+      var data = event.data;
+      if (!data || data.ns !== ns || data.version !== version || data.type !== messages.keyboardPolicyUpdate) return;
+      applyKeyboardPolicyUpdate(data.payload);
+    }
+    function keyboardHandler(event) {
+      if (event.defaultPrevented) return;
+      var signature = keyboardSignatureFromEvent(event);
+      if (!signature) return;
+      var entry = keyboardPolicy[signature];
+      if (!entry || entry.owner !== 'obsidian' || !entry.commandId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      post(messages.keyboardDispatch, {
+        signature: signature,
+        commandId: entry.commandId,
+        display: entry.display || signature
+      });
+    }
+    function promptContextCommandHandler(event) {
+      var data = event.data;
+      if (!data || data.ns !== ns || data.version !== version || data.type !== messages.promptContextCommand) return;
+      var command = data.payload;
     if (!command || typeof command.transactionId !== 'string' || typeof command.action !== 'string') return;
     try {
       var result = runPromptContextCommand(command);
@@ -718,27 +859,23 @@ export function createBridgeScript(options: BridgeInjectionOptions = {}): string
         error: error && error.message ? error.message : String(error)
       });
     }
-  }
-  window.addEventListener('message', promptContextCommandHandler, true);
-  window.setTimeout(function() {
-    if (!promptContextGetter) promptContextPortUnavailable('port-not-loaded', 'Prompt context port did not load');
-  }, 5000);
-  post(messages.proxyLoaded);
-  function toggleHandler(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      post(messages.viewToggle);
     }
-  }
-  document.addEventListener('pointermove', vaultFileHoverHandler, true);
-  document.addEventListener('pointerleave', hideHoverIndicator, true);
-  document.addEventListener('click', vaultFileClickHandler, true);
-  document.addEventListener('contextmenu', vaultFileClickHandler, true);
-  window.addEventListener('keydown', toggleHandler, true);
-  document.addEventListener('keydown', toggleHandler, true);
-})();
-</script>
-`;
+    window.addEventListener('message', promptContextCommandHandler, true);
+    window.addEventListener('message', keyboardMessageHandler, true);
+    window.setTimeout(function() {
+      if (!promptContextGetter) promptContextPortUnavailable('port-not-loaded', 'Prompt context port did not load');
+    }, 5000);
+    window.setTimeout(function() {
+      if (!keyboardCatalogGetter) keyboardPortUnavailable('port-not-loaded', 'Keyboard command catalog port did not load');
+    }, 5000);
+    post(messages.proxyLoaded);
+    document.addEventListener('pointermove', vaultFileHoverHandler, true);
+    document.addEventListener('pointerleave', hideHoverIndicator, true);
+    document.addEventListener('click', vaultFileClickHandler, true);
+    document.addEventListener('contextmenu', vaultFileClickHandler, true);
+    window.addEventListener('keydown', keyboardHandler, true);
+    document.addEventListener('keydown', keyboardHandler, true);
+  })();
+  </script>
+  `;
 }

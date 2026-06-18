@@ -56,7 +56,18 @@ class FakeSetting {
 
 mock.module("obsidian", () => ({
   addIcon: () => {},
+  getLinkpath: (linktext: string) => linktext.split("#", 1)[0],
   getLanguage: () => "en",
+  parseLinktext: (linktext: string) => {
+    const subpathIndex = linktext.indexOf("#");
+    if (subpathIndex === -1) {
+      return { path: linktext, subpath: "" };
+    }
+    return {
+      path: linktext.slice(0, subpathIndex),
+      subpath: linktext.slice(subpathIndex + 1),
+    };
+  },
   setIcon: () => {},
   ItemView: class ItemView {},
   MarkdownView: class MarkdownView {},
@@ -98,6 +109,8 @@ mock.module("obsidian", () => ({
       return this;
     }
   },
+  TFile: class TFile {},
+  TFolder: class TFolder {},
 }));
 
 let OpenCodeSettingTab: typeof OpenCodeSettingTabClass;
@@ -139,7 +152,6 @@ describe("OpenCodeSettingTab i18n", () => {
       expect(visibleText).toContain("服务器配置");
       expect(visibleText).toContain("自定义命令");
       expect(visibleText).toContain("项目目录");
-      expect(visibleText).toContain("主点击打开 vault 文件");
       expect(visibleText).toContain("上下文辅助");
       expect(visibleText).toContain("服务器状态");
 
@@ -233,6 +245,89 @@ describe("OpenCodeSettingTab i18n", () => {
       expect(visibleText).not.toContain("单段文本长度上限");
       expect(visibleText).toContain("工作区线索");
       expect(visibleText).toContain("打开的笔记数量上限");
+    });
+  });
+
+  test("renders keyboard bridge conflicts as a warning in settings", () => {
+    setPluginLanguageForTests("zh-CN");
+    withSettingsDom(() => {
+      const tab = new OpenCodeSettingTab(
+        {} as any,
+        {} as any,
+        makeSettings(),
+        fakeServerManager(),
+        async () => {},
+        {
+          getSummary: () => ({
+            status: "available",
+            obsidianShortcutCount: 1,
+            opencodeShortcutCount: 1,
+            conflictCount: 1,
+            obsidianAvailable: true,
+            opencodeAvailable: true,
+            unavailableReason: null,
+            conflicts: [
+              {
+                signature: "meta+comma",
+                display: "⌘,",
+                obsidian: [
+                  {
+                    source: "obsidian",
+                    commandId: "app:open-settings",
+                    title: "打开设置",
+                    signature: "meta+comma",
+                    display: "⌘,",
+                    keybind: "Mod+,",
+                  },
+                ],
+                opencode: [
+                  {
+                    source: "opencode",
+                    commandId: "settings.open",
+                    title: "Open settings",
+                    signature: "meta+comma",
+                    display: "⌘,",
+                    keybind: "mod+comma",
+                  },
+                ],
+                policy: {
+                  signature: "meta+comma",
+                  display: "⌘,",
+                  owner: "obsidian",
+                  commandId: "app:open-settings",
+                  reason: "default-obsidian",
+                },
+              },
+            ],
+          }),
+          setOwner: async () => {},
+          refresh: () => {},
+        }
+      );
+      const definitions = tab.getSettingDefinitions();
+      const keyboardGroup = findGroup(definitions, "快捷键冲突");
+      const container = document.createElement("div");
+
+      keyboardGroup.items[0].render({ settingEl: container });
+
+      expect(container.textContent).toContain("状态：可用");
+      expect(container.textContent).toContain("发现 1 个快捷键冲突。默认由 Obsidian 响应");
+      expect(container.querySelector(".opencode-keyboard-conflict-shortcut")?.textContent).toBe(
+        "⌘,"
+      );
+      expect(container.textContent).toContain("Obsidian");
+      expect(container.textContent).toContain("打开设置");
+      expect(container.textContent).toContain("OpenCode");
+      expect(container.textContent).toContain("Open settings");
+      const ownerButtons = Array.from(
+        container.querySelectorAll(".opencode-keyboard-conflict-owner-option")
+      ) as HTMLButtonElement[];
+      expect(ownerButtons.map((button) => button.textContent)).toEqual(["Obsidian", "OpenCode"]);
+      expect(ownerButtons[0]?.getAttribute("aria-pressed")).toBe("true");
+      expect(ownerButtons[1]?.getAttribute("aria-pressed")).toBe("false");
+      expect(container.querySelector(".opencode-keyboard-bridge-warning")?.textContent).toContain(
+        "发现 1 个快捷键冲突"
+      );
     });
   });
 });

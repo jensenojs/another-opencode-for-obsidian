@@ -1,5 +1,6 @@
 export type ViewLocation = "sidebar" | "main";
 export type WebViewAppearance = "opencode" | "obsidian";
+export type KeyboardBridgeShortcutOwner = "opencode" | "obsidian";
 
 export interface ContextAssistSettings {
   enabled: boolean;
@@ -13,6 +14,10 @@ export interface ContextAssistSettings {
     maxSnippets: number;
     maxCharsPerSnippet: number;
   };
+}
+
+export interface KeyboardBridgeSettings {
+  conflictOwners: Record<string, KeyboardBridgeShortcutOwner>;
 }
 
 export interface WebViewTheme {
@@ -113,7 +118,7 @@ export interface OpenCodeSettings {
   customCommand: string;
   useCustomCommand: boolean;
   webViewAppearance: WebViewAppearance;
-  webUiVaultNavigationPrimaryClick: boolean;
+  keyboardBridge: KeyboardBridgeSettings;
   lastSessionUrl: string;
 }
 
@@ -144,14 +149,16 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
   customCommand: "",
   useCustomCommand: false,
   webViewAppearance: "obsidian",
-  webUiVaultNavigationPrimaryClick: true,
+  keyboardBridge: {
+    conflictOwners: {},
+  },
   lastSessionUrl: "",
 };
 
 export function normalizeOpenCodeSettings(
   data: Partial<OpenCodeSettings> | null
 ): OpenCodeSettings {
-  const loaded = stripLegacyContextSourceSettings(data);
+  const loaded = stripLegacyVaultNavigationPrimaryClick(stripLegacyContextSourceSettings(data));
   const loadedContextAssist = (loaded.contextAssist ?? {}) as Partial<ContextAssistSettings>;
   const contextAssist: ContextAssistSettings = {
     ...DEFAULT_SETTINGS.contextAssist,
@@ -165,12 +172,45 @@ export function normalizeOpenCodeSettings(
       ...((loadedContextAssist.selection ?? {}) as Partial<ContextAssistSettings["selection"]>),
     },
   };
+  const loadedKeyboardBridge = (loaded.keyboardBridge ?? {}) as Partial<KeyboardBridgeSettings>;
+  const keyboardBridge: KeyboardBridgeSettings = {
+    ...DEFAULT_SETTINGS.keyboardBridge,
+    ...loadedKeyboardBridge,
+    conflictOwners: normalizeKeyboardBridgeConflictOwners(loadedKeyboardBridge.conflictOwners),
+  };
 
   return {
     ...DEFAULT_SETTINGS,
     ...loaded,
     contextAssist,
+    keyboardBridge,
   };
+}
+
+function stripLegacyVaultNavigationPrimaryClick(
+  data: Partial<OpenCodeSettings>
+): Partial<OpenCodeSettings> {
+  const { webUiVaultNavigationPrimaryClick: _legacy, ...rest } =
+    data as Partial<OpenCodeSettings> & {
+      webUiVaultNavigationPrimaryClick?: unknown;
+    };
+  return rest;
+}
+
+function normalizeKeyboardBridgeConflictOwners(
+  value: KeyboardBridgeSettings["conflictOwners"] | undefined
+): KeyboardBridgeSettings["conflictOwners"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized: KeyboardBridgeSettings["conflictOwners"] = {};
+  for (const [signature, owner] of Object.entries(value)) {
+    if (owner === "opencode" || owner === "obsidian") {
+      normalized[signature] = owner;
+    }
+  }
+  return normalized;
 }
 
 function stripLegacyContextSourceSettings(

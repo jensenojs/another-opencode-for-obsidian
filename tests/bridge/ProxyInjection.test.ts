@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE } from "../../src/bridge/BridgeProtocol";
 import { injectOpenCodeWebUiProxyHtml } from "../../src/bridge/ProxyInjection";
-import type { BridgeInjectionOptions } from "../../src/bridge/BridgeInjection";
 
 const html = "<html><head></head><body>OpenCode</body></html>";
 type PostedBridgeMessage = {
@@ -12,15 +11,12 @@ type PostedBridgeMessage = {
   payload?: unknown;
 };
 
-function runInjectedBridge(
-  bodyMarkup: string,
-  bridgeOptions: BridgeInjectionOptions = {}
-): {
+function runInjectedBridge(bodyMarkup: string): {
   document: any;
   messages: PostedBridgeMessage[];
   window: Window;
 } {
-  const injected = injectOpenCodeWebUiProxyHtml(html, "opencode", null, bridgeOptions);
+  const injected = injectOpenCodeWebUiProxyHtml(html, "opencode", null);
   const script = extractBridgeScript(injected);
   const window = new Window({ url: "http://127.0.0.1:4097" });
   const messages: PostedBridgeMessage[] = [];
@@ -118,6 +114,21 @@ function dispatchMouse(
   );
 }
 
+function dispatchKeyboard(
+  window: Window,
+  target: EventTarget,
+  options: KeyboardEventInit & { key: string }
+): boolean {
+  return target.dispatchEvent(
+    new window.KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      ...options,
+    } as any) as unknown as Event
+  );
+}
+
 function clickTextOffset(window: Window, text: Text, offset: number): void {
   const ownerDocument = text.ownerDocument as Document & {
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -183,7 +194,8 @@ describe("ProxyInjection", () => {
 
     expect(body).toContain(BRIDGE_NAMESPACE);
     expect(body).toContain(BRIDGE_MESSAGES.proxyLoaded);
-    expect(body).toContain(BRIDGE_MESSAGES.viewToggle);
+    expect(body).toContain(BRIDGE_MESSAGES.keyboardPolicyUpdate);
+    expect(body).toContain(BRIDGE_MESSAGES.keyboardDispatch);
     expect(body).toContain(BRIDGE_MESSAGES.vaultFileOpen);
     expect(body).toContain("vaultFileClickRules");
     expect(body).toContain('data-slot="session-review-trigger-content"');
@@ -203,6 +215,90 @@ describe("ProxyInjection", () => {
     expect(body).toContain("lineNumberFromPath");
     expect(body).not.toContain("data-another-opencode-for-obsidian-appearance");
     expect(body).not.toContain("data-another-opencode-for-obsidian-theme");
+  });
+
+  test("dispatches an Obsidian keyboard command only when policy owns the signature", () => {
+    const { document, messages, window } = runInjectedBridge(`<main id="target"></main>`);
+
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        data: {
+          ns: BRIDGE_NAMESPACE,
+          version: 1,
+          type: BRIDGE_MESSAGES.keyboardPolicyUpdate,
+          payload: {
+            revision: 1,
+            entries: [
+              {
+                signature: "meta+l",
+                display: "⌘L",
+                owner: "obsidian",
+                commandId: "another-opencode-for-obsidian:toggle-opencode-view",
+                reason: "bridge-owned",
+              },
+            ],
+          },
+        },
+      })
+    );
+
+    const defaultWasNotPrevented = dispatchKeyboard(window, document.getElementById("target")!, {
+      key: "l",
+      metaKey: true,
+    });
+
+    expect(defaultWasNotPrevented).toBe(false);
+    expect(lastMessage(messages)).toEqual({
+      ns: BRIDGE_NAMESPACE,
+      version: 1,
+      type: BRIDGE_MESSAGES.keyboardDispatch,
+      payload: {
+        signature: "meta+l",
+        commandId: "another-opencode-for-obsidian:toggle-opencode-view",
+        display: "⌘L",
+      },
+    });
+  });
+
+  test("leaves Ctrl+L to OpenCode when policy only owns Cmd+L", () => {
+    const { document, messages, window } = runInjectedBridge(`<main id="target"></main>`);
+
+    window.dispatchEvent(
+      new window.MessageEvent("message", {
+        data: {
+          ns: BRIDGE_NAMESPACE,
+          version: 1,
+          type: BRIDGE_MESSAGES.keyboardPolicyUpdate,
+          payload: {
+            revision: 1,
+            entries: [
+              {
+                signature: "meta+l",
+                display: "⌘L",
+                owner: "obsidian",
+                commandId: "another-opencode-for-obsidian:toggle-opencode-view",
+                reason: "bridge-owned",
+              },
+            ],
+          },
+        },
+      })
+    );
+
+    const defaultWasNotPrevented = dispatchKeyboard(window, document.getElementById("target")!, {
+      key: "l",
+      ctrlKey: true,
+    });
+
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
   });
 
   test("posts a vault file open message for a session review file path", () => {
@@ -247,30 +343,6 @@ describe("ProxyInjection", () => {
         payload: undefined,
       },
     ]);
-  });
-
-  test("can reverse vault navigation to secondary click and leave primary click to OpenCode", () => {
-    const { document, messages, window } = runInjectedBridge(
-      `
-        <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
-          <div id="target" data-slot="session-review-trigger-content">A.md</div>
-        </div>
-      `,
-      { webUiVaultNavigationPrimaryClick: false }
-    );
-    const target = document.getElementById("target")!;
-
-    const primaryWasNotPrevented = dispatchMouse(window, target, "click", 0);
-    const secondaryWasNotPrevented = dispatchMouse(window, target, "contextmenu", 2);
-
-    expect(primaryWasNotPrevented).toBe(true);
-    expect(secondaryWasNotPrevented).toBe(false);
-    expect(lastMessage(messages)).toEqual({
-      ns: BRIDGE_NAMESPACE,
-      version: 1,
-      type: BRIDGE_MESSAGES.vaultFileOpen,
-      payload: { path: "0-理论/计算机体系结构/A.md" },
-    });
   });
 
   test("does not post vault navigation for absolute filesystem paths", () => {
@@ -793,32 +865,6 @@ describe("ProxyInjection", () => {
 
     expect(document.documentElement.style.cursor).toBe("");
     expect(document.body.style.cursor).toBe("");
-  });
-
-  test("marks vault navigation hover as context-menu when secondary click opens Obsidian", () => {
-    const { document, messages, window } = runInjectedBridge(
-      `
-          <div data-component="markdown">
-            <p id="target">• 0-理论/计算机体系结构/向量-SIMD和GPU体系结构中的数据并行.md: primary file being edited</p>
-          </div>
-        `,
-      { webUiVaultNavigationPrimaryClick: false }
-    );
-    const text = document.getElementById("target")!.firstChild as Text;
-    const offset = text.textContent!.indexOf("向量-SIMD");
-
-    pointerMoveTextOffset(window, text, offset);
-
-    expect(document.documentElement.style.cursor).toBe("context-menu");
-    expect(document.body.style.cursor).toBe("context-menu");
-    expect(messages).toEqual([
-      {
-        ns: BRIDGE_NAMESPACE,
-        version: 1,
-        type: BRIDGE_MESSAGES.proxyLoaded,
-        payload: undefined,
-      },
-    ]);
   });
 
   test("does not post a bare path message when the clicked offset is outside the path token", () => {

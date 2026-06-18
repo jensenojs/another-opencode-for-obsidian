@@ -4,6 +4,7 @@ import { homedir } from "os";
 import {
   CUSTOM_COMMAND_EXAMPLE,
   OPENCODE_VIEW_TYPE,
+  type KeyboardBridgeShortcutOwner,
   OpenCodeSettings,
   ViewLocation,
   WebViewAppearance,
@@ -13,6 +14,7 @@ import { ExecutableResolver } from "../server/ExecutableResolver";
 import { getRuntimePaths } from "../debug/RuntimeDiagnostics";
 import { OpenCodeView } from "../ui/OpenCodeView";
 import { getText } from "../i18n";
+import type { KeyboardConflict, KeyboardShortcutIndex } from "../bridge/KeyboardShortcutIndex";
 
 type SettingsKey =
   | "port"
@@ -24,7 +26,6 @@ type SettingsKey =
   | "autoStart"
   | "defaultViewLocation"
   | "webViewAppearance"
-  | "webUiVaultNavigationPrimaryClick"
   | "contextAssist.enabled"
   | "contextAssist.workspace.enabled"
   | "contextAssist.workspace.maxOpenNotes"
@@ -32,6 +33,21 @@ type SettingsKey =
   | "contextAssist.selection.enabled"
   | "contextAssist.selection.maxSnippets"
   | "contextAssist.selection.maxCharsPerSnippet";
+
+interface KeyboardBridgeSettingsControl {
+  getSummary: () => {
+    status: KeyboardShortcutIndex["status"];
+    obsidianShortcutCount: number;
+    opencodeShortcutCount: number;
+    conflictCount: number;
+    obsidianAvailable: boolean;
+    opencodeAvailable: boolean;
+    unavailableReason: string | null;
+    conflicts: KeyboardConflict[];
+  };
+  setOwner: (signature: string, owner: KeyboardBridgeShortcutOwner) => Promise<void>;
+  refresh: () => void;
+}
 
 function expandTilde(path: string): string {
   if (path === "~") {
@@ -49,7 +65,8 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     plugin: Plugin,
     private settings: OpenCodeSettings,
     private serverManager: ServerManager,
-    private onSettingsChange: () => Promise<void>
+    private onSettingsChange: () => Promise<void>,
+    private keyboardBridge?: KeyboardBridgeSettingsControl
   ) {
     super(app, plugin);
   }
@@ -187,15 +204,6 @@ export class OpenCodeSettingTab extends PluginSettingTab {
               defaultValue: "obsidian",
             },
           },
-          {
-            name: text.settings.webUiVaultNavigationPrimaryClick,
-            desc: text.settings.webUiVaultNavigationPrimaryClickDesc,
-            control: {
-              type: "toggle",
-              key: "webUiVaultNavigationPrimaryClick",
-              defaultValue: true,
-            },
-          },
         ],
       },
       {
@@ -314,6 +322,21 @@ export class OpenCodeSettingTab extends PluginSettingTab {
       },
       {
         type: "group",
+        heading: text.settings.keyboardBridge,
+        cls: "opencode-settings-group opencode-settings-keyboard-bridge",
+        items: [
+          {
+            name: text.settings.keyboardBridge,
+            desc: text.settings.keyboardBridgeDesc,
+            searchable: false,
+            render: (setting) => {
+              this.renderKeyboardBridge(setting.settingEl);
+            },
+          },
+        ],
+      },
+      {
+        type: "group",
         heading: text.settings.serverStatus,
         cls: "opencode-settings-group opencode-settings-status-group",
         items: [
@@ -352,8 +375,6 @@ export class OpenCodeSettingTab extends PluginSettingTab {
         return this.settings.defaultViewLocation;
       case "webViewAppearance":
         return this.settings.webViewAppearance;
-      case "webUiVaultNavigationPrimaryClick":
-        return this.settings.webUiVaultNavigationPrimaryClick;
       case "contextAssist.enabled":
         return this.settings.contextAssist.enabled;
       case "contextAssist.workspace.enabled":
@@ -407,11 +428,6 @@ export class OpenCodeSettingTab extends PluginSettingTab {
         return;
       case "webViewAppearance":
         this.settings.webViewAppearance = expectWebViewAppearance(key, value);
-        await this.onSettingsChange();
-        this.refreshOpenCodeViews();
-        return;
-      case "webUiVaultNavigationPrimaryClick":
-        this.settings.webUiVaultNavigationPrimaryClick = expectBoolean(key, value);
         await this.onSettingsChange();
         this.refreshOpenCodeViews();
         return;
@@ -509,6 +525,140 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     const expanded = expandTilde(trimmed);
     this.serverManager.updateProjectDirectory(expanded);
     await this.onSettingsChange();
+  }
+
+  private renderKeyboardBridge(container: HTMLElement): void {
+    const text = getText();
+    container.empty();
+    container.classList.add("opencode-keyboard-bridge-setting");
+
+    if (!this.keyboardBridge) {
+      container.createDiv({
+        text: text.settings.keyboardBridgeUnavailable,
+        cls: "opencode-keyboard-bridge-status",
+      });
+      return;
+    }
+
+    const panel = container.createDiv({ cls: "opencode-keyboard-bridge-panel" });
+    const summary = this.keyboardBridge.getSummary();
+    const summaryEl = panel.createDiv({ cls: "opencode-keyboard-bridge-summary" });
+    const metricsEl = summaryEl.createDiv({ cls: "opencode-keyboard-bridge-metrics" });
+    const statusEl = metricsEl.createDiv({ cls: "opencode-keyboard-bridge-status" });
+    statusEl.createSpan({ text: text.settings.statusLabel });
+    statusEl.createSpan({
+      text: this.keyboardBridgeStatusText(summary),
+      cls: summary.status === "available" ? "opencode-keyboard-bridge-status-ok" : undefined,
+    });
+
+    const countsEl = metricsEl.createDiv({ cls: "opencode-keyboard-bridge-counts" });
+    countsEl.createSpan({
+      text: text.settings.keyboardBridgeCounts(
+        summary.obsidianShortcutCount,
+        summary.opencodeShortcutCount,
+        summary.conflictCount
+      ),
+    });
+
+    const buttonContainer = summaryEl.createDiv({ cls: "opencode-settings-buttons" });
+    const refreshButton = buttonContainer.createEl("button", {
+      text: text.settings.refreshKeyboardBridge,
+    });
+    refreshButton.addEventListener("click", () => {
+      this.keyboardBridge?.refresh();
+      this.renderKeyboardBridge(container);
+    });
+
+    if (summary.conflictCount > 0) {
+      panel.createDiv({
+        text: text.settings.keyboardBridgeConflictsNeedReview(summary.conflictCount),
+        cls: "opencode-keyboard-bridge-warning",
+      });
+    }
+
+    if (summary.conflicts.length === 0) {
+      panel.createDiv({
+        text: text.settings.keyboardBridgeNoConflicts,
+        cls: "opencode-keyboard-bridge-empty",
+      });
+      return;
+    }
+
+    const listEl = panel.createDiv({ cls: "opencode-keyboard-conflict-list" });
+    for (const conflict of summary.conflicts.slice(0, 20)) {
+      this.renderKeyboardConflict(listEl, conflict, container);
+    }
+  }
+
+  private renderKeyboardConflict(
+    container: HTMLElement,
+    conflict: KeyboardConflict,
+    refreshContainer: HTMLElement
+  ): void {
+    const text = getText();
+    const row = container.createDiv({ cls: "opencode-keyboard-conflict-row" });
+    row.createEl("code", {
+      text: conflict.display,
+      cls: "opencode-keyboard-conflict-shortcut",
+    });
+
+    const detail = row.createDiv({ cls: "opencode-keyboard-conflict-detail" });
+    const obsidianLine = detail.createDiv({ cls: "opencode-keyboard-conflict-command" });
+    obsidianLine.createSpan({ text: "Obsidian", cls: "opencode-keyboard-conflict-label" });
+    obsidianLine.createSpan({
+      text: formatShortcutOwners(conflict.obsidian),
+      cls: "opencode-keyboard-conflict-command-text",
+    });
+
+    const opencodeLine = detail.createDiv({ cls: "opencode-keyboard-conflict-command" });
+    opencodeLine.createSpan({ text: "OpenCode", cls: "opencode-keyboard-conflict-label" });
+    opencodeLine.createSpan({
+      text: formatShortcutOwners(conflict.opencode),
+      cls: "opencode-keyboard-conflict-command-text",
+    });
+
+    const actions = row.createDiv({ cls: "opencode-keyboard-conflict-actions" });
+    const ownerControl = actions.createDiv({
+      cls: "opencode-keyboard-conflict-owner-segment",
+      attr: { "aria-label": text.settings.keyboardConflictOwnerLabel },
+    });
+    const owners: KeyboardBridgeShortcutOwner[] = ["obsidian", "opencode"];
+    for (const owner of owners) {
+      const active = conflict.policy.owner === owner;
+      const button = ownerControl.createEl("button", {
+        text: owner === "obsidian" ? "Obsidian" : "OpenCode",
+        cls: "opencode-keyboard-conflict-owner-option",
+        attr: {
+          type: "button",
+          "aria-pressed": active ? "true" : "false",
+          title: owner === "obsidian" ? text.settings.ownerObsidian : text.settings.ownerOpenCode,
+        },
+      });
+      button.classList.toggle("is-active", active);
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (conflict.policy.owner === owner) {
+          return;
+        }
+        void this.keyboardBridge?.setOwner(conflict.signature, owner).then(() => {
+          this.renderKeyboardBridge(refreshContainer);
+        });
+      });
+    }
+  }
+
+  private keyboardBridgeStatusText(
+    summary: ReturnType<KeyboardBridgeSettingsControl["getSummary"]>
+  ): string {
+    const text = getText();
+    if (!summary.obsidianAvailable) {
+      return text.settings.keyboardBridgeObsidianUnavailable;
+    }
+    if (!summary.opencodeAvailable) {
+      return text.settings.keyboardBridgeOpenCodeUnavailable;
+    }
+    return text.settings.keyboardBridgeAvailable;
   }
 
   private renderServerStatus(container: HTMLElement): void {
@@ -682,4 +832,8 @@ function expectWebViewAppearance(key: SettingsKey, value: unknown): WebViewAppea
     throw new TypeError(`Expected ${key} to be a valid web view appearance`);
   }
   return value;
+}
+
+function formatShortcutOwners(entries: Array<{ title: string; commandId: string }>): string {
+  return entries.map((entry) => entry.title || entry.commandId).join(", ");
 }

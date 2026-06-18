@@ -1,4 +1,4 @@
-import { createBridgeScript, type BridgeInjectionOptions } from "./BridgeInjection";
+import { createBridgeScript } from "./BridgeInjection";
 import { BRIDGE_MESSAGES, BRIDGE_NAMESPACE, BRIDGE_VERSION } from "./BridgeProtocol";
 import type { WebViewAppearance, WebViewTheme } from "../types";
 
@@ -100,13 +100,9 @@ function createObsidianAppearanceStyle(): string {
 export function injectOpenCodeWebUiProxyHtml(
   html: string,
   appearance: WebViewAppearance,
-  theme: WebViewTheme | null,
-  bridgeOptions: BridgeInjectionOptions = {}
+  theme: WebViewTheme | null
 ): string {
-  return injectIntoHead(
-    html,
-    createBridgeScript(bridgeOptions) + getAppearanceInjection(appearance, theme)
-  );
+  return injectIntoHead(html, createBridgeScript() + getAppearanceInjection(appearance, theme));
 }
 
 function injectIntoHead(html: string, injection: string): string {

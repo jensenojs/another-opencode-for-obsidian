@@ -4,6 +4,9 @@ import {
   BRIDGE_NAMESPACE,
   BRIDGE_VERSION,
   isBridgeMessage,
+  isKeyboardCatalogPayload,
+  isKeyboardDispatchPayload,
+  isKeyboardPolicyUpdatePayload,
   isPromptContextChangedPayload,
   isPromptContextRemovedPayload,
   isVaultFileOpenPayload,
@@ -15,7 +18,7 @@ describe("BridgeProtocol", () => {
       isBridgeMessage({
         ns: BRIDGE_NAMESPACE,
         version: BRIDGE_VERSION,
-        type: BRIDGE_MESSAGES.viewToggle,
+        type: BRIDGE_MESSAGES.proxyLoaded,
       })
     ).toBe(true);
     expect(
@@ -29,7 +32,7 @@ describe("BridgeProtocol", () => {
   });
 
   test("rejects unscoped messages", () => {
-    expect(isBridgeMessage({ type: BRIDGE_MESSAGES.viewToggle })).toBe(false);
+    expect(isBridgeMessage({ type: "keyboard:dispatch" })).toBe(false);
     expect(
       isBridgeMessage({
         ns: BRIDGE_NAMESPACE,
@@ -85,5 +88,52 @@ describe("BridgeProtocol", () => {
         origin: "bridge-sync",
       })
     ).toBe(false);
+  });
+
+  test("validates keyboard catalog payloads", () => {
+    expect(
+      isKeyboardCatalogPayload({
+        available: true,
+        options: [{ id: "settings.open", title: "Settings", keybind: "mod+comma" }],
+        catalog: [{ id: "input.focus", title: "Focus input", keybind: "ctrl+l" }],
+      })
+    ).toBe(true);
+    expect(
+      isKeyboardCatalogPayload({
+        available: true,
+        options: [{ title: "Settings", keybind: "mod+comma" }],
+        catalog: [],
+      })
+    ).toBe(false);
+  });
+
+  test("validates keyboard policy and dispatch payloads", () => {
+    expect(
+      isKeyboardPolicyUpdatePayload({
+        revision: 1,
+        entries: [
+          {
+            signature: "meta+comma",
+            display: "⌘,",
+            owner: "obsidian",
+            commandId: "app:open-settings",
+            reason: "user-conflict-policy",
+          },
+        ],
+      })
+    ).toBe(true);
+    expect(
+      isKeyboardPolicyUpdatePayload({
+        revision: 1,
+        entries: [{ signature: "Cmd+,", owner: "obsidian", reason: "user-conflict-policy" }],
+      })
+    ).toBe(false);
+    expect(
+      isKeyboardDispatchPayload({
+        signature: "meta+l",
+        commandId: "another-opencode-for-obsidian:toggle-opencode-view",
+      })
+    ).toBe(true);
+    expect(isKeyboardDispatchPayload({ signature: "meta+l" })).toBe(false);
   });
 });

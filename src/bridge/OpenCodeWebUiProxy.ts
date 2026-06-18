@@ -3,13 +3,17 @@ import * as net from "net";
 import { EventEmitter } from "events";
 import { createLogger } from "../debug/RuntimeDiagnostics";
 import { injectOpenCodeWebUiProxyHtml } from "./ProxyInjection";
-import type { BridgeInjectionOptions } from "./BridgeInjection";
 import type { WebViewAppearance, WebViewTheme } from "../types";
 import {
   mergePromptContextBundlePatchDiagnostics,
   patchOpenCodePromptContextBundle,
   type PromptContextBundlePatchDiagnostics,
 } from "./OpenCodePromptContextBundlePatch";
+import {
+  mergeKeyboardBundlePatchDiagnostics,
+  patchOpenCodeKeyboardBundle,
+  type KeyboardBundlePatchDiagnostics,
+} from "./OpenCodeKeyboardBundlePatch";
 import {
   mergeTerminalBundlePatchDiagnostics,
   patchOpenCodeTerminalBundle,
@@ -50,12 +54,12 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   private targetPort: number;
   private appearance: WebViewAppearance;
   private theme: WebViewThemeSource;
-  private bridgeOptions: BridgeInjectionOptions = {};
   private effectivePort: number = 0;
   private logger = createLogger("proxy");
   private promptRequestHook: PromptRequestHook | null = null;
   private promptRequestOutcomeHook: PromptRequestOutcomeHook | null = null;
   private promptContextBundlePatch: PromptContextBundlePatchDiagnostics | null = null;
+  private keyboardBundlePatch: KeyboardBundlePatchDiagnostics | null = null;
   private terminalBundlePatch: TerminalBundlePatchDiagnostics | null = null;
   private static readonly START_PORT = 4097;
   private static readonly MAX_ATTEMPTS = 10;
@@ -91,10 +95,6 @@ export class OpenCodeWebUiProxy extends EventEmitter {
     this.theme = theme;
   }
 
-  updateBridgeOptions(options: BridgeInjectionOptions): void {
-    this.bridgeOptions = options;
-  }
-
   updatePromptRequestHook(
     hook: PromptRequestHook | null,
     outcomeHook: PromptRequestOutcomeHook | null = null
@@ -105,6 +105,10 @@ export class OpenCodeWebUiProxy extends EventEmitter {
 
   getPromptContextBundlePatchDiagnostics(): PromptContextBundlePatchDiagnostics | null {
     return this.promptContextBundlePatch;
+  }
+
+  getKeyboardBundlePatchDiagnostics(): KeyboardBundlePatchDiagnostics | null {
+    return this.keyboardBundlePatch;
   }
 
   getTerminalBundlePatchDiagnostics(): TerminalBundlePatchDiagnostics | null {
@@ -353,6 +357,7 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   private shouldPatchJavaScriptAsset(path: string, contentType: string): boolean {
     if (
       !this.shouldPatchPromptContextBundle(path, contentType) &&
+      !this.shouldPatchKeyboardBundle(path, contentType) &&
       !this.shouldPatchTerminalBundle(path, contentType)
     ) {
       return false;
@@ -366,6 +371,10 @@ export class OpenCodeWebUiProxy extends EventEmitter {
 
   private shouldPatchPromptContextBundle(path: string, _contentType: string): boolean {
     return /\/assets\/(?:index|session-composer-state)-[^/?]+\.js(?:$|[?#])/.test(path);
+  }
+
+  private shouldPatchKeyboardBundle(path: string, _contentType: string): boolean {
+    return /\/assets\/index-[^/?]+\.js(?:$|[?#])/.test(path);
   }
 
   private shouldPatchTerminalBundle(path: string, _contentType: string): boolean {
@@ -385,6 +394,23 @@ export class OpenCodeWebUiProxy extends EventEmitter {
       this.logger.info("prompt context bundle patch", {
         status: this.promptContextBundlePatch.status,
         patches: this.promptContextBundlePatch.patches,
+        assetStatus: patched.status,
+        assetPatches: patched.patches,
+        path,
+      });
+      code = patched.code;
+    }
+    if (this.shouldPatchKeyboardBundle(path, "")) {
+      const patched = patchOpenCodeKeyboardBundle(code);
+      this.keyboardBundlePatch = mergeKeyboardBundlePatchDiagnostics(
+        this.keyboardBundlePatch,
+        path,
+        patched
+      );
+      this.emit("keyboardBundlePatch", this.keyboardBundlePatch);
+      this.logger.info("keyboard bundle patch", {
+        status: this.keyboardBundlePatch.status,
+        patches: this.keyboardBundlePatch.patches,
         assetStatus: patched.status,
         assetPatches: patched.patches,
         path,
@@ -426,12 +452,7 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   }
 
   private injectScript(body: string): string {
-    return injectOpenCodeWebUiProxyHtml(
-      body,
-      this.appearance,
-      this.resolveTheme(),
-      this.bridgeOptions
-    );
+    return injectOpenCodeWebUiProxyHtml(body, this.appearance, this.resolveTheme());
   }
 
   private resolveTheme(): WebViewTheme | null {
