@@ -23,33 +23,6 @@ export function createBridgeScript(): string {
   }
   var vaultFileClickRules = [
     {
-      name: 'session-review-file',
-      eventTargetSelector: '[data-slot="session-review-trigger-content"], [data-slot="session-review-file-info"], [data-slot="session-review-view-button"]',
-      containerSelector: '[data-slot="session-review-accordion-item"], [data-file]',
-      attribute: 'data-file'
-    },
-    {
-      name: 'session-review-slots',
-      eventTargetSelector: '[data-slot="session-review-directory"], [data-slot="session-review-filename"]',
-      containerSelector: '[data-slot="session-review-file-name-container"]',
-      directorySelector: '[data-slot="session-review-directory"]',
-      filenameSelector: '[data-slot="session-review-filename"]'
-    },
-    {
-      name: 'tool-file-slots',
-      eventTargetSelector: '[data-slot="apply-patch-trigger-content"], [data-slot="apply-patch-file-info"], [data-slot="apply-patch-directory"], [data-slot="apply-patch-filename"]',
-      containerSelector: '[data-slot="apply-patch-trigger-content"]',
-      directorySelector: '[data-slot="apply-patch-directory"]',
-      filenameSelector: '[data-slot="apply-patch-filename"]'
-    },
-    {
-      name: 'message-title-slots',
-      eventTargetSelector: '[data-component="edit-trigger"], [data-component="write-trigger"], [data-slot="message-part-title-area"], [data-slot="message-part-directory"], [data-slot="message-part-title-filename"]',
-      containerSelector: '[data-slot="message-part-title-area"]',
-      directorySelector: '[data-slot="message-part-directory"]',
-      filenameSelector: '[data-slot="message-part-title-filename"]'
-    },
-    {
       name: 'session-review-line',
       eventTargetSelector: '[data-line], [data-alt-line]',
       containerSelector: '[data-slot="session-review-accordion-item"], [data-file]',
@@ -60,13 +33,6 @@ export function createBridgeScript(): string {
       eventTargetSelector: '[data-line], [data-alt-line]',
       containerSelector: '[data-slot="tabs-content"]',
       fileTabPath: true
-    },
-    {
-      name: 'session-turn-diff-slots',
-      eventTargetSelector: '[data-slot="session-turn-diff-trigger"], [data-slot="session-turn-diff-path"], [data-slot="session-turn-diff-directory"], [data-slot="session-turn-diff-filename"]',
-      containerSelector: '[data-slot="accordion-item"]',
-      directorySelector: '[data-slot="session-turn-diff-directory"]',
-      filenameSelector: '[data-slot="session-turn-diff-filename"]'
     },
     {
       name: 'session-turn-diff-line',
@@ -81,19 +47,6 @@ export function createBridgeScript(): string {
       containerSelector: '[data-slot="accordion-item"]',
       directorySelector: '[data-slot="apply-patch-directory"]',
       filenameSelector: '[data-slot="apply-patch-filename"]'
-    },
-    {
-      name: 'basic-tool-path-text',
-      eventTargetSelector: '[data-component="tool-trigger"], [data-slot="basic-tool-tool-trigger-content"], [data-slot="basic-tool-tool-subtitle"], [data-slot="basic-tool-tool-arg"]',
-      containerSelector: '[data-component="tool-trigger"]',
-      textSelector: '[data-slot="basic-tool-tool-subtitle"]',
-      textPath: true
-    },
-    {
-      name: 'tool-loaded-file',
-      eventTargetSelector: '[data-component="tool-loaded-file"]',
-      containerSelector: '[data-component="tool-loaded-file"]',
-      textPath: true
     }
   ];
   var absoluteFilesystemRootPattern = /^\\/(?:Users|home|private|tmp|var|Volumes|Applications|System|Library|bin|sbin|usr|etc|opt|dev|proc|run)(?:\\/|$)/;

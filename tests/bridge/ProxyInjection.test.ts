@@ -198,19 +198,12 @@ describe("ProxyInjection", () => {
     expect(body).toContain(BRIDGE_MESSAGES.keyboardDispatch);
     expect(body).toContain(BRIDGE_MESSAGES.vaultFileOpen);
     expect(body).toContain("vaultFileClickRules");
-    expect(body).toContain('data-slot="session-review-trigger-content"');
-    expect(body).toContain('data-slot="apply-patch-trigger-content"');
-    expect(body).toContain('data-component="edit-trigger"');
-    expect(body).toContain('data-component="write-trigger"');
-    expect(body).toContain('data-slot="message-part-title-filename"');
     expect(body).toContain('data-slot="apply-patch-filename"');
-    expect(body).toContain('data-slot="session-review-filename"');
     expect(body).toContain("composedPath");
     expect(body).toContain("session-review-line");
     expect(body).toContain("file-tab-line");
     expect(body).toContain('data-slot="tabs-content"');
     expect(body).toContain("tool-file-line");
-    expect(body).toContain("basic-tool-path-text");
     expect(body).toContain("absoluteFilesystemRootPattern");
     expect(body).toContain("lineNumberFromPath");
     expect(body).not.toContain("data-another-opencode-for-obsidian-appearance");
@@ -301,7 +294,7 @@ describe("ProxyInjection", () => {
     ]);
   });
 
-  test("posts a vault file open message for a session review file path", () => {
+  test("leaves session review accordion trigger clicks to OpenCode", () => {
     const { document, messages, window } = runInjectedBridge(`
       <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
         <div id="target" data-slot="session-review-trigger-content">
@@ -310,17 +303,25 @@ describe("ProxyInjection", () => {
       </div>
     `);
 
-    click(window, document.getElementById("target")!);
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
 
-    expect(lastMessage(messages)).toEqual({
-      ns: BRIDGE_NAMESPACE,
-      version: 1,
-      type: BRIDGE_MESSAGES.vaultFileOpen,
-      payload: { path: "0-理论/计算机体系结构/A.md" },
-    });
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
   });
 
-  test("leaves secondary click to OpenCode when primary click opens Obsidian", () => {
+  test("leaves secondary clicks on session review triggers to OpenCode", () => {
     const { document, messages, window } = runInjectedBridge(`
       <div data-slot="session-review-accordion-item" data-file="/0-理论/计算机体系结构/A.md">
         <div id="target" data-slot="session-review-trigger-content">A.md</div>
@@ -652,7 +653,33 @@ describe("ProxyInjection", () => {
     });
   });
 
-  test("normalizes the logged double slash tool path shape", () => {
+  test("normalizes the logged double slash tool path shape from diff content", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div data-scope="apply-patch">
+        <div data-slot="accordion-item">
+          <div data-slot="apply-patch-trigger-content">
+            <span data-slot="apply-patch-directory">/0-理论/计算机体系结构/</span>
+            <span data-slot="apply-patch-filename">浮点数的编码：精度与范围的位宽争夺.md</span>
+          </div>
+          <div id="host" data-component="file"></div>
+        </div>
+      </div>
+    `);
+    const host = document.getElementById("host")!;
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `<div data-diff><div data-line="17"><span id="line">content</span></div></div>`;
+
+    click(window, shadow.getElementById("line")!);
+
+    expect(lastMessage(messages)).toEqual({
+      ns: BRIDGE_NAMESPACE,
+      version: 1,
+      type: BRIDGE_MESSAGES.vaultFileOpen,
+      payload: { path: "0-理论/计算机体系结构/浮点数的编码：精度与范围的位宽争夺.md", line: 17 },
+    });
+  });
+
+  test("leaves apply patch accordion trigger clicks to OpenCode", () => {
     const { document, messages, window } = runInjectedBridge(`
       <div data-scope="apply-patch">
         <div data-slot="accordion-item">
@@ -664,14 +691,22 @@ describe("ProxyInjection", () => {
       </div>
     `);
 
-    click(window, document.getElementById("target")!);
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
 
-    expect(lastMessage(messages)).toEqual({
-      ns: BRIDGE_NAMESPACE,
-      version: 1,
-      type: BRIDGE_MESSAGES.vaultFileOpen,
-      payload: { path: "0-理论/计算机体系结构/浮点数的编码：精度与范围的位宽争夺.md" },
-    });
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
   });
 
   test("posts the clicked accordion item path from multi-file tool content", () => {
@@ -707,7 +742,7 @@ describe("ProxyInjection", () => {
     });
   });
 
-  test("posts a vault file open message from a basic tool file summary", () => {
+  test("leaves basic tool trigger content clicks to OpenCode", () => {
     const { document, messages, window } = runInjectedBridge(`
       <div data-component="tool-trigger">
         <div id="target" data-slot="basic-tool-tool-trigger-content">
@@ -718,17 +753,25 @@ describe("ProxyInjection", () => {
       </div>
     `);
 
-    click(window, document.getElementById("target")!);
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
 
-    expect(lastMessage(messages)).toEqual({
-      ns: BRIDGE_NAMESPACE,
-      version: 1,
-      type: BRIDGE_MESSAGES.vaultFileOpen,
-      payload: { path: "浮点数的编码：精度与范围的位置竞争.md" },
-    });
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
   });
 
-  test("posts a vault file open message from a basic tool subtitle with spaces", () => {
+  test("leaves basic tool subtitle clicks to OpenCode", () => {
     const { document, messages, window } = runInjectedBridge(`
       <div data-component="tool-trigger">
         <div data-slot="basic-tool-tool-trigger-content">
@@ -739,14 +782,22 @@ describe("ProxyInjection", () => {
       </div>
     `);
 
-    click(window, document.getElementById("target")!);
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
 
-    expect(lastMessage(messages)).toEqual({
-      ns: BRIDGE_NAMESPACE,
-      version: 1,
-      type: BRIDGE_MESSAGES.vaultFileOpen,
-      payload: { path: "Note With Spaces.md" },
-    });
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
   });
 
   test("posts a line-aware message from session turn diff content", () => {
@@ -773,6 +824,38 @@ describe("ProxyInjection", () => {
       type: BRIDGE_MESSAGES.vaultFileOpen,
       payload: { path: "0-理论/计算机体系结构/向量-SIMD和GPU体系结构中的数据并行.md", line: 739 },
     });
+  });
+
+  test("leaves session turn diff trigger clicks to OpenCode", () => {
+    const { document, messages, window } = runInjectedBridge(`
+        <div data-component="session-turn-diffs-content">
+          <div data-slot="accordion-item">
+            <div id="target" data-slot="session-turn-diff-trigger">
+              <span data-slot="session-turn-diff-path">
+                <span data-slot="session-turn-diff-directory">0-理论/计算机体系结构</span>
+                <span data-slot="session-turn-diff-filename">向量-SIMD和GPU体系结构中的数据并行.md</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      `);
+
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
+
+    expect(defaultWasNotPrevented).toBe(true);
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
   });
 
   test("posts a vault file open message from a clicked Obsidian wikilink in markdown", () => {
@@ -878,6 +961,41 @@ describe("ProxyInjection", () => {
 
     clickTextOffset(window, text, offset);
 
+    expect(messages).toEqual([
+      {
+        ns: BRIDGE_NAMESPACE,
+        version: 1,
+        type: BRIDGE_MESSAGES.proxyLoaded,
+        payload: undefined,
+      },
+    ]);
+  });
+
+  test("leaves edit tool title area clicks to OpenCode", () => {
+    const { document, messages, window } = runInjectedBridge(`
+      <div data-component="tool-trigger">
+        <div id="target" data-component="edit-trigger">
+          <div data-slot="message-part-title-area">
+            <div data-slot="message-part-title">
+              <span data-slot="message-part-title-text">编辑</span>
+              <span data-slot="message-part-title-filename">单位根检验.md</span>
+            </div>
+            <div data-slot="message-part-path">
+              <span data-slot="message-part-directory">0-理论/0/数学/时间序列分析</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+
+    const defaultWasNotPrevented = dispatchMouse(
+      window,
+      document.getElementById("target")!,
+      "click",
+      0
+    );
+
+    expect(defaultWasNotPrevented).toBe(true);
     expect(messages).toEqual([
       {
         ns: BRIDGE_NAMESPACE,
