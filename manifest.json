@@ -1,7 +1,7 @@
 {
   "id": "another-opencode-for-obsidian",
   "name": "Another OpenCode for Obsidian",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "minAppVersion": "1.13.1",
   "description": "Another OpenCode integration for Obsidian with vault navigation, context provenance, and diagnostics",
   "author": "mtymek",
