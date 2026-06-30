@@ -45,6 +45,17 @@ describe("OpenCodePromptContextBundlePatch", () => {
     expect(result.code).toContain("__anotherOpenCodeForObsidianInstallPromptContextPort");
   });
 
+  test("patches the prompt context port when the provider uses the current session accessor", () => {
+    const result = patchOpenCodePromptContextBundle(currentSessionAccessorBundle());
+
+    expect(result.status).toBe("missing-anchor");
+    expect(result.patchedPoints).toEqual(["port"]);
+    expect(result.patches.port).toEqual({ status: "patched", anchorCount: 1 });
+    expect(result.code).toContain("__anotherOpenCodeForObsidianInstallPromptContextPort");
+    expect(result.code).toContain("items:()=>h().context.items()");
+    expect(result.code).toContain("replaceComments:u=>h().context.replaceComments(u)");
+  });
+
   test("aggregates patch points across the actual split OpenCode assets", () => {
     const indexResult = patchOpenCodePromptContextBundle(indexBundle());
     const sessionResult = patchOpenCodePromptContextBundle(sessionComposerBundle());
@@ -110,5 +121,13 @@ function runtimeSessionComposerBundle(): string {
     return u(Yt,{get children(){var l=jm(),p=l.firstChild,b=p.firstChild,v=b.firstChild;return l.$$click=()=>e.openComment(n),
     h(p,u(pt,{type:"button",icon:"close-small",variant:"ghost",class:"ml-auto size-3.5 text-text-weak hover:text-text-strong transition-all",onClick:h=>{h.stopPropagation(),e.remove(n)},get"aria-label"(){return e.t("prompt.context.removeFile")}}),null),
     ue(h=>wt(l,{"group shrink-0 flex flex-col rounded-[6px] pl-2 pr-1 py-1 max-w-[200px] h-12 cursor-default transition-all transition-transform shadow-xs-border hover:shadow-xs-border-hover":!0,"hover:bg-surface-interactive-weak":!!n.commentID&&!a,"bg-background-stronger":!a},h)),l}})}})),t}})
+  `;
+}
+
+function currentSessionAccessorBundle(): string {
+  return `
+    const{use:Km,provider:wF}=xr({name:"Prompt",gate:!1,init:()=>{const e=Fr(),t=Vr(),[n]=Hf(),r=Ki(),i=kr(),s=Go(),o=Lr(),a=new Map;
+    const f=v=>yF(r().scope,v),h=A(()=>f(n.draftId?{draftID:n.draftId}:{dir:gn(t().directory),id:e.id})),g=v=>v?f(v):h();
+    return{ready:fve(h),current:()=>h().current(),cursor:()=>h().cursor(),dirty:()=>h().dirty(),context:{items:()=>h().context.items(),add:v=>h().context.add(v),remove:v=>h().context.remove(v),removeComment:(v,y)=>h().context.removeComment(v,y),updateComment:(v,y,b)=>h().context.updateComment(v,y,b),replaceComments:v=>h().context.replaceComments(v)},set:(v,y,b)=>g(b).set(v,y),reset:v=>g(v).reset()}}})
   `;
 }

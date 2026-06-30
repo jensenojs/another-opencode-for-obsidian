@@ -29,19 +29,17 @@ export interface PromptContextBundlePatchDiagnostics {
   assets: PromptContextBundlePatchAssetDiagnostic[];
 }
 
-const PORT_CONTEXT_ANCHOR =
-  "context:{items:()=>l().context.items(),add:u=>l().context.add(u),remove:u=>l().context.remove(u),removeComment:(u,d)=>l().context.removeComment(u,d),updateComment:(u,d,f)=>l().context.updateComment(u,d,f),replaceComments:u=>l().context.replaceComments(u)},set:";
-const PORT_CONTEXT_PATCH = `context:{items:()=>l().context.items(),add:u=>l().context.add(u),remove:u=>l().context.remove(u),removeComment:(u,d)=>l().context.removeComment(u,d),updateComment:(u,d,f)=>l().context.updateComment(u,d,f),replaceComments:u=>l().context.replaceComments(u)},set:`;
 const PORT_RETURN_PREFIX = "return{ready:()=>l().ready";
-const PORT_INSTALL =
-  'typeof window<"u"&&window.__anotherOpenCodeForObsidianInstallPromptContextPort?.(()=>({items:()=>l().context.items(),add:u=>l().context.add(u),remove:u=>l().context.remove(u),removeComment:(u,d)=>l().context.removeComment(u,d),updateComment:(u,d,f)=>l().context.updateComment(u,d,f),replaceComments:u=>l().context.replaceComments(u)}));';
+const PORT_RETURN_PREFIX_PATTERN = "return{ready:";
+const PORT_CONTEXT_ANCHOR_PATTERN =
+  /context:\{items:\(\)=>([A-Za-z_$][\w$]*\(\))\.context\.items\(\),add:([A-Za-z_$][\w$]*)=>\1\.context\.add\(\2\),remove:([A-Za-z_$][\w$]*)=>\1\.context\.remove\(\3\),removeComment:\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)=>\1\.context\.removeComment\(\4,\5\),updateComment:\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)=>\1\.context\.updateComment\(\6,\7,\8\),replaceComments:([A-Za-z_$][\w$]*)=>\1\.context\.replaceComments\(\9\)\},set:/g;
 const ACTIVATION_ANCHOR_PATTERN = /([A-Za-z_$][\w$]*)\.\$\$click=\(\)=>e\.openComment\(n\)/g;
 const CLOSE_ANCHOR_PATTERN =
   /onClick:([A-Za-z_$][\w$]*)=>\{\1\.stopPropagation\(\),e\.remove\(n\)\}/g;
 
 export function patchOpenCodePromptContextBundle(input: string): PromptContextBundlePatchResult {
   const patches = {
-    port: evaluatePatchPoint(input, PORT_CONTEXT_ANCHOR),
+    port: evaluatePortPatchPoint(input),
     activation: evaluateRegexPatchPoint(input, ACTIVATION_ANCHOR_PATTERN),
     close: evaluateRegexPatchPoint(input, CLOSE_ANCHOR_PATTERN),
   } satisfies Record<PromptContextBundlePatchPoint, PromptContextBundlePatchPointResult>;
@@ -103,16 +101,17 @@ export function mergePromptContextBundlePatchDiagnostics(
 }
 
 function patchPortAnchor(input: string): string {
-  const contextIndex = input.indexOf(PORT_CONTEXT_ANCHOR);
-  if (contextIndex < 0) {
+  const match = firstRegexMatch(input, PORT_CONTEXT_ANCHOR_PATTERN);
+  if (!match) {
     return input;
   }
 
-  const prefixIndex = input.lastIndexOf(PORT_RETURN_PREFIX, contextIndex);
+  const contextIndex = match.index ?? -1;
+  const prefixIndex = findPortReturnPrefixIndex(input, contextIndex);
   if (prefixIndex < 0) {
-    return input.replace(PORT_CONTEXT_ANCHOR, PORT_CONTEXT_PATCH);
+    return input;
   }
-  return `${input.slice(0, prefixIndex)}${PORT_INSTALL}${input.slice(prefixIndex)}`;
+  return `${input.slice(0, prefixIndex)}${createPortInstall(match[1])}${input.slice(prefixIndex)}`;
 }
 
 function patchActivationAnchor(input: string): string {
@@ -131,9 +130,10 @@ function patchCloseAnchor(input: string): string {
   );
 }
 
-function evaluatePatchPoint(input: string, anchor: string): PromptContextBundlePatchPointResult {
-  const anchorCount = countOccurrences(input, anchor);
-  if (anchorCount === 1) {
+function evaluatePortPatchPoint(input: string): PromptContextBundlePatchPointResult {
+  const matches = regexMatches(input, PORT_CONTEXT_ANCHOR_PATTERN);
+  const anchorCount = matches.length;
+  if (anchorCount === 1 && findPortReturnPrefixIndex(input, matches[0].index ?? -1) >= 0) {
     return { status: "patched", anchorCount };
   }
   return {
@@ -154,6 +154,22 @@ function evaluateRegexPatchPoint(
     status: anchorCount === 0 ? "missing-anchor" : "ambiguous-anchor",
     anchorCount,
   };
+}
+
+function findPortReturnPrefixIndex(input: string, contextIndex: number): number {
+  if (contextIndex < 0) {
+    return -1;
+  }
+
+  const exactPrefixIndex = input.lastIndexOf(PORT_RETURN_PREFIX, contextIndex);
+  if (exactPrefixIndex >= 0) {
+    return exactPrefixIndex;
+  }
+  return input.lastIndexOf(PORT_RETURN_PREFIX_PATTERN, contextIndex);
+}
+
+function createPortInstall(storeExpression: string): string {
+  return `typeof window<"u"&&window.__anotherOpenCodeForObsidianInstallPromptContextPort?.(()=>({items:()=>${storeExpression}.context.items(),add:u=>${storeExpression}.context.add(u),remove:u=>${storeExpression}.context.remove(u),removeComment:(u,d)=>${storeExpression}.context.removeComment(u,d),updateComment:(u,d,f)=>${storeExpression}.context.updateComment(u,d,f),replaceComments:u=>${storeExpression}.context.replaceComments(u)}));`;
 }
 
 function summarizePatchStatus(
@@ -191,24 +207,18 @@ function summarizePatchPointAcrossAssets(
   return { status: "missing-anchor", anchorCount };
 }
 
-function countOccurrences(input: string, needle: string): number {
-  if (!needle) {
-    return 0;
-  }
-
-  let count = 0;
-  let index = input.indexOf(needle);
-  while (index >= 0) {
-    count += 1;
-    index = input.indexOf(needle, index + needle.length);
-  }
-  return count;
+function countRegexOccurrences(input: string, pattern: RegExp): number {
+  return regexMatches(input, pattern).length;
 }
 
-function countRegexOccurrences(input: string, pattern: RegExp): number {
+function firstRegexMatch(input: string, pattern: RegExp): RegExpMatchArray | null {
+  return regexMatches(input, pattern)[0] ?? null;
+}
+
+function regexMatches(input: string, pattern: RegExp): RegExpMatchArray[] {
   const regex = new RegExp(
     pattern.source,
     pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`
   );
-  return Array.from(input.matchAll(regex)).length;
+  return Array.from(input.matchAll(regex));
 }
