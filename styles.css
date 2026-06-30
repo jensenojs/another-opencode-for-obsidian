@@ -526,6 +526,13 @@
   color: var(--text-normal);
 }
 
+.opencode-ctx-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-popover);
+  background: transparent;
+}
+
 .opencode-ctx-popover {
   position: fixed;
   z-index: var(--layer-popover);

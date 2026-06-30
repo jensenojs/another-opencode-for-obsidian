@@ -361,7 +361,8 @@ function mergeNativeFileCardCluster(
   const primary =
     cluster.find((projection) => projection.native.sourceKind === "selection") ?? cluster[0];
   const candidateIds = uniqueStrings(cluster.flatMap(projectionCandidateIds));
-  const projectionId = `native:merged:${primary.native.item.path}:${range.start}-${range.end}:${candidateIds.join(",")}`;
+  const projectionIdentityCandidateIds = [...candidateIds].sort();
+  const projectionId = `native:merged:${primary.native.item.path}:${projectionIdentityCandidateIds.join(",")}`;
   const clickAction =
     primary.native.clickAction.type === "obsidian-open"
       ? { ...primary.native.clickAction, line: range.start, endLine: range.end }

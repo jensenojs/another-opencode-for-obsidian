@@ -165,6 +165,38 @@ describe("PromptContextProjection", () => {
     });
   });
 
+  test("keeps a merged native projection id stable when the workspace line moves", () => {
+    const workspaceAtLine = (line: number) =>
+      makeCandidate({
+        id: "workspace",
+        sourceId: "workspace",
+        sourceKind: "workspace",
+        identityKey: "current",
+        lifetime: "dynamic",
+        sourceFile: "Obsidian workspace",
+        navigationSourceFile: "notes/example.md",
+        startLine: line,
+        endLine: line,
+      });
+    const selection = makeCandidate({
+      id: "selection",
+      identityKey: "selection",
+      fingerprint: "selection:24-44",
+      startLine: 24,
+      endLine: 44,
+    });
+    const before = filterNativeFileCardProjections(
+      buildPromptContextProjections([workspaceAtLine(23), selection], resolver()).projections
+    )[0];
+    const after = filterNativeFileCardProjections(
+      buildPromptContextProjections([selection, workspaceAtLine(25)], resolver()).projections
+    )[0];
+
+    expect(before.projectionId).toBe(after.projectionId);
+    expect(before.native.item.selection).toMatchObject({ startLine: 23, endLine: 44 });
+    expect(after.native.item.selection).toMatchObject({ startLine: 24, endLine: 44 });
+  });
+
   test("merges same-file native selection cards when the line gap is at most 50", () => {
     const result = buildPromptContextProjections(
       [

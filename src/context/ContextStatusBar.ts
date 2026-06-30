@@ -40,9 +40,9 @@ type ContextStatusBarSource = ContextNavigationSource & { id: string };
 export class ContextStatusBar {
   private statusEl: HTMLElement;
   private popoverEl: HTMLElement | null = null;
+  private backdropEl: HTMLElement | null = null;
   private unsubscribeItems: (() => void) | null = null;
   private unsubscribeCandidates: (() => void) | null = null;
-  private removeDocumentClick: (() => void) | null = null;
   private removeKeydown: (() => void) | null = null;
   private expandedItemIds = new Set<string>();
   private pendingOpenTimers = new Map<string, number>();
@@ -107,20 +107,16 @@ export class ContextStatusBar {
   }
 
   private showPopover(): void {
+    this.backdropEl = document.body.createDiv({ cls: "opencode-ctx-popover-backdrop" });
+    this.backdropEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.hidePopover();
+    });
     this.popoverEl = document.body.createDiv({ cls: "opencode-ctx-popover" });
     this.positionPopover();
     this.renderPopover(this.deps.getItems(), this.getCandidates());
 
-    const handleDocumentClick = (event: MouseEvent): void => {
-      const target = event.target;
-      if (
-        target instanceof Node &&
-        (this.statusEl.contains(target) || this.popoverEl?.contains(target))
-      ) {
-        return;
-      }
-      this.hidePopover();
-    };
     const handleKeydown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         this.hidePopover();
@@ -128,21 +124,18 @@ export class ContextStatusBar {
     };
 
     window.setTimeout(() => {
-      document.addEventListener("click", handleDocumentClick, true);
       window.addEventListener("keydown", handleKeydown, true);
-      this.removeDocumentClick = () =>
-        document.removeEventListener("click", handleDocumentClick, true);
       this.removeKeydown = () => window.removeEventListener("keydown", handleKeydown, true);
     }, 0);
   }
 
   private hidePopover(): void {
-    this.removeDocumentClick?.();
     this.removeKeydown?.();
-    this.removeDocumentClick = null;
     this.removeKeydown = null;
     this.popoverEl?.remove();
     this.popoverEl = null;
+    this.backdropEl?.remove();
+    this.backdropEl = null;
   }
 
   private renderPopover(items: ContextItem[], candidates: ContextCandidate[]): void {

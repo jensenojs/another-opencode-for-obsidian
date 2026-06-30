@@ -416,6 +416,38 @@ describe("ContextStatusBar", () => {
     });
   });
 
+  test("hides the popover when the outside backdrop is clicked", async () => {
+    await withContextStatusBarDom(async (window) => {
+      const statusEl = window.document.createElement("div");
+      window.document.body.append(statusEl);
+      const statusBar = new ContextStatusBar({
+        addStatusBarItem: () => statusEl as unknown as HTMLElement,
+        getItems: () => [manualItem],
+        onItemsChanged: (callback) => {
+          callback([manualItem]);
+          return () => {};
+        },
+        resolveItem: (item) => ({ status: "resolved", path: item.sourceFile, line: null }),
+        openItem: async (item) => ({ status: "opened", path: item.sourceFile, line: null }),
+        removeItem: async () => true,
+      });
+
+      statusEl.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const backdrop = window.document.querySelector(".opencode-ctx-popover-backdrop");
+      expect(backdrop).toBeTruthy();
+      expect(window.document.querySelector(".opencode-ctx-popover")).toBeTruthy();
+
+      backdrop?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+      expect(window.document.querySelector(".opencode-ctx-popover-backdrop")).toBeNull();
+      expect(window.document.querySelector(".opencode-ctx-popover")).toBeNull();
+
+      statusBar.destroy();
+    });
+  });
+
   test("warns when an included candidate failed to attach as a native OpenCode card", async () => {
     await withContextStatusBarDom(async (window) => {
       const statusEl = window.document.createElement("div");
