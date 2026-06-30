@@ -38,7 +38,7 @@ export class PromptContextInjector {
     const candidateIds = uniqueCandidateIds(
       projections
         .filter((projection) => projection.kind !== "status-only")
-        .map((projection) => projection.candidateId)
+        .flatMap(projectionCandidateIds)
     );
     const hasSkippedDynamic = this.candidates
       .getCandidates()
@@ -49,7 +49,7 @@ export class PromptContextInjector {
 
     if (synthetic.length > 0 && !isPromptRequestBody(requestBody)) {
       this.candidates.markFailed(
-        synthetic.map((projection) => projection.candidateId),
+        synthetic.flatMap(projectionCandidateIds),
         "OpenCode prompt body did not expose a parts array"
       );
       return null;
@@ -123,6 +123,10 @@ function isPromptRequestBody(value: unknown): value is PromptRequestBody {
 
 function uniqueCandidateIds(candidateIds: string[]): string[] {
   return Array.from(new Set(candidateIds));
+}
+
+function projectionCandidateIds(projection: PromptContextProjection): string[] {
+  return projection.candidateIds ?? [projection.candidateId];
 }
 
 function snapshotCandidateRefs(

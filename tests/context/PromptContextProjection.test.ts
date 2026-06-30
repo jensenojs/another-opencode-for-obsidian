@@ -122,6 +122,122 @@ describe("PromptContextProjection", () => {
     });
   });
 
+  test("merges workspace active line into an included nearby selection card", () => {
+    const result = buildPromptContextProjections(
+      [
+        makeCandidate({
+          id: "workspace",
+          sourceId: "workspace",
+          sourceKind: "workspace",
+          identityKey: "current",
+          lifetime: "dynamic",
+          sourceFile: "Obsidian workspace",
+          navigationSourceFile: "notes/example.md",
+          startLine: 14,
+          endLine: 14,
+        }),
+        makeCandidate({
+          id: "selection",
+          identityKey: "selection",
+          fingerprint: "selection:14-17",
+          startLine: 14,
+          endLine: 17,
+        }),
+      ],
+      resolver()
+    );
+
+    const native = filterNativeFileCardProjections(result.projections);
+    expect(native).toHaveLength(1);
+    expect(native[0].candidateId).toBe("selection");
+    expect(native[0].candidateIds).toEqual(["workspace", "selection"]);
+    expect(native[0].native.item.selection).toEqual({
+      startLine: 14,
+      startChar: 0,
+      endLine: 17,
+      endChar: 0,
+    });
+    expect(native[0].native.clickAction).toEqual({
+      type: "obsidian-open",
+      path: "notes/example.md",
+      line: 14,
+      endLine: 17,
+    });
+  });
+
+  test("merges same-file native selection cards when the line gap is at most 50", () => {
+    const result = buildPromptContextProjections(
+      [
+        makeCandidate({
+          id: "selection-a",
+          identityKey: "selection-a",
+          fingerprint: "selection:16-19",
+          startLine: 16,
+          endLine: 19,
+        }),
+        makeCandidate({
+          id: "selection-b",
+          identityKey: "selection-b",
+          fingerprint: "selection:21-25",
+          startLine: 21,
+          endLine: 25,
+        }),
+      ],
+      resolver()
+    );
+
+    const native = filterNativeFileCardProjections(result.projections);
+    expect(native).toHaveLength(1);
+    expect(native[0].candidateIds).toEqual(["selection-a", "selection-b"]);
+    expect(native[0].native.item.selection).toEqual({
+      startLine: 16,
+      startChar: 0,
+      endLine: 25,
+      endChar: 0,
+    });
+  });
+
+  test("keeps same-file native selection cards separate when the line gap is more than 50", () => {
+    const result = buildPromptContextProjections(
+      [
+        makeCandidate({
+          id: "selection-a",
+          identityKey: "selection-a",
+          fingerprint: "selection:1-5",
+          startLine: 1,
+          endLine: 5,
+        }),
+        makeCandidate({
+          id: "selection-b",
+          identityKey: "selection-b",
+          fingerprint: "selection:57-60",
+          startLine: 57,
+          endLine: 60,
+        }),
+      ],
+      resolver()
+    );
+
+    expect(
+      filterNativeFileCardProjections(result.projections).map(
+        (projection) => projection.native.item.selection
+      )
+    ).toEqual([
+      {
+        startLine: 1,
+        startChar: 0,
+        endLine: 5,
+        endChar: 0,
+      },
+      {
+        startLine: 57,
+        startChar: 0,
+        endLine: 60,
+        endChar: 0,
+      },
+    ]);
+  });
+
   test("uses synthetic text when a path cannot be converted to an OpenCode-readable path", () => {
     const result = buildPromptContextProjections(
       [

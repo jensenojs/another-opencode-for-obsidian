@@ -107,6 +107,36 @@ describe("PromptContextInjector", () => {
     expect(registry.getCandidates()).toMatchObject([{ id: "workspace", lifetime: "dynamic" }]);
   });
 
+  test("complete consumes every one-shot candidate represented by a merged native projection", () => {
+    const registry = new CandidateRegistry();
+    registry.setSession("ses_1");
+    registry.upsert(makeCandidate({ id: "selection-a", identityKey: "selection-a" }));
+    registry.upsert(
+      makeCandidate({ id: "selection-b", identityKey: "selection-b", startLine: 10, endLine: 12 })
+    );
+    registry.upsert(
+      makeCandidate({
+        id: "workspace",
+        identityKey: "workspace",
+        sourceKind: "workspace",
+        lifetime: "dynamic",
+      })
+    );
+    const injector = new PromptContextInjector(registry);
+    const plan = injector.prepare("ses_1", { parts: [{ type: "text", text: "user" }] }, [
+      {
+        ...nativeProjection("selection-a"),
+        candidateIds: ["selection-a", "selection-b", "workspace"],
+      },
+    ]);
+
+    expect(plan?.candidateIds).toEqual(["selection-a", "selection-b", "workspace"]);
+
+    injector.complete(plan!.id);
+
+    expect(registry.getCandidates()).toMatchObject([{ id: "workspace", lifetime: "dynamic" }]);
+  });
+
   test("complete does not consume an overlapping selection created after prepare", () => {
     const registry = new CandidateRegistry();
     registry.setSession("ses_1");

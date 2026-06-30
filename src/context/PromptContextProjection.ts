@@ -10,6 +10,7 @@ export type PromptContextClickAction =
 export interface NativePromptContextProjection {
   projectionId: string;
   candidateId: string;
+  candidateIds?: string[];
   sourceId: string;
   sourceKind: ContextCandidate["sourceKind"];
   fingerprint: string;
@@ -23,18 +24,21 @@ export type PromptContextProjection =
       kind: "native-file-card";
       projectionId: string;
       candidateId: string;
+      candidateIds?: string[];
       native: NativePromptContextProjection;
     }
   | {
       kind: "synthetic-text";
       projectionId: string;
       candidateId: string;
+      candidateIds?: string[];
       text: string;
     }
   | {
       kind: "status-only";
       projectionId: string;
       candidateId: string;
+      candidateIds?: string[];
       label: string;
       clickAction?: PromptContextClickAction;
       reason?: string;
@@ -76,6 +80,8 @@ export interface OpenCodeContextPathResolver {
     endLine?: number;
   }): PromptContextClickAction;
 }
+
+const NATIVE_FILE_CARD_MERGE_GAP_LINES = 50;
 
 interface OpenCodeContextPathResolverOptions {
   vaultBasePath: string | null;
@@ -131,7 +137,7 @@ export function buildPromptContextProjections(
     failures.push(...projection.failures);
   }
 
-  return { projections, failures };
+  return { projections: mergeNearbyNativeFileCardProjections(projections), failures };
 }
 
 export function filterSyntheticTextProjections(
@@ -244,6 +250,7 @@ function buildNativeFileProjection(
         native: {
           projectionId,
           candidateId: candidate.id,
+          candidateIds: [candidate.id],
           sourceId: candidate.sourceId,
           sourceKind: candidate.sourceKind,
           fingerprint: candidate.fingerprint,
@@ -262,6 +269,151 @@ function buildNativeFileProjection(
       },
     ],
     failures: [],
+  };
+}
+
+function mergeNearbyNativeFileCardProjections(
+  projections: PromptContextProjection[]
+): PromptContextProjection[] {
+  const mergeable = projections.filter(isMergeableNativeFileCardProjection);
+  if (mergeable.length < 2) {
+    return projections;
+  }
+
+  const replacements = new Map<PromptContextProjection, PromptContextProjection | null>();
+  const byPath = new Map<
+    string,
+    Extract<PromptContextProjection, { kind: "native-file-card" }>[]
+  >();
+
+  for (const projection of mergeable) {
+    const path = projection.native.item.path;
+    byPath.set(path, [...(byPath.get(path) ?? []), projection]);
+  }
+
+  for (const pathProjections of byPath.values()) {
+    const sorted = [...pathProjections].sort((a, b) => nativeRange(a).start - nativeRange(b).start);
+    let cluster: Extract<PromptContextProjection, { kind: "native-file-card" }>[] = [];
+    let clusterRange: { start: number; end: number } | null = null;
+
+    for (const projection of sorted) {
+      const range = nativeRange(projection);
+      if (
+        cluster.length === 0 ||
+        (clusterRange && range.start <= clusterRange.end + NATIVE_FILE_CARD_MERGE_GAP_LINES + 1)
+      ) {
+        cluster.push(projection);
+        clusterRange = clusterRange
+          ? {
+              start: Math.min(clusterRange.start, range.start),
+              end: Math.max(clusterRange.end, range.end),
+            }
+          : range;
+        continue;
+      }
+
+      recordMergedCluster(replacements, cluster, clusterRange!);
+      cluster = [projection];
+      clusterRange = range;
+    }
+
+    if (cluster.length > 1) {
+      recordMergedCluster(replacements, cluster, clusterRange!);
+    }
+  }
+
+  if (replacements.size === 0) {
+    return projections;
+  }
+
+  const result: PromptContextProjection[] = [];
+  for (const projection of projections) {
+    if (!replacements.has(projection)) {
+      result.push(projection);
+      continue;
+    }
+
+    const replacement = replacements.get(projection);
+    if (replacement) {
+      result.push(replacement);
+    }
+  }
+  return result;
+}
+
+function isMergeableNativeFileCardProjection(
+  projection: PromptContextProjection
+): projection is Extract<PromptContextProjection, { kind: "native-file-card" }> {
+  return (
+    projection.kind === "native-file-card" &&
+    (projection.native.sourceKind === "selection" ||
+      projection.native.sourceKind === "workspace") &&
+    !projection.native.item.commentID &&
+    !projection.native.item.comment &&
+    Boolean(projection.native.item.selection)
+  );
+}
+
+function mergeNativeFileCardCluster(
+  cluster: Extract<PromptContextProjection, { kind: "native-file-card" }>[],
+  range: { start: number; end: number }
+): Extract<PromptContextProjection, { kind: "native-file-card" }> {
+  const primary =
+    cluster.find((projection) => projection.native.sourceKind === "selection") ?? cluster[0];
+  const candidateIds = uniqueStrings(cluster.flatMap(projectionCandidateIds));
+  const projectionId = `native:merged:${primary.native.item.path}:${range.start}-${range.end}:${candidateIds.join(",")}`;
+  const clickAction =
+    primary.native.clickAction.type === "obsidian-open"
+      ? { ...primary.native.clickAction, line: range.start, endLine: range.end }
+      : primary.native.clickAction;
+
+  return {
+    kind: "native-file-card",
+    projectionId,
+    candidateId: primary.candidateId,
+    candidateIds,
+    native: {
+      ...primary.native,
+      projectionId,
+      candidateId: primary.candidateId,
+      candidateIds,
+      fingerprint: cluster.map((projection) => projection.native.fingerprint).join("\n"),
+      item: {
+        ...primary.native.item,
+        selection: lineSelection(range.start, range.end),
+      },
+      clickAction,
+    },
+  };
+}
+
+function recordMergedCluster(
+  replacements: Map<PromptContextProjection, PromptContextProjection | null>,
+  cluster: Extract<PromptContextProjection, { kind: "native-file-card" }>[],
+  range: { start: number; end: number }
+): void {
+  const merged = mergeNativeFileCardCluster(cluster, range);
+  cluster.forEach((projection, index) => {
+    replacements.set(projection, index === 0 ? merged : null);
+  });
+}
+
+function projectionCandidateIds(projection: PromptContextProjection): string[] {
+  return projection.candidateIds ?? [projection.candidateId];
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function nativeRange(projection: Extract<PromptContextProjection, { kind: "native-file-card" }>): {
+  start: number;
+  end: number;
+} {
+  const selection = projection.native.item.selection!;
+  return {
+    start: Math.min(selection.startLine, selection.endLine),
+    end: Math.max(selection.startLine, selection.endLine),
   };
 }
 
