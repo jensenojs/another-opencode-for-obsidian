@@ -214,7 +214,7 @@ zsh -lc 'source "$HOME/.zshrc"; exec opencode serve --hostname {hostname} --port
 如果 OpenCode server 需要额外 flag，可以放在同一个模板里：
 
 ```bash
-zsh -lc 'exec "$HOME/.local/bin/opencode" serve --hostname {hostname} --port {port} --cors {cors} --shutdown-after-last-client'
+zsh -lc 'exec "$HOME/.local/bin/opencode" serve --hostname {hostname} --port {port} --cors {cors} --print-logs'
 ```
 
 额外 flag 只在你安装的 OpenCode 版本支持时使用。这个模板的重点是明确 process environment：shell 入口、binary path 或显式 source 的 setup 文件，以及 `serve` 需要的 placeholders。

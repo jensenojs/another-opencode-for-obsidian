@@ -18,6 +18,7 @@ import {
   type EnvironmentDiagnostics,
 } from "./EnvironmentDiagnostics";
 import { createLogger } from "../debug/RuntimeDiagnostics";
+import { buildServerAuthHeader, parseServerPassword } from "../client/ServerAuth";
 
 export type { ServerState } from "./types";
 
@@ -77,6 +78,7 @@ export class ServerManager extends EventEmitter {
   private lastProcessErrorStack: string | null = null;
   private lastSpawnEnvironment: EnvironmentDiagnostics | null = null;
   private lastResolvedExecutable: string | null = null;
+  private serverPassword: string | null = null;
   private settings: OpenCodeSettings;
   private projectDirectory: string;
   private processImpl: OpenCodeProcess;
@@ -131,6 +133,14 @@ export class ServerManager extends EventEmitter {
       lastResolvedExecutable: this.lastResolvedExecutable,
       hint: this.getDiagnosticHint(),
     };
+  }
+
+  getServerPassword(): string | null {
+    return this.serverPassword;
+  }
+
+  getServerAuthHeader(): string | undefined {
+    return buildServerAuthHeader(this.serverPassword);
   }
 
   getPid(): number | null {
@@ -396,6 +406,7 @@ export class ServerManager extends EventEmitter {
   }
 
   private resetProcessDiagnostics(): void {
+    this.serverPassword = null;
     this.lastCommand = null;
     this.lastCommandArgs = [];
     this.lastDisplayCommand = null;
@@ -421,6 +432,10 @@ export class ServerManager extends EventEmitter {
 
     if (kind === "stdout") {
       this.lastStdout = next;
+      const password = parseServerPassword(next);
+      if (password) {
+        this.serverPassword = password;
+      }
       return;
     }
     this.lastStderr = next;
@@ -465,35 +480,40 @@ export class ServerManager extends EventEmitter {
     const healthUrl = this.getEndpoint().healthUrl;
 
     return new Promise((resolve) => {
-      const request = http.get(healthUrl, (response) => {
-        let body = "";
+      const authHeader = this.getServerAuthHeader();
+      const request = http.get(
+        healthUrl,
+        authHeader ? { headers: { Authorization: authHeader } } : {},
+        (response) => {
+          let body = "";
 
-        response.setEncoding("utf8");
-        response.on("data", (chunk: string) => {
-          body += chunk;
-        });
+          response.setEncoding("utf8");
+          response.on("data", (chunk: string) => {
+            body += chunk;
+          });
 
-        response.on("end", () => {
-          if (response.statusCode !== 200) {
-            this.lastHealthError = `${healthUrl} returned HTTP ${response.statusCode}`;
-            resolve(false);
-            return;
-          }
-
-          try {
-            const payload = JSON.parse(body) as { healthy?: unknown };
-            if (payload.healthy === true) {
-              this.lastHealthError = null;
-              resolve(true);
+          response.on("end", () => {
+            if (response.statusCode !== 200) {
+              this.lastHealthError = `${healthUrl} returned HTTP ${response.statusCode}`;
+              resolve(false);
               return;
             }
-            this.lastHealthError = `${healthUrl} returned an unhealthy payload`;
-          } catch {
-            this.lastHealthError = `${healthUrl} returned a non-JSON response`;
-          }
-          resolve(false);
-        });
-      });
+
+            try {
+              const payload = JSON.parse(body) as { healthy?: unknown };
+              if (payload.healthy === true) {
+                this.lastHealthError = null;
+                resolve(true);
+                return;
+              }
+              this.lastHealthError = `${healthUrl} returned an unhealthy payload`;
+            } catch {
+              this.lastHealthError = `${healthUrl} returned a non-JSON response`;
+            }
+            resolve(false);
+          });
+        }
+      );
 
       request.setTimeout(2000, () => {
         this.lastHealthError = `${healthUrl} timed out`;

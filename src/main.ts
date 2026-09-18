@@ -330,7 +330,8 @@ export default class OpenCodePlugin extends Plugin {
     this.openCodeClient = new OpenCodeClient(
       this.getApiBaseUrl(),
       this.getServerUrl(),
-      projectDirectory
+      projectDirectory,
+      () => this.processManager.getServerPassword()
     );
     this.lastBaseUrl = this.getServerUrl();
     this.lastApiBaseUrl = this.getApiBaseUrl();
@@ -343,6 +344,7 @@ export default class OpenCodePlugin extends Plugin {
       apiBaseUrl: this.getApiBaseUrl(),
       projectDirectory,
       getCurrentSessionId: () => this.currentContextSession.getCurrentSessionId(),
+      getAuthPassword: () => this.processManager.getServerPassword(),
       onEventSnapshot: (snapshot) => {
         this.runtimeDiagnostics.opencodeEvents = snapshot;
         this.scheduleEventStatusWrite();

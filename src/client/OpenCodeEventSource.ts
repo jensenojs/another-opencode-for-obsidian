@@ -25,10 +25,13 @@ export interface OpenCodeEventSourceSnapshot {
   currentSessionEventCount: number;
 }
 
+import { buildServerAuthHeader } from "./ServerAuth";
+
 export interface OpenCodeEventSourceOptions {
   apiBaseUrl: string;
   projectDirectory: string;
   getCurrentSessionId: () => string | null;
+  getAuthPassword?: () => string | null;
   onSnapshot?: (snapshot: OpenCodeEventSourceSnapshot) => void;
 }
 
@@ -43,6 +46,7 @@ export class OpenCodeEventSource {
   private apiBaseUrl: string;
   private projectDirectory: string;
   private getCurrentSessionId: () => string | null;
+  private getAuthPassword?: () => string | null;
   private onSnapshot?: (snapshot: OpenCodeEventSourceSnapshot) => void;
   private request: http.ClientRequest | null = null;
   private buffer = "";
@@ -68,6 +72,7 @@ export class OpenCodeEventSource {
     this.apiBaseUrl = normalizeBaseUrl(options.apiBaseUrl);
     this.projectDirectory = options.projectDirectory;
     this.getCurrentSessionId = options.getCurrentSessionId;
+    this.getAuthPassword = options.getAuthPassword;
     this.onSnapshot = options.onSnapshot;
   }
 
@@ -101,6 +106,7 @@ export class OpenCodeEventSource {
     });
 
     const url = new URL(endpoint);
+    const authHeader = buildServerAuthHeader(this.getAuthPassword?.() ?? null);
     const req = http.request(
       {
         hostname: url.hostname,
@@ -110,6 +116,7 @@ export class OpenCodeEventSource {
         headers: {
           Accept: "text/event-stream",
           "x-opencode-directory": encodeURIComponent(this.projectDirectory),
+          ...(authHeader ? { Authorization: authHeader } : {}),
         },
       },
       (res) => {

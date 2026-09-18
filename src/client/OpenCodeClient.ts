@@ -1,4 +1,5 @@
 import { createLogger } from "../debug/RuntimeDiagnostics";
+import { buildServerAuthHeader } from "./ServerAuth";
 import {
   CONTEXT_MESSAGE_PREFIX,
   formatContextMessageText,
@@ -63,12 +64,19 @@ export class OpenCodeClient {
   private apiBaseUrl: string;
   private uiBaseUrl: string;
   private projectDirectory: string;
+  private getAuthPassword?: () => string | null;
   private logger = createLogger("client");
 
-  constructor(apiBaseUrl: string, uiBaseUrl: string, projectDirectory: string) {
+  constructor(
+    apiBaseUrl: string,
+    uiBaseUrl: string,
+    projectDirectory: string,
+    getAuthPassword?: () => string | null
+  ) {
     this.apiBaseUrl = this.normalizeBaseUrl(apiBaseUrl);
     this.uiBaseUrl = this.normalizeBaseUrl(uiBaseUrl);
     this.projectDirectory = projectDirectory;
+    this.getAuthPassword = getAuthPassword;
   }
 
   updateBaseUrl(apiBaseUrl: string, uiBaseUrl: string, projectDirectory: string): void {
@@ -216,6 +224,7 @@ export class OpenCodeClient {
       const url = `${this.apiBaseUrl}${path}`;
       const urlObj = new URL(url);
       const http = require("http");
+      const authHeader = buildServerAuthHeader(this.getAuthPassword?.() ?? null);
       const options = {
         hostname: urlObj.hostname,
         port: urlObj.port,
@@ -225,6 +234,7 @@ export class OpenCodeClient {
           "Content-Type": "application/json",
           // OpenCode's JS SDK percent-encodes this header; the server decodes it before loading the instance.
           "x-opencode-directory": encodeURIComponent(this.projectDirectory),
+          ...(authHeader ? { Authorization: authHeader } : {}),
         },
       };
       const response = await new Promise<{

@@ -10,6 +10,7 @@ export interface OpenCodeBridgeOptions {
   apiBaseUrl: string;
   projectDirectory: string;
   getCurrentSessionId: () => string | null;
+  getAuthPassword?: () => string | null;
   onEventSnapshot?: (snapshot: OpenCodeEventSourceSnapshot) => void;
 }
 
@@ -21,6 +22,7 @@ export class OpenCodeBridge {
       apiBaseUrl: options.apiBaseUrl,
       projectDirectory: options.projectDirectory,
       getCurrentSessionId: options.getCurrentSessionId,
+      getAuthPassword: options.getAuthPassword,
       onSnapshot: options.onEventSnapshot,
     });
   }

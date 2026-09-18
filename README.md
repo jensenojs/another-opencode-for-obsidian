@@ -261,7 +261,10 @@ Template with explicit environment variables:
 zsh -lc 'export HTTPS_PROXY=http://127.0.0.1:7890; export NO_PROXY=127.0.0.1,localhost; exec "$HOME/.local/bin/opencode" serve --hostname {hostname} --port {port} --cors {cors}'
 ```
 
-Template with an extra OpenCode server flag:
+Template with an extra OpenCode server flag (OpenCode v2 `serve` has no
+`--shutdown-after-last-client`; its attach semantics are built in, and v2
+servers require Basic auth — the plugin picks up the generated password from
+the server's stdout automatically):
 
 ```bash
 zsh -lc 'exec "$HOME/.local/bin/opencode" serve --hostname {hostname} --port {port} --cors {cors} --shutdown-after-last-client'
