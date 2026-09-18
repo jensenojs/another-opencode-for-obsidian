@@ -259,6 +259,9 @@ export class OpenCodeWebUiProxy extends EventEmitter {
       ...extraHeaders,
       host: `${this.targetHost}:${this.targetPort}`,
     };
+    // 上游返回 gzip/br 时 HTML 注入会破坏压缩体（Chromium 报 ERR_CONTENT_DECODING_FAILED）。
+    // 本地回环上请求未压缩响应，代价可忽略。
+    delete headers["accept-encoding"];
     if (!headers["authorization"]) {
       const authHeader = this.getAuthHeader();
       if (authHeader) {
