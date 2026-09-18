@@ -114,7 +114,11 @@ function isIgnoredPluginContextMessage(message: OpenCodeMessage): boolean {
 }
 
 function isPluginContextMessage(message: OpenCodeMessage): boolean {
-  return message.parts.length > 0 && message.parts.every(isPluginContextPart);
+  return (
+    Array.isArray(message.parts) &&
+    message.parts.length > 0 &&
+    message.parts.every(isPluginContextPart)
+  );
 }
 
 function isPluginContextPart(part: OpenCodeMessage["parts"][number]): boolean {
