@@ -220,6 +220,32 @@ export class OpenCodeClient {
     path: string,
     body?: unknown
   ): Promise<OpenCodeRequestResult<T>> {
+    // opencode v2 的 JSON API 挂在 /api 前缀下；v1 无前缀。v2 对无前缀路径返回 SPA HTML，
+    // v1 对 /api 前缀返回 404。按 /api 优先探测，识别到错版本特征时回落另一条路径。
+    const viaApi = await this.attemptRequest(method, `/api${path}`, body);
+    if (viaApi?.ok && !viaApi.isHtml) {
+      return { ok: true, status: viaApi.status, value: viaApi.value as OpenCodeResponse<T> };
+    }
+    const direct = await this.attemptRequest(method, path, body);
+    if (direct?.ok && !direct.isHtml) {
+      return { ok: true, status: direct.status, value: direct.value as OpenCodeResponse<T> };
+    }
+    const failed = viaApi ?? direct;
+    if (!failed) {
+      this.logger.error("api request error", new Error("all attempts failed at network level"));
+      return { ok: false, status: 0, value: null };
+    }
+    if (!failed.ok) {
+      this.logger.error("api request failed", { path, status: failed.status });
+    }
+    return { ok: false, status: failed.status, value: null };
+  }
+
+  private async attemptRequest(
+    method: string,
+    path: string,
+    body?: unknown
+  ): Promise<{ ok: boolean; status: number; value: unknown; isHtml: boolean } | null> {
     try {
       const url = `${this.apiBaseUrl}${path}`;
       const urlObj = new URL(url);
@@ -237,25 +263,30 @@ export class OpenCodeClient {
           ...(authHeader ? { Authorization: authHeader } : {}),
         },
       };
-      const response = await new Promise<{
+      return await new Promise<{
         ok: boolean;
         status: number;
-        json: () => Promise<unknown>;
-      }>((resolve, reject) => {
+        value: unknown;
+        isHtml: boolean;
+      } | null>((resolve, reject) => {
         const req = http.request(options, (res: import("http").IncomingMessage) => {
           let data = "";
           res.on("data", (chunk: Buffer) => (data += chunk));
           res.on("end", () => {
+            const isHtml = data.trimStart().startsWith("<");
+            let value: unknown = null;
+            if (!isHtml) {
+              try {
+                value = JSON.parse(data || "null");
+              } catch {
+                value = null;
+              }
+            }
             resolve({
               ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
               status: res.statusCode ?? 500,
-              json: async () => {
-                try {
-                  return JSON.parse(data || "null");
-                } catch {
-                  return null;
-                }
-              },
+              value,
+              isHtml,
             });
           });
         });
@@ -263,32 +294,9 @@ export class OpenCodeClient {
         if (body) req.write(JSON.stringify(body));
         req.end();
       });
-
-      if (!response.ok) {
-        this.logger.error("api request failed", {
-          path,
-          status: response.status,
-        });
-        return {
-          ok: false,
-          status: response.status,
-          value: null,
-        };
-      }
-
-      const json = await response.json();
-      return {
-        ok: true,
-        status: response.status,
-        value: json as OpenCodeResponse<T>,
-      };
     } catch (error) {
       this.logger.error("api request error", error);
-      return {
-        ok: false,
-        status: 0,
-        value: null,
-      };
+      return null;
     }
   }
 
