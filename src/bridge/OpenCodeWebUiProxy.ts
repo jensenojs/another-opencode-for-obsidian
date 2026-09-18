@@ -193,6 +193,11 @@ export class OpenCodeWebUiProxy extends EventEmitter {
     return `http://127.0.0.1:${this.effectivePort}/${encodedPath}`;
   }
 
+  getV2ServerUrl(): string {
+    const origin = `http://127.0.0.1:${this.effectivePort}`;
+    return `${origin}/server/${Buffer.from(origin).toString("base64")}`;
+  }
+
   private handleRequest(clientReq: http.IncomingMessage, clientRes: http.ServerResponse): void {
     if (this.shouldHandlePromptRequest(clientReq)) {
       void this.handlePromptRequest(clientReq, clientRes);

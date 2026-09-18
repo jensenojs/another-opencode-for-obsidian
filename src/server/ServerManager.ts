@@ -79,6 +79,7 @@ export class ServerManager extends EventEmitter {
   private lastSpawnEnvironment: EnvironmentDiagnostics | null = null;
   private lastResolvedExecutable: string | null = null;
   private serverPassword: string | null = null;
+  private serverVersion: string | null = null;
   private settings: OpenCodeSettings;
   private projectDirectory: string;
   private processImpl: OpenCodeProcess;
@@ -137,6 +138,10 @@ export class ServerManager extends EventEmitter {
 
   getServerPassword(): string | null {
     return this.serverPassword;
+  }
+
+  getServerVersion(): string | null {
+    return this.serverVersion;
   }
 
   getServerAuthHeader(): string | undefined {
@@ -407,6 +412,7 @@ export class ServerManager extends EventEmitter {
 
   private resetProcessDiagnostics(): void {
     this.serverPassword = null;
+    this.serverVersion = null;
     this.lastCommand = null;
     this.lastCommandArgs = [];
     this.lastDisplayCommand = null;
@@ -509,8 +515,9 @@ export class ServerManager extends EventEmitter {
             }
 
             try {
-              const payload = JSON.parse(body) as { healthy?: unknown };
+              const payload = JSON.parse(body) as { healthy?: unknown; version?: unknown };
               if (payload.healthy === true) {
+                this.serverVersion = typeof payload.version === "string" ? payload.version : null;
                 this.lastHealthError = null;
                 resolve(true);
                 return;

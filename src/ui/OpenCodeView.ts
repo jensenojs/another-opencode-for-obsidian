@@ -467,12 +467,13 @@ export class OpenCodeView extends ItemView {
 
   private reloadIframe(): void {
     if (this.iframeEl) {
-      const src = this.iframeEl.src;
+      const storedUrl = this.iframeEl.src;
+      const nextUrl = resolveInitialOpenCodeIframeUrl(storedUrl, this.plugin.getServerUrl());
       this.resetThemeDeliveryState();
       this.iframeEl.src = "about:blank";
       setTimeout(() => {
         if (this.iframeEl) {
-          this.iframeEl.src = src;
+          this.iframeEl.src = nextUrl;
         }
       }, 100);
     }

@@ -712,6 +712,11 @@ export default class OpenCodePlugin extends Plugin {
 
   getServerUrl(): string {
     const endpoint = createServerEndpoint(this.settings, this.getProjectDirectory());
+    const version = this.processManager.getServerVersion();
+    const major = version ? Number.parseInt(version.split(".")[0] ?? "", 10) : Number.NaN;
+    if (Number.isFinite(major) && major >= 2) {
+      return this.openCodeWebUiProxy.getV2ServerUrl();
+    }
     return this.openCodeWebUiProxy.getProxyUrl(endpoint.encodedProjectDirectory);
   }
 
@@ -743,6 +748,9 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   private notifyStateChange(state: ServerState): void {
+    if (state === "running" && this.openCodeClient) {
+      this.refreshClientState();
+    }
     for (const callback of this.stateChangeCallbacks) {
       callback(state);
     }
