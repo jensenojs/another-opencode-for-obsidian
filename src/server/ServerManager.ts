@@ -477,8 +477,17 @@ export class ServerManager extends EventEmitter {
   }
 
   private async checkServerHealth(): Promise<boolean> {
-    const healthUrl = this.getEndpoint().healthUrl;
+    // v2 serve 暴露 /api/health (JSON)，v1 patch 只有 /global/health；v2 对后者返回 SPA HTML。
+    const apiBaseUrl = this.getEndpoint().apiBaseUrl;
+    for (const healthPath of ["/api/health", "/global/health"]) {
+      if (await this.checkHealthUrl(`${apiBaseUrl}${healthPath}`)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
+  private checkHealthUrl(healthUrl: string): Promise<boolean> {
     return new Promise((resolve) => {
       const authHeader = this.getServerAuthHeader();
       const request = http.get(
