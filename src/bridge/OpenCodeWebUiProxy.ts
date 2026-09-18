@@ -2,6 +2,7 @@ import * as http from "http";
 import * as net from "net";
 import { EventEmitter } from "events";
 import { createLogger } from "../debug/RuntimeDiagnostics";
+import { buildServerAuthHeader } from "../client/ServerAuth";
 import { injectOpenCodeWebUiProxyHtml } from "./ProxyInjection";
 import type { WebViewAppearance, WebViewTheme } from "../types";
 import {
@@ -57,6 +58,7 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   private effectivePort: number = 0;
   private logger = createLogger("proxy");
   private promptRequestHook: PromptRequestHook | null = null;
+  private authPasswordProvider: (() => string | null) | null = null;
   private promptRequestOutcomeHook: PromptRequestOutcomeHook | null = null;
   private promptContextBundlePatch: PromptContextBundlePatchDiagnostics | null = null;
   private keyboardBundlePatch: KeyboardBundlePatchDiagnostics | null = null;
@@ -88,6 +90,16 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   updateTarget(targetHost: string, targetPort: number): void {
     this.targetHost = targetHost;
     this.targetPort = targetPort;
+  }
+
+  // opencode v2 强制 Basic 鉴权，Electron iframe 不会带凭据；由代理注入 Authorization 头。
+  setAuthPasswordProvider(provider: (() => string | null) | null): void {
+    this.authPasswordProvider = provider;
+  }
+
+  private getAuthHeader(): string | undefined {
+    const password = this.authPasswordProvider?.();
+    return buildServerAuthHeader(password);
   }
 
   updateAppearance(appearance: WebViewAppearance, theme: WebViewThemeSource = null): void {
@@ -247,6 +259,12 @@ export class OpenCodeWebUiProxy extends EventEmitter {
       ...extraHeaders,
       host: `${this.targetHost}:${this.targetPort}`,
     };
+    if (!headers["authorization"]) {
+      const authHeader = this.getAuthHeader();
+      if (authHeader) {
+        headers["authorization"] = authHeader;
+      }
+    }
 
     if (body) {
       headers["content-length"] = String(body.byteLength);
@@ -331,7 +349,11 @@ export class OpenCodeWebUiProxy extends EventEmitter {
         forwardSocketData(targetSocket, clientSocket);
         forwardSocketData(clientSocket, targetSocket);
         targetSocket.write(
-          formatRawHttpUpgradeRequest(clientReq, `${this.targetHost}:${this.targetPort}`)
+          formatRawHttpUpgradeRequest(
+            clientReq,
+            `${this.targetHost}:${this.targetPort}`,
+            this.getAuthHeader()
+          )
         );
         if (clientHead.length > 0) {
           targetSocket.write(clientHead);
@@ -487,13 +509,15 @@ function isSuccessStatus(statusCode: number | undefined): boolean {
 
 export function formatRawHttpUpgradeRequest(
   request: http.IncomingMessage,
-  targetHostHeader: string
+  targetHostHeader: string,
+  authHeader?: string
 ): string {
   const requestLine = `${request.method ?? "GET"} ${request.url ?? "/"} HTTP/${
     request.httpVersion || "1.1"
   }`;
   const headers: string[] = [requestLine];
   let wroteHost = false;
+  let wroteAuth = !authHeader;
   const rawHeaders =
     request.rawHeaders.length > 0 ? request.rawHeaders : rawHeadersFromObject(request.headers);
 
@@ -505,11 +529,17 @@ export function formatRawHttpUpgradeRequest(
       wroteHost = true;
       continue;
     }
+    if (name.toLowerCase() === "authorization") {
+      wroteAuth = true;
+    }
     headers.push(`${name}: ${value}`);
   }
 
   if (!wroteHost) {
     headers.push(`Host: ${targetHostHeader}`);
+  }
+  if (!wroteAuth && authHeader) {
+    headers.push(`Authorization: ${authHeader}`);
   }
 
   return `${headers.join("\r\n")}\r\n\r\n`;

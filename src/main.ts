@@ -151,6 +151,7 @@ export default class OpenCodePlugin extends Plugin {
     const endpoint = createServerEndpoint(this.settings, projectDirectory);
 
     this.openCodeWebUiProxy = new OpenCodeWebUiProxy(endpoint.hostname, endpoint.port);
+    this.openCodeWebUiProxy.setAuthPasswordProvider(() => this.processManager.getServerPassword());
     this.refreshProxyAppearance();
     const proxyStarted = await this.openCodeWebUiProxy.start();
     if (!proxyStarted) {
