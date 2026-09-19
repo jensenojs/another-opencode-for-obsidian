@@ -64,6 +64,7 @@ export class ServerManager extends EventEmitter {
   private state: ServerState = "stopped";
   private lastError: string | null = null;
   private lastHealthError: string | null = null;
+  private lastHealthStatus: number | null = null;
   private earlyExitCode: number | null = null;
   private lastCommand: string | null = null;
   private lastCommandArgs: string[] = [];
@@ -168,6 +169,7 @@ export class ServerManager extends EventEmitter {
     this.setState("starting");
     this.lastError = null;
     this.lastHealthError = null;
+    this.lastHealthStatus = null;
     this.earlyExitCode = null;
     this.resetProcessDiagnostics();
 
@@ -483,9 +485,11 @@ export class ServerManager extends EventEmitter {
   }
 
   private async checkServerHealth(): Promise<boolean> {
-    // v2 serve 暴露 /api/health (JSON)，v1 patch 只有 /global/health；v2 对后者返回 SPA HTML。
+    // v2 的 JSON 健康端点随版本漂移：2.0.3 是 /api/health（2.0.8 起移除），新版本无专用端点，
+    // 用 /api/config（JSON，需鉴权）做存活+鉴权探针；v1 patch 只有 /global/health。
+    // 注意 /health 在新版本是 SPA fallback，返回 HTML 200，不可用作探针。
     const apiBaseUrl = this.getEndpoint().apiBaseUrl;
-    for (const healthPath of ["/api/health", "/global/health"]) {
+    for (const healthPath of ["/api/health", "/api/config", "/global/health"]) {
       if (await this.checkHealthUrl(`${apiBaseUrl}${healthPath}`)) {
         return true;
       }
@@ -510,14 +514,22 @@ export class ServerManager extends EventEmitter {
           response.on("end", () => {
             if (response.statusCode !== 200) {
               this.lastHealthError = `${healthUrl} returned HTTP ${response.statusCode}`;
+              this.lastHealthStatus = response.statusCode ?? null;
               resolve(false);
               return;
             }
 
             try {
               const payload = JSON.parse(body) as { healthy?: unknown; version?: unknown };
-              if (payload.healthy === true) {
-                this.serverVersion = typeof payload.version === "string" ? payload.version : null;
+              if (payload.healthy === true || Array.isArray(payload)) {
+                // /api/config 返回 JSON 数组（无 healthy/version 字段）；能解析即证明 server 存活且鉴权通过。
+                // 版本号拿不到精确值时按 major=2 记录（/api 前缀本身是 v2 特征），仅供 v2 路由判定。
+                this.serverVersion =
+                  typeof payload.version === "string"
+                    ? payload.version
+                    : Array.isArray(payload)
+                      ? "2"
+                      : null;
                 this.lastHealthError = null;
                 resolve(true);
                 return;
@@ -546,6 +558,16 @@ export class ServerManager extends EventEmitter {
 
   private async checkExistingServerIsStable(): Promise<boolean> {
     if (!(await this.checkServerHealth())) {
+      if (this.lastHealthStatus === 401) {
+        // 端口被一个我们不知道密码的 v2 server 占用（孤儿进程或外部启动）。
+        // 直接 spawn 只会端口冲突，暴露真实原因让用户处置。
+        return this.setError(
+          `Port ${this.settings.port} is held by an opencode server this session cannot authenticate (HTTP 401). ` +
+            "Kill the stale server (lsof -ti tcp:" +
+            this.settings.port +
+            " | xargs kill) or start this server with OPENCODE_SERVER_PASSWORD set to its password."
+        );
+      }
       return false;
     }
 
