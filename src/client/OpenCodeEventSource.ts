@@ -45,7 +45,6 @@ export class OpenCodeEventSource {
   private apiBaseUrl: string;
   private projectDirectory: string;
   private request: http.ClientRequest | null = null;
-  private stopped = true;
   private buffer = "";
   private snapshot: OpenCodeEventSourceSnapshot = createSnapshot();
   private getCurrentSessionId: () => string | null;
@@ -67,14 +66,20 @@ export class OpenCodeEventSource {
   }
 
   start(): void {
+    const endpoint = buildEventEndpoint(this.apiBaseUrl);
     if (this.request) {
-      return;
+      if (this.snapshot.endpoint === endpoint) {
+        return;
+      }
+      // The plugin attached to a different service. The live request still
+      // points at the previous endpoint, so drop it: from here on its callbacks
+      // are stale and must not touch the stream this method is about to open.
+      this.request.destroy();
+      this.request = null;
     }
 
-    const endpoint = buildEventEndpoint(this.apiBaseUrl);
     const url = new URL(endpoint);
     const authHeader = buildServerAuthHeader(this.getAuthPassword?.() ?? null);
-    this.stopped = false;
     this.buffer = "";
     this.setSnapshot({ state: "connecting", endpoint });
 
@@ -90,21 +95,30 @@ export class OpenCodeEventSource {
         },
       },
       (response) => {
+        if (this.request !== request) {
+          response.resume();
+          return;
+        }
+
         const status = response.statusCode ?? 0;
         if (status === 404) {
-          this.finishUnsupported("OpenCode /api/event route is not available");
+          this.finish(request, "unsupported", "OpenCode /api/event route is not available");
           response.resume();
           return;
         }
         if (status < 200 || status >= 300) {
-          this.finishFailed(`OpenCode event stream returned HTTP ${status}`);
+          this.finish(request, "failed", `OpenCode event stream returned HTTP ${status}`);
           response.resume();
           return;
         }
 
         const contentType = String(response.headers["content-type"] ?? "");
         if (!contentType.includes("text/event-stream")) {
-          this.finishFailed("OpenCode event stream returned an unexpected content type");
+          this.finish(
+            request,
+            "failed",
+            "OpenCode event stream returned an unexpected content type"
+          );
           response.resume();
           return;
         }
@@ -112,31 +126,30 @@ export class OpenCodeEventSource {
         this.setSnapshot({ state: "connected", connectedAt: Date.now() });
         response.setEncoding("utf8");
         response.on("data", (chunk: string) => {
+          if (this.request !== request) {
+            return;
+          }
           this.consumeChunk(chunk);
         });
         response.on("end", () => {
-          this.request = null;
-          if (this.stopped) {
+          if (this.request !== request) {
             return;
           }
+          this.request = null;
           this.setSnapshot({ state: "disconnected", disconnectedAt: Date.now() });
         });
       }
     );
 
     request.on("error", (error) => {
-      this.request = null;
-      if (this.stopped) {
-        return;
-      }
-      this.finishFailed(error instanceof Error ? error.message : String(error));
+      this.finish(request, "failed", error instanceof Error ? error.message : String(error));
     });
+
     this.request = request;
     request.end();
   }
 
   stop(): void {
-    this.stopped = true;
     this.buffer = "";
     if (this.request) {
       this.request.destroy();
@@ -203,20 +216,16 @@ export class OpenCodeEventSource {
     this.setSnapshot(next);
   }
 
-  private finishUnsupported(reason: string): void {
-    this.request = null;
-    if (this.stopped) {
+  private finish(
+    request: http.ClientRequest,
+    state: "unsupported" | "failed",
+    reason: string
+  ): void {
+    if (this.request !== request) {
       return;
     }
-    this.setSnapshot({ state: "unsupported", lastError: reason });
-  }
-
-  private finishFailed(reason: string): void {
     this.request = null;
-    if (this.stopped) {
-      return;
-    }
-    this.setSnapshot({ state: "failed", lastError: reason });
+    this.setSnapshot({ state, lastError: reason });
   }
 
   private setSnapshot(patch: Partial<OpenCodeEventSourceSnapshot>): void {

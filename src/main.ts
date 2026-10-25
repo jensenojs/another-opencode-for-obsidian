@@ -28,7 +28,7 @@ import { getSelectionLineRange } from "./context/SelectionLineRange";
 import type { GraphIndex } from "./graph/GraphIndex";
 import { createObsidianGraphIndex, isMarkdownTFile, toGraphFile } from "./graph/ObsidianGraphIndex";
 import { OpenCodeWebUiProxy, extractPromptSessionId } from "./bridge/OpenCodeWebUiProxy";
-import { OpenCodeBridge } from "./bridge/OpenCodeBridge";
+import { OpenCodeBridge, describeEventLoss } from "./bridge/OpenCodeBridge";
 import {
   createLogger,
   getRuntimePaths,
@@ -129,11 +129,9 @@ export default class OpenCodePlugin extends Plugin {
       onEventSnapshot: (snapshot) => {
         this.runtimeDiagnostics.opencodeEvents = snapshot;
         this.scheduleEventStatusWrite();
-        if (snapshot.state === "disconnected" && this.getServiceState() === "attached") {
-          this.applyServiceStatus({
-            state: "unavailable",
-            reason: "OpenCode event stream ended",
-          });
+        const loss = describeEventLoss(snapshot);
+        if (loss && this.getServiceState() === "attached") {
+          this.applyServiceStatus({ state: "unavailable", reason: loss });
         }
       },
     });

@@ -209,6 +209,125 @@ describe("OpenCodeEventSource", () => {
 
     expect(source.getSnapshot().state).toBe("idle");
   });
+  test("reconnects to the service the plugin just attached to", async () => {
+    let connected = 0;
+    let previousClosed = false;
+    const previous = await listen(() => {
+      // Never responds, so the switch interrupts an in-flight request.
+    });
+    previous.on("connection", (socket) => {
+      connected += 1;
+      socket.on("close", () => {
+        previousClosed = true;
+      });
+    });
+
+    const requestedUrls: string[] = [];
+    const next = await listen((req, res) => {
+      requestedUrls.push(req.url ?? "");
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify(event("evt_next", "server.connected"))}\n\n`);
+    });
+
+    const snapshots: OpenCodeEventSourceSnapshot[] = [];
+    const source = new OpenCodeEventSource({
+      apiBaseUrl: previous.url,
+      projectDirectory: "/vault",
+      getCurrentSessionId: () => null,
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    });
+
+    source.start();
+    await waitFor(() => connected === 1);
+
+    source.updateConnection(next.url, "/vault");
+    source.start();
+
+    const snapshot = await waitForSnapshot(
+      snapshots,
+      (candidate) => candidate.state === "connected"
+    );
+    expect(snapshot.endpoint).toBe(buildEventEndpoint(next.url));
+    expect(requestedUrls).toEqual(["/api/event"]);
+    expect(source.getSnapshot().endpoint).toBe(buildEventEndpoint(next.url));
+
+    await waitFor(() => previousClosed);
+    expect(source.getSnapshot().state).toBe("connected");
+
+    source.stop();
+  });
+
+  test("keeps the new stream when the previous request tears down", async () => {
+    let connected = 0;
+    const previous = await listen(() => {
+      // Never responds: destroying this request emits ECONNRESET on it.
+    });
+    previous.on("connection", () => {
+      connected += 1;
+    });
+
+    const next = await listen((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify(event("evt_b1", "server.connected"))}\n\n`);
+      setTimeout(() => {
+        res.write(`data: ${JSON.stringify(event("evt_b2", "session.idle"))}\n\n`);
+      }, 120);
+    });
+
+    const snapshots: OpenCodeEventSourceSnapshot[] = [];
+    const source = new OpenCodeEventSource({
+      apiBaseUrl: previous.url,
+      projectDirectory: "/vault",
+      getCurrentSessionId: () => null,
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    });
+
+    source.start();
+    await waitFor(() => connected === 1);
+
+    source.updateConnection(next.url, "/vault");
+    source.start();
+
+    // The stale request errors within a few milliseconds of the switch; the
+    // second event only arrives later, so reaching it proves nothing stale
+    // cleared the slot or the snapshot.
+    const snapshot = await waitForSnapshot(snapshots, (candidate) => candidate.eventCount === 2);
+    expect(snapshot.state).toBe("connected");
+    expect(snapshot.endpoint).toBe(buildEventEndpoint(next.url));
+    expect(snapshots.some((candidate) => candidate.state === "failed")).toBe(false);
+
+    source.stop();
+  });
+
+  test("stays idle when a stopped request tears down", async () => {
+    let connected = 0;
+    let closed = false;
+    const server = await listen(() => {
+      // Never responds: stop() destroys the request mid-flight.
+    });
+    server.on("connection", (socket) => {
+      connected += 1;
+      socket.on("close", () => {
+        closed = true;
+      });
+    });
+
+    const snapshots: OpenCodeEventSourceSnapshot[] = [];
+    const source = new OpenCodeEventSource({
+      apiBaseUrl: server.url,
+      projectDirectory: "/vault",
+      getCurrentSessionId: () => null,
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    });
+
+    source.start();
+    await waitFor(() => connected === 1);
+    source.stop();
+    await waitFor(() => closed);
+
+    expect(source.getSnapshot().state).toBe("idle");
+    expect(snapshots.some((candidate) => candidate.state === "disconnected")).toBe(false);
+  });
 });
 
 async function listen(handler: http.RequestListener): Promise<http.Server & { url: string }> {
@@ -221,6 +340,21 @@ async function listen(handler: http.RequestListener): Promise<http.Server & { ur
   server.url = `http://127.0.0.1:${port}`;
   servers.push(server);
   return server;
+}
+
+function event(id: string, type: string): Record<string, unknown> {
+  return { id, type, data: {}, location: { directory: "/vault" } };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2000) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for condition");
 }
 
 async function waitForSnapshot(
