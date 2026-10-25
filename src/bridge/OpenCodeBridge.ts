@@ -1,4 +1,4 @@
-import type { ServerState } from "../server/ServerManager";
+import type { ServiceState } from "../server/types";
 import {
   OpenCodeEventSource,
   type OpenCodeEventSourceSnapshot,
@@ -31,8 +31,8 @@ export class OpenCodeBridge {
     this.eventSource.updateConnection(apiBaseUrl, projectDirectory);
   }
 
-  syncServerState(state: ServerState): void {
-    if (state === "running") {
+  syncServiceState(state: ServiceState): void {
+    if (state === "attached") {
       this.eventSource.start();
       return;
     }

@@ -1,6 +1,5 @@
 export type ViewLocation = "sidebar" | "main";
 export type WebViewAppearance = "opencode" | "obsidian";
-export type KeyboardBridgeShortcutOwner = "opencode" | "obsidian";
 
 export interface ContextAssistSettings {
   enabled: boolean;
@@ -16,74 +15,14 @@ export interface ContextAssistSettings {
   };
 }
 
-export interface KeyboardBridgeSettings {
-  conflictOwners: Record<string, KeyboardBridgeShortcutOwner>;
-}
-
 export interface WebViewTheme {
   colorScheme: "light" | "dark";
   variables: Record<string, string>;
 }
 
-export interface ServerEndpoint {
-  hostname: string;
-  port: number;
-  apiBaseUrl: string;
-  uiBaseUrl: string;
-  healthUrl: string;
-  encodedProjectDirectory: string;
-}
-
-export type ContextItemType = "manual" | "auto" | "inbound";
-export type ContextProvenanceStatus = "known" | "uncertain";
-export type ContextCandidateSourceKind =
-  | "workspace"
-  | "selection"
-  | "manual"
-  | "graph"
-  | "diagnostic"
-  | "opencode-native-comment";
+export type ContextCandidateSourceKind = "workspace" | "selection" | "manual";
 export type CandidateLifetime = "dynamic" | "one-shot";
 export type ContextCandidateStatus = "active" | "failed";
-
-export interface ContextCandidateFileSelection {
-  startLine: number;
-  startChar: number;
-  endLine: number;
-  endChar: number;
-}
-
-export interface OpenCodeNativeCommentCandidateSourceData {
-  kind: "opencode-native-comment";
-  key: string;
-  item: {
-    type: "file";
-    path: string;
-    selection?: ContextCandidateFileSelection;
-    comment: string;
-    commentID: string;
-    commentOrigin?: "review" | "file";
-    preview?: string;
-  };
-}
-
-export type ContextCandidateSourceData = OpenCodeNativeCommentCandidateSourceData;
-
-export interface ContextItem {
-  id: string;
-  type: ContextItemType;
-  label: string;
-  text: string;
-  sourceFile: string;
-  navigationSourceFile?: string;
-  startLine?: number;
-  endLine?: number;
-  messageId?: string;
-  partId?: string;
-  textLength?: number;
-  provenanceStatus?: ContextProvenanceStatus;
-  createdAt: number;
-}
 
 export interface ContextCandidate {
   id: string;
@@ -101,37 +40,22 @@ export interface ContextCandidate {
   lifetime: CandidateLifetime;
   status: ContextCandidateStatus;
   statusReason?: string;
-  sourceData?: ContextCandidateSourceData;
   createdAt: number;
   updatedAt: number;
 }
 
 export interface OpenCodeSettings {
-  port: number;
-  hostname: string;
-  autoStart: boolean;
-  opencodePath: string;
+  serviceName: string;
   projectDirectory: string;
-  startupTimeout: number;
   defaultViewLocation: ViewLocation;
   contextAssist: ContextAssistSettings;
-  customCommand: string;
-  useCustomCommand: boolean;
   webViewAppearance: WebViewAppearance;
-  keyboardBridge: KeyboardBridgeSettings;
   lastSessionUrl: string;
 }
 
-export const CUSTOM_COMMAND_EXAMPLE =
-  "opencode serve --hostname {hostname} --port {port} --cors {cors}";
-
 export const DEFAULT_SETTINGS: OpenCodeSettings = {
-  port: 14096,
-  hostname: "127.0.0.1",
-  autoStart: false,
-  opencodePath: "opencode",
+  serviceName: "auto",
   projectDirectory: "",
-  startupTimeout: 45000,
   defaultViewLocation: "sidebar",
   contextAssist: {
     enabled: true,
@@ -146,19 +70,14 @@ export const DEFAULT_SETTINGS: OpenCodeSettings = {
       maxCharsPerSnippet: 500,
     },
   },
-  customCommand: "",
-  useCustomCommand: false,
   webViewAppearance: "obsidian",
-  keyboardBridge: {
-    conflictOwners: {},
-  },
   lastSessionUrl: "",
 };
 
 export function normalizeOpenCodeSettings(
   data: Partial<OpenCodeSettings> | null
 ): OpenCodeSettings {
-  const loaded = stripLegacyVaultNavigationPrimaryClick(stripLegacyContextSourceSettings(data));
+  const loaded = stripRetiredSettings(data);
   const loadedContextAssist = (loaded.contextAssist ?? {}) as Partial<ContextAssistSettings>;
   const contextAssist: ContextAssistSettings = {
     ...DEFAULT_SETTINGS.contextAssist,
@@ -172,55 +91,29 @@ export function normalizeOpenCodeSettings(
       ...((loadedContextAssist.selection ?? {}) as Partial<ContextAssistSettings["selection"]>),
     },
   };
-  const loadedKeyboardBridge = (loaded.keyboardBridge ?? {}) as Partial<KeyboardBridgeSettings>;
-  const keyboardBridge: KeyboardBridgeSettings = {
-    ...DEFAULT_SETTINGS.keyboardBridge,
-    ...loadedKeyboardBridge,
-    conflictOwners: normalizeKeyboardBridgeConflictOwners(loadedKeyboardBridge.conflictOwners),
-  };
 
   return {
     ...DEFAULT_SETTINGS,
     ...loaded,
     contextAssist,
-    keyboardBridge,
   };
 }
 
-function stripLegacyVaultNavigationPrimaryClick(
-  data: Partial<OpenCodeSettings>
-): Partial<OpenCodeSettings> {
-  const { webUiVaultNavigationPrimaryClick: _legacy, ...rest } =
-    data as Partial<OpenCodeSettings> & {
-      webUiVaultNavigationPrimaryClick?: unknown;
-    };
-  return rest;
-}
-
-function normalizeKeyboardBridgeConflictOwners(
-  value: KeyboardBridgeSettings["conflictOwners"] | undefined
-): KeyboardBridgeSettings["conflictOwners"] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  const normalized: KeyboardBridgeSettings["conflictOwners"] = {};
-  for (const [signature, owner] of Object.entries(value)) {
-    if (owner === "opencode" || owner === "obsidian") {
-      normalized[signature] = owner;
-    }
-  }
-  return normalized;
-}
-
-function stripLegacyContextSourceSettings(
-  data: Partial<OpenCodeSettings> | null
-): Partial<OpenCodeSettings> {
+function stripRetiredSettings(data: Partial<OpenCodeSettings> | null): Partial<OpenCodeSettings> {
   if (!data) {
     return {};
   }
 
   const {
+    port: _port,
+    hostname: _hostname,
+    autoStart: _autoStart,
+    opencodePath: _opencodePath,
+    startupTimeout: _startupTimeout,
+    customCommand: _customCommand,
+    useCustomCommand: _useCustomCommand,
+    keyboardBridge: _keyboardBridge,
+    webUiVaultNavigationPrimaryClick: _legacyPrimaryClick,
     contextCommitMode: _contextCommitMode,
     candidateSources: _candidateSources,
     maxNotesInContext: _maxNotesInContext,
@@ -230,47 +123,9 @@ function stripLegacyContextSourceSettings(
     autoAddBacklinksContext: _autoAddBacklinksContext,
     autoAddCursorContext: _autoAddCursorContext,
     ...settings
-  } = data as Partial<OpenCodeSettings> & {
-    contextCommitMode?: unknown;
-    candidateSources?: unknown;
-    maxNotesInContext?: unknown;
-    maxSelectionLength?: unknown;
-    injectWorkspaceContext?: unknown;
-    autoAddSelectionContext?: unknown;
-    autoAddBacklinksContext?: unknown;
-    autoAddCursorContext?: unknown;
-  };
+  } = data as Record<string, unknown>;
 
-  return settings;
+  return settings as Partial<OpenCodeSettings>;
 }
 
 export const OPENCODE_VIEW_TYPE = "opencode-view";
-
-export function getExplicitCustomCommand(
-  settings: Pick<OpenCodeSettings, "customCommand">
-): string {
-  return settings.customCommand.trim();
-}
-
-export function usesExplicitCustomCommand(
-  settings: Pick<OpenCodeSettings, "customCommand" | "useCustomCommand">
-): boolean {
-  return settings.useCustomCommand && getExplicitCustomCommand(settings).length > 0;
-}
-
-export function createServerEndpoint(
-  settings: Pick<OpenCodeSettings, "hostname" | "port">,
-  projectDirectory: string
-): ServerEndpoint {
-  const encodedProjectDirectory = Buffer.from(projectDirectory).toString("base64");
-  const apiBaseUrl = `http://${settings.hostname}:${settings.port}`;
-
-  return {
-    hostname: settings.hostname,
-    port: settings.port,
-    apiBaseUrl,
-    uiBaseUrl: `${apiBaseUrl}/${encodedProjectDirectory}`,
-    healthUrl: `${apiBaseUrl}/global/health`,
-    encodedProjectDirectory,
-  };
-}

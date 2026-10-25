@@ -4,7 +4,6 @@ import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import { getRuntimePaths } from "../src/debug/RuntimeDiagnostics";
 import { buildBridgeReport, summarizeBridgeReport } from "./harness/bridgeReport";
-import { probeHealth } from "./harness/healthProbe";
 import { defaultDevtoolsListUrl, reloadObsidianPlugin } from "./harness/obsidianReload";
 import {
   CheckResult,
@@ -25,7 +24,6 @@ import {
 import {
   summarizeLogEvents,
   summarizeLogLine,
-  summarizeEnvironmentDiagnostics,
   summarizeRuntimeStatus,
   summarizeSettings,
 } from "./harness/runtimeSummary";
@@ -274,10 +272,6 @@ async function status(args: Args): Promise<void> {
     },
   };
 
-  if (runtimeStatus?.healthUrl && result.runtime.status) {
-    result.runtime.status.healthProbe = await probeHealth(runtimeStatus.healthUrl);
-  }
-
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -311,10 +305,9 @@ async function reload(args: Args): Promise<void> {
     devtoolsListUrl: defaultDevtoolsListUrl(args.cdpPort),
     settleMs: args.reloadSettleMs,
     openView: args.reloadOpenView,
-    restartServer: args.reloadRestartServer,
+    reattachService: args.reloadRestartServer,
   });
   const runtimeStatus = readJson(getRuntimePaths().statusFile);
-  const healthProbe = runtimeStatus?.healthUrl ? await probeHealth(runtimeStatus.healthUrl) : null;
 
   console.log(
     JSON.stringify(
@@ -322,7 +315,6 @@ async function reload(args: Args): Promise<void> {
         ...report,
         runtime: {
           status: runtimeStatus ? summarizeRuntimeStatus(runtimeStatus) : null,
-          healthProbe,
         },
       },
       null,
@@ -330,7 +322,7 @@ async function reload(args: Args): Promise<void> {
     )
   );
 
-  if (!report.ok || healthProbe?.healthy === false) {
+  if (!report.ok || runtimeStatus?.serviceState === "unavailable") {
     process.exitCode = 1;
   }
 }
@@ -368,17 +360,6 @@ async function doctor(args: Args): Promise<void> {
     });
   }
 
-  const opencode = spawnSync("opencode", ["--version"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
-  checks.push({
-    name: "opencode --version",
-    ok: opencode.status === 0,
-    detail:
-      opencode.status === 0 ? opencode.stdout.trim() : (opencode.stderr || opencode.stdout).trim(),
-  });
-
   const bridgeReport = buildBridgeReport({ repoRoot, opencodeSource: args.opencode });
   checks.push({
     name: "bridge contracts",
@@ -388,34 +369,16 @@ async function doctor(args: Args): Promise<void> {
 
   const runtimeStatus = readJson(getRuntimePaths().statusFile);
   checks.push({
-    name: "runtime process environment diagnostics",
-    ok: Boolean(runtimeStatus?.processEnvironment),
-    detail: runtimeStatus?.processEnvironment
+    name: "opencode service attach",
+    ok: runtimeStatus?.serviceState === "attached" && Boolean(runtimeStatus?.service),
+    detail: runtimeStatus
       ? {
-          process: summarizeEnvironmentDiagnostics(runtimeStatus.processEnvironment),
-          spawn: summarizeEnvironmentDiagnostics(runtimeStatus.lastSpawnEnvironment),
-          mode: runtimeStatus.lastStartMode ?? null,
-          usesShell: runtimeStatus.lastUsesShell ?? null,
-          command: runtimeStatus.lastDisplayCommand ?? runtimeStatus.lastCommand ?? null,
-          resolvedExecutable: runtimeStatus.lastResolvedExecutable ?? null,
+          serviceState: runtimeStatus.serviceState ?? null,
+          service: runtimeStatus.service ?? null,
+          serviceError: runtimeStatus.serviceError ?? null,
         }
-      : "status.json has no processEnvironment yet; reload the plugin with a current bundle",
+      : "status.json missing; start Obsidian/plugin first",
   });
-
-  if (runtimeStatus?.healthUrl) {
-    const healthProbe = await probeHealth(runtimeStatus.healthUrl);
-    checks.push({
-      name: "runtime health",
-      ok: Boolean(healthProbe.healthy),
-      detail: healthProbe,
-    });
-  } else {
-    checks.push({
-      name: "runtime health",
-      ok: false,
-      detail: "status.json has no healthUrl yet; start Obsidian/plugin first",
-    });
-  }
 
   if (runtimeStatus?.proxyUrl) {
     const themeReport = await buildThemeReport({
@@ -447,8 +410,7 @@ async function doctor(args: Args): Promise<void> {
 }
 
 // Bridge checks use local contract files as the gold standard:
-// - OpenCode HTTP: packages/sdk/openapi.json
-// - OpenCode hooks: packages/plugin/src/index.ts
+// - OpenCode HTTP: packages/protocol/openapi.json
 // - Obsidian events: node_modules/obsidian/obsidian.d.ts
 // The referenceUrl fields below are only breadcrumbs for maintainers; harness never fetches them.
 function bridge(args: Args): void {

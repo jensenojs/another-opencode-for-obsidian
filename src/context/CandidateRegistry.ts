@@ -335,10 +335,7 @@ export class CandidateRegistry {
 }
 
 function copyCandidate(candidate: ContextCandidate): ContextCandidate {
-  return {
-    ...candidate,
-    sourceData: candidate.sourceData ? JSON.parse(JSON.stringify(candidate.sourceData)) : undefined,
-  };
+  return { ...candidate };
 }
 
 function replaceAt<T>(items: T[], index: number, item: T): T[] {
@@ -404,7 +401,6 @@ function matchesSourceSnapshot(a: ContextCandidate, b: ContextCandidate): boolea
     a.startLine === b.startLine &&
     a.endLine === b.endLine &&
     a.status === b.status &&
-    a.statusReason === b.statusReason &&
-    JSON.stringify(a.sourceData ?? null) === JSON.stringify(b.sourceData ?? null)
+    a.statusReason === b.statusReason
   );
 }

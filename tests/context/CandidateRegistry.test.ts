@@ -107,10 +107,15 @@ describe("CandidateRegistry", () => {
       makeCandidate({ id: "selection", sourceId: "selection", identityKey: "active" })
     );
     registry.upsert(
-      makeCandidate({ id: "graph", sourceId: "graph", sourceKind: "graph", identityKey: "active" })
+      makeCandidate({ id: "graph", sourceId: "graph", sourceKind: "manual", identityKey: "active" })
     );
     registry.upsert(
-      makeCandidate({ id: "graph-2", sourceId: "graph", sourceKind: "graph", identityKey: "other" })
+      makeCandidate({
+        id: "graph-2",
+        sourceId: "graph",
+        sourceKind: "manual",
+        identityKey: "other",
+      })
     );
 
     const removedSelection = registry.removeByIdentity("selection", "active");
@@ -138,38 +143,6 @@ describe("CandidateRegistry", () => {
     expect(failed[0].statusReason).toBe("OpenCode rejected context");
     expect(failed[0].included).toBe(true);
     expect(registry.snapshotIncluded()[0].status).toBe("failed");
-  });
-
-  test("preserves native comment sourceData across equivalent source updates", () => {
-    const registry = new CandidateRegistry();
-    const candidate = makeCandidate({
-      id: "comment",
-      sourceId: "opencode-native-comment",
-      sourceKind: "opencode-native-comment",
-      identityKey: "opencode-comment:/repo/a.ts:c1",
-      sourceData: {
-        kind: "opencode-native-comment",
-        key: "file:/repo/a.ts:1:1:c=c1",
-        item: {
-          type: "file",
-          path: "/repo/a.ts",
-          selection: { startLine: 1, startChar: 0, endLine: 1, endChar: 0 },
-          comment: "check this",
-          commentID: "c1",
-          commentOrigin: "review",
-        },
-      },
-    });
-
-    registry.upsert(candidate);
-    registry.setIncluded("comment", false);
-    registry.upsert(makeCandidate({ ...candidate, id: "comment-recreated" }));
-
-    expect(registry.getCandidates()[0]).toMatchObject({
-      id: "comment",
-      included: false,
-      sourceData: candidate.sourceData,
-    });
   });
 
   test("enforces bounded source queues with FIFO eviction", () => {

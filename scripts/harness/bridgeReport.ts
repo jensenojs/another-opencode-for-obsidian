@@ -42,14 +42,12 @@ export interface BridgeReport {
   };
   sources: {
     openapi: SourceReport;
-    opencodeHooks: SourceReport;
     obsidianTypes: SourceReport;
     localBridgeProtocol: SourceReport;
   };
   opencode: {
     apiOperations: number;
     apiUses: ApiUseReport[];
-    hooks: HookReport;
   };
   obsidian: {
     workspaceEvents: WorkspaceEventReport[];
@@ -76,13 +74,6 @@ export interface ApiUseReport extends LocalApiUse {
   bodyNotAllowed: boolean;
 }
 
-interface HookReport {
-  ok: boolean;
-  source: SourceReport;
-  names: string[];
-  error: string | null;
-}
-
 interface WorkspaceEventReport {
   source: string;
   line: number;
@@ -96,21 +87,26 @@ export interface BridgeReportOptions {
 }
 
 const httpMethods = new Set<HttpMethod>(["get", "post", "patch", "put", "delete"]);
+const opencodeOpenApiRelativePaths = [
+  join("packages", "protocol", "openapi.json"),
+  join("packages", "sdk", "openapi.json"),
+];
 const opencodeOpenApiReferenceUrl =
-  "https://github.com/sst/opencode/blob/dev/packages/sdk/openapi.json";
-const opencodeHooksReferenceUrl =
-  "https://github.com/sst/opencode/blob/dev/packages/plugin/src/index.ts";
+  "https://github.com/sst/opencode/blob/dev/packages/protocol/openapi.json";
 const obsidianTypesReferenceUrl =
   "https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts";
 
+function resolveOpenApiPath(opencodeSource: string): string {
+  const candidates = opencodeOpenApiRelativePaths.map((relative) => join(opencodeSource, relative));
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
 export function buildBridgeReport(options: BridgeReportOptions): BridgeReport {
-  const openapiPath = join(options.opencodeSource, "packages", "sdk", "openapi.json");
-  const hooksPath = join(options.opencodeSource, "packages", "plugin", "src", "index.ts");
+  const openapiPath = resolveOpenApiPath(options.opencodeSource);
   const obsidianTypesPath = join(options.repoRoot, "node_modules", "obsidian", "obsidian.d.ts");
   const localBridgeProtocolPath = join(options.repoRoot, "src", "bridge", "BridgeProtocol.ts");
 
   const openapiSource = sourceReport(openapiPath, opencodeOpenApiReferenceUrl);
-  const hooksSource = sourceReport(hooksPath, opencodeHooksReferenceUrl);
   const obsidianTypesSource = sourceReport(obsidianTypesPath, obsidianTypesReferenceUrl);
   const localBridgeProtocolSource = sourceReport(
     localBridgeProtocolPath,
@@ -122,7 +118,6 @@ export function buildBridgeReport(options: BridgeReportOptions): BridgeReport {
   const apiUses = extractOpenCodeApiUses(options.repoRoot).map((use) =>
     checkApiUse(use, operations, openapi)
   );
-  const hooks = extractOpenCodeHooks(hooksPath, hooksSource);
   const declaredWorkspaceEvents = extractObsidianWorkspaceEvents(obsidianTypesPath);
   const workspaceEvents = extractLocalWorkspaceEvents(options.repoRoot).map((event) => ({
     ...event,
@@ -131,7 +126,6 @@ export function buildBridgeReport(options: BridgeReportOptions): BridgeReport {
 
   const ok =
     openapiSource.exists &&
-    hooks.ok &&
     obsidianTypesSource.exists &&
     localBridgeProtocolSource.exists &&
     apiUses.every((use) => use.ok) &&
@@ -156,14 +150,12 @@ export function buildBridgeReport(options: BridgeReportOptions): BridgeReport {
     },
     sources: {
       openapi: openapiSource,
-      opencodeHooks: hooksSource,
       obsidianTypes: obsidianTypesSource,
       localBridgeProtocol: localBridgeProtocolSource,
     },
     opencode: {
       apiOperations: operations.length,
       apiUses,
-      hooks,
     },
     obsidian: {
       workspaceEvents,
@@ -182,12 +174,6 @@ export function summarizeBridgeReport(report: BridgeReport): unknown {
     opencodeApiUses: {
       total: report.opencode.apiUses.length,
       failed: report.opencode.apiUses.filter((use) => !use.ok),
-    },
-    opencodeHooks: {
-      ok: report.opencode.hooks.ok,
-      count: report.opencode.hooks.names.length,
-      error: report.opencode.hooks.error,
-      source: report.opencode.hooks.source,
     },
     obsidianWorkspaceEvents: {
       total: report.obsidian.workspaceEvents.length,
@@ -236,10 +222,7 @@ export function collectOpenApiOperations(openapi: any): OpenApiOperation[] {
 }
 
 function extractOpenCodeApiUses(repoRoot: string): LocalApiUse[] {
-  return [
-    ...extractRequestCalls(join(repoRoot, "src", "client", "OpenCodeClient.ts"), repoRoot),
-    ...extractHealthUrlUse(join(repoRoot, "src", "types.ts"), repoRoot),
-  ];
+  return extractRequestCalls(join(repoRoot, "src", "client", "OpenCodeClient.ts"), repoRoot);
 }
 
 function extractRequestCalls(filePath: string, repoRoot: string): LocalApiUse[] {
@@ -263,36 +246,6 @@ function extractRequestCalls(filePath: string, repoRoot: string): LocalApiUse[] 
           path: toOpenApiPath(rawPath),
           queryParams: extractQueryParams(rawPath),
           body: node.arguments[2] ? extractObjectBody(node.arguments[2]) : null,
-        });
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-
-  visit(source);
-  return uses;
-}
-
-function extractHealthUrlUse(filePath: string, repoRoot: string): LocalApiUse[] {
-  const source = readSourceFile(filePath);
-  if (!source) {
-    return [];
-  }
-
-  const uses: LocalApiUse[] = [];
-
-  const visit = (node: ts.Node): void => {
-    if (ts.isPropertyAssignment(node) && propertyNameText(node.name) === "healthUrl") {
-      const rawPath = expressionToTemplatePattern(node.initializer);
-      if (rawPath) {
-        uses.push({
-          source: sourceRelativePath(filePath, repoRoot),
-          line: lineNumber(source, node),
-          method: "get",
-          rawPath,
-          path: toOpenApiPath(rawPath),
-          queryParams: extractQueryParams(rawPath),
-          body: null,
         });
       }
     }
@@ -492,42 +445,6 @@ function resolveRef(ref: string, openapi: any): any {
     .slice(2)
     .split("/")
     .reduce((value, key) => value?.[key], openapi);
-}
-
-function extractOpenCodeHooks(filePath: string, source: SourceReport): HookReport {
-  const sourceFile = readSourceFile(filePath);
-  if (!sourceFile) {
-    return {
-      ok: false,
-      source,
-      names: [],
-      error: "Hook source file is missing or unreadable",
-    };
-  }
-
-  const hooks: string[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isInterfaceDeclaration(node) && node.name.text === "Hooks") {
-      for (const member of node.members) {
-        if (ts.isPropertySignature(member)) {
-          const name = propertyNameText(member.name);
-          if (name) {
-            hooks.push(name);
-          }
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-
-  visit(sourceFile);
-
-  return {
-    ok: hooks.length > 0,
-    source,
-    names: hooks,
-    error: hooks.length > 0 ? null : "Interface Hooks was not found or had no members",
-  };
 }
 
 function extractObsidianWorkspaceEvents(filePath: string): string[] {

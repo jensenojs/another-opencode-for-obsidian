@@ -1,5 +1,7 @@
 # oc-ctx prompt-coupled behavior design
 
+> Superseded by [v2-attach-spec.md](v2-attach-spec.md)。本文记录 0.6.0 之前的 prompt-coupled 设计；现在的上下文载体是 prompt 的 `files` 附件。
+
 日期：2026-06-17
 
 ## 本文档地位

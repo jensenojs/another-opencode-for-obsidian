@@ -1,3 +1,6 @@
+> 2026-10-25 更新：本文评估的「iframe 内注入上下文面板」方案没有落地。0.6.0 实际注入的内容只有两类：OpenCode Web UI DOM 里的 vault 文件点击（转成本地 `vault-file:open` 消息）与 proxy 就绪通知；本地 postMessage 一共 4 条消息。
+> 上下文不再写进 opencode 消息，而是作为 prompt 请求的 `files` 附件。下文的可行性分析与伪代码保留为当时的调研记录。
+
 # OpenCode Web UI 增强与扩展可行性分析
 
 ## 概述
@@ -184,9 +187,11 @@ async function getContextMessages(sessionId) {
 | **外部方案：Obsidian 侧独立面板** | 高 | 高 | 中 | 不在 iframe 内做任何事，在 Obsidian 侧通过 Node.js `http.request`（已有 OpenCodeClient）展示上下文面板 |
 | **使用 opencode SDK** | 最高 | 高 | 低 | opencode 没有浏览器端 SDK，只有 Node.js SDK。不适合 |
 
-### D. 最优路径建议
+### D. 当时的路径建议（未采用）
 
-**推荐：混合方案 B — 注入脚本在 iframe 内追加上下文面板 + 同源 fetch 获取数据**
+**当时推荐：混合方案 B — 注入脚本在 iframe 内追加上下文面板 + 同源 fetch 获取数据**
+
+实际实现没有走这条：注入脚本只做 vault 文件点击与 proxy 就绪通知，没有面板、没有轮询、没有自行 fetch。下面的策略与伪代码保留为调研记录，不要按它实现。
 
 理由：
 1. **openCode Web UI 已经有 Context 标签页**，但它显示的是 token 指标而非「AI 收到的 Obsidian 上下文内容」。我们可以在这个基础上**追加一个自定义的上下文预览面板**，或增强现有的 Context 标签页。
@@ -352,7 +357,6 @@ Obsidian 侧                       iframe 内（opencode Web UI）
 
 1. **opencode Web UI 使用 Solid.js 构建**，DOM 结构完全动态生成，没有稳定的锚点。
 2. **已存在的 Context 标签页**显示 token 指标而非上下文内容，但我们需要的「AI 收到了什么 Obsidian 上下文」仍有空白。
-3. **注入脚本 + 同源 fetch 是最优方案**：不依赖 opencode DOM 结构，只依赖稳定的 HTTP API。
-4. **社区无人做注入增强**——都在做替代 UI。我们的代理注入方案是差异化路径。
-5. **Shadow DOM 隔离样式**可以避免注入 UI 与 opencode 自身样式冲突。
-6. **fetch 同源请求**无需认证（代理使 iframe 与 opencode 同源），除非启用了 `OPENCODE_SERVER_PASSWORD`。
+3. **注入脚本 + 同源 fetch 在当时看是最优方案**，理由是只依赖 HTTP API、不依赖 DOM 锚点。它没有被采用：上游 JS asset 的内部锚点在 2.1.3 已消失，注入脚本改成只做 vault 文件点击与 proxy 就绪通知两类事。
+4. **社区无人做注入增强**——都在做替代 UI。本插件走的是 iframe 嵌入 + 有限注入。
+5. **认证**：代理给转发请求补 `Authorization`，iframe 内不需要自己带密码；`OPENCODE_SERVER_PASSWORD` 不再是插件关心的事，密码来自 state 文件。

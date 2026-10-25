@@ -1,35 +1,43 @@
 # Source Owner Map
 
-This source tree is a bridge between two local gold standards:
+两边的金标准都是本机可读的实体：
 
-- Obsidian public plugin API from `node_modules/obsidian/obsidian.d.ts`.
-- OpenCode local package exports, SDK output, server source, and Web UI source from the configured local checkout.
+- Obsidian public plugin API：`node_modules/obsidian/obsidian.d.ts`
+- OpenCode HTTP 契约：`<checkout>/packages/protocol/openapi.json`
+- OpenCode Web UI source：`<checkout>/packages/app/src/**`（只在 `bridge/` 的注入脚本里消费）
 
-Owner map:
+Owner map：
 
-- `context/` owns Obsidian facts: workspace/editor events, vault files, metadata/link resolution, candidate lifecycle, and safe navigation.
-- `bridge/` owns the Obsidian <-> OpenCode boundary: OpenCode Web UI proxy transport, HTML injection, iframe hooks, local iframe messages, OpenCode server event diagnostics, theme injection, and future Web UI prompt-context adapter execution.
-- `client/` owns OpenCode server HTTP calls from the Obsidian plugin main process.
-- `ui/` owns Obsidian ItemView rendering and user-facing Obsidian plugin controls.
-- `graph/` owns Obsidian metadata facts prepared for navigation and future GraphRAG derivation.
+- `server/` 拥有服务发现与 attach（`ServiceDiscovery.ts`）以及 `ServiceState` / `ServiceStatus`。
+- `client/` 拥有对 OpenCode `/api/*` 的 HTTP 调用和 `/api/event` SSE 连接。
+- `context/` 拥有 Obsidian facts：workspace/editor 事件、候选生命周期、prompt 附件构造、安全导航。
+- `bridge/` 拥有执行边界：本地代理、HTML 注入、iframe 内 hook、本地 message、事件诊断、外观注入。
+- `ui/` 拥有 ItemView 渲染和用户可见控件。
+- `graph/` 拥有 vault 元数据事实层，供导航和后续派生使用。
 
-Cross-product hooks should have a visible owner before code is added:
+数据流：
 
 ```text
-Obsidian event/source
-  -> context source / candidate
-  -> OpenCode Web UI adapter
-  -> bridge-injected iframe hook or future live bridge
-  -> OpenCode native UI
-
-OpenCode iframe action
-  -> bridge local message
-  -> Obsidian main thread validation
-  -> context navigator or diagnostics
-
-OpenCode server event
-  -> OpenCodeBridge
-  -> runtime diagnostics
+~/.local/state/opencode/service*.json
+  -> server/ServiceDiscovery        (GET /api/info 验活)
+  -> ServiceHandle{name,url,password,version,pid}
+    -> client/OpenCodeClient        (/api/session*)
+    -> client/OpenCodeEventSource   (/api/event)
+    -> bridge/OpenCodeWebUiProxy    (Web UI + auth 透传)
+  -> main.ts 装配与状态
 ```
 
-If an OpenCode capability is a public package export or SDK endpoint, consume that surface. If it exists only inside OpenCode Web UI source, express it through a small adapter type in `bridge/` and keep the internal shape there.
+```text
+Obsidian workspace/selection facts
+  -> context source driver
+  -> CandidateRegistry
+  -> PromptContextInjector -> prompt body files
+```
+
+```text
+OpenCode iframe action
+  -> BridgeInjection -> BridgeProtocol message
+  -> main.ts 校验 -> ContextItemNavigator / ViewManager / theme sync / diagnostics
+```
+
+OpenCode 的 public package export 或 OpenAPI 端点可以直接消费。只存在于 Web UI 内部的能力必须收敛在 `bridge/` 的一个执行点里；不要把它扩散进 `context/`、`ui/` 或 `main.ts`。

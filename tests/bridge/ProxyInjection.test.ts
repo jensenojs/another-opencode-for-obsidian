@@ -114,21 +114,6 @@ function dispatchMouse(
   );
 }
 
-function dispatchKeyboard(
-  window: Window,
-  target: EventTarget,
-  options: KeyboardEventInit & { key: string }
-): boolean {
-  return target.dispatchEvent(
-    new window.KeyboardEvent("keydown", {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      ...options,
-    } as any) as unknown as Event
-  );
-}
-
 function clickTextOffset(window: Window, text: Text, offset: number): void {
   const ownerDocument = text.ownerDocument as Document & {
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -194,8 +179,6 @@ describe("ProxyInjection", () => {
 
     expect(body).toContain(BRIDGE_NAMESPACE);
     expect(body).toContain(BRIDGE_MESSAGES.proxyLoaded);
-    expect(body).toContain(BRIDGE_MESSAGES.keyboardPolicyUpdate);
-    expect(body).toContain(BRIDGE_MESSAGES.keyboardDispatch);
     expect(body).toContain(BRIDGE_MESSAGES.vaultFileOpen);
     expect(body).toContain("vaultFileClickRules");
     expect(body).toContain('data-slot="apply-patch-filename"');
@@ -208,90 +191,6 @@ describe("ProxyInjection", () => {
     expect(body).toContain("lineNumberFromPath");
     expect(body).not.toContain("data-another-opencode-for-obsidian-appearance");
     expect(body).not.toContain("data-another-opencode-for-obsidian-theme");
-  });
-
-  test("dispatches an Obsidian keyboard command only when policy owns the signature", () => {
-    const { document, messages, window } = runInjectedBridge(`<main id="target"></main>`);
-
-    window.dispatchEvent(
-      new window.MessageEvent("message", {
-        data: {
-          ns: BRIDGE_NAMESPACE,
-          version: 1,
-          type: BRIDGE_MESSAGES.keyboardPolicyUpdate,
-          payload: {
-            revision: 1,
-            entries: [
-              {
-                signature: "meta+l",
-                display: "⌘L",
-                owner: "obsidian",
-                commandId: "another-opencode-for-obsidian:toggle-opencode-view",
-                reason: "bridge-owned",
-              },
-            ],
-          },
-        },
-      })
-    );
-
-    const defaultWasNotPrevented = dispatchKeyboard(window, document.getElementById("target")!, {
-      key: "l",
-      metaKey: true,
-    });
-
-    expect(defaultWasNotPrevented).toBe(false);
-    expect(lastMessage(messages)).toEqual({
-      ns: BRIDGE_NAMESPACE,
-      version: 1,
-      type: BRIDGE_MESSAGES.keyboardDispatch,
-      payload: {
-        signature: "meta+l",
-        commandId: "another-opencode-for-obsidian:toggle-opencode-view",
-        display: "⌘L",
-      },
-    });
-  });
-
-  test("leaves Ctrl+L to OpenCode when policy only owns Cmd+L", () => {
-    const { document, messages, window } = runInjectedBridge(`<main id="target"></main>`);
-
-    window.dispatchEvent(
-      new window.MessageEvent("message", {
-        data: {
-          ns: BRIDGE_NAMESPACE,
-          version: 1,
-          type: BRIDGE_MESSAGES.keyboardPolicyUpdate,
-          payload: {
-            revision: 1,
-            entries: [
-              {
-                signature: "meta+l",
-                display: "⌘L",
-                owner: "obsidian",
-                commandId: "another-opencode-for-obsidian:toggle-opencode-view",
-                reason: "bridge-owned",
-              },
-            ],
-          },
-        },
-      })
-    );
-
-    const defaultWasNotPrevented = dispatchKeyboard(window, document.getElementById("target")!, {
-      key: "l",
-      ctrlKey: true,
-    });
-
-    expect(defaultWasNotPrevented).toBe(true);
-    expect(messages).toEqual([
-      {
-        ns: BRIDGE_NAMESPACE,
-        version: 1,
-        type: BRIDGE_MESSAGES.proxyLoaded,
-        payload: undefined,
-      },
-    ]);
   });
 
   test("leaves session review accordion trigger clicks to OpenCode", () => {

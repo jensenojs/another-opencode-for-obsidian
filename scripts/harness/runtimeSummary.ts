@@ -1,5 +1,3 @@
-import { getExplicitCustomCommand, usesExplicitCustomCommand } from "../../src/types";
-
 export type LogEntry = {
   time: string | null;
   level: string | null;
@@ -9,24 +7,11 @@ export type LogEntry = {
 };
 
 export function summarizeSettings(data: any): unknown {
-  const customCommand = String(data.customCommand ?? "");
-  const useCustomCommand = Boolean(data.useCustomCommand);
-
   return {
-    port: data.port,
-    hostname: data.hostname,
-    autoStart: data.autoStart,
-    useCustomCommand,
-    customCommand,
-    explicitCustomCommand: getExplicitCustomCommand({ customCommand }) || null,
-    effectiveStartMode: usesExplicitCustomCommand({
-      customCommand,
-      useCustomCommand,
-    })
-      ? "custom"
-      : "path",
-    webViewAppearance: data.webViewAppearance,
+    serviceName: data.serviceName ?? null,
     projectDirectory: data.projectDirectory,
+    defaultViewLocation: data.defaultViewLocation,
+    webViewAppearance: data.webViewAppearance,
     contextAssist: {
       enabled: data.contextAssist?.enabled ?? null,
       workspace: {
@@ -40,7 +25,6 @@ export function summarizeSettings(data: any): unknown {
         maxCharsPerSnippet: data.contextAssist?.selection?.maxCharsPerSnippet ?? null,
       },
     },
-    startupTimeout: data.startupTimeout,
     lastSessionUrl: data.lastSessionUrl,
   };
 }
@@ -48,34 +32,7 @@ export function summarizeSettings(data: any): unknown {
 export function summarizeRuntimeStatus(status: any): any {
   return {
     ...status,
-    processEnvironment: summarizeEnvironmentDiagnostics(status.processEnvironment),
-    lastSpawnEnvironment: summarizeEnvironmentDiagnostics(status.lastSpawnEnvironment),
-    lastStdout: summarizeLogValue(status.lastStdout, 0),
-    lastStderr: summarizeLogValue(status.lastStderr, 0),
-    lastProcessErrorStack: summarizeLogValue(status.lastProcessErrorStack, 0),
     runtimeDiagnostics: summarizeLogValue(status.runtimeDiagnostics, 0),
-  };
-}
-
-export function summarizeEnvironmentDiagnostics(environment: any): unknown {
-  if (!environment || typeof environment !== "object") {
-    return null;
-  }
-
-  const envKeys = Array.isArray(environment.envKeys) ? environment.envKeys : [];
-  const secretLikeEnvKeys = Array.isArray(environment.secretLikeEnvKeys)
-    ? environment.secretLikeEnvKeys
-    : [];
-
-  return {
-    platform: environment.platform ?? null,
-    pathKey: environment.pathKey ?? null,
-    path: environment.path ?? null,
-    pathEntries: Array.isArray(environment.pathEntries) ? environment.pathEntries : [],
-    shell: environment.shell ?? null,
-    envKeyCount: envKeys.length,
-    envKeySample: envKeys.slice(0, 12),
-    secretLikeEnvKeys,
   };
 }
 
@@ -138,18 +95,6 @@ export function summarizeLogEvents(lines: string[]): unknown {
     lastProblem: summarizeLast(
       entries,
       (entry) => entry.level === "error" || entry.level === "warn"
-    ),
-    lastServerStart: summarizeLast(
-      entries,
-      (entry) => entry.component === "server" && entry.message === "starting server"
-    ),
-    lastServerExit: summarizeLast(
-      entries,
-      (entry) => entry.component === "server" && entry.message === "process exited"
-    ),
-    lastStderr: summarizeLast(
-      entries,
-      (entry) => entry.component === "server" && entry.message === "process stderr"
     ),
     lastThemeDiagnostics: summarizeLast(
       entries,

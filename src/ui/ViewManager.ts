@@ -4,7 +4,7 @@ import { OpenCodeView } from "./OpenCodeView";
 import { OpenCodeClient } from "../client/OpenCodeClient";
 import { ContextManager } from "../context/ContextManager";
 import { CurrentContextSession } from "../context/ContextSessionResolver";
-import type { ServerState } from "../server/types";
+import type { ServiceState } from "../server/types";
 
 type ViewManagerDeps = {
   app: App;
@@ -12,8 +12,7 @@ type ViewManagerDeps = {
   client: OpenCodeClient;
   contextManager: ContextManager;
   currentSession: CurrentContextSession;
-  getServerState: () => ServerState;
-  startServer: () => void;
+  getServiceState: () => ServiceState;
 };
 
 export class ViewManager {
@@ -22,8 +21,7 @@ export class ViewManager {
   private client: OpenCodeClient;
   private contextManager: ContextManager;
   private currentSession: CurrentContextSession;
-  private getServerState: () => ServerState;
-  private startServer: () => void;
+  private getServiceState: () => ServiceState;
   private previousEditorLeaf: WorkspaceLeaf | null = null;
 
   constructor(deps: ViewManagerDeps) {
@@ -32,8 +30,7 @@ export class ViewManager {
     this.client = deps.client;
     this.contextManager = deps.contextManager;
     this.currentSession = deps.currentSession;
-    this.getServerState = deps.getServerState;
-    this.startServer = deps.startServer;
+    this.getServiceState = deps.getServiceState;
   }
 
   updateSettings(settings: OpenCodeSettings): void {
@@ -91,7 +88,6 @@ export class ViewManager {
     if (options.activate) {
       this.app.workspace.setActiveLeaf(leaf, { focus: true });
     }
-    this.startServerForUserActivation();
     if (options.focusIframe) {
       this.focusIframe(leaf);
     }
@@ -152,12 +148,6 @@ export class ViewManager {
     }
 
     await this.openLeafAt(this.settings.defaultViewLocation, { activate: false });
-  }
-
-  private startServerForUserActivation(): void {
-    if (this.getServerState() === "stopped") {
-      this.startServer();
-    }
   }
 
   async toggleView(): Promise<void> {
@@ -221,7 +211,7 @@ export class ViewManager {
   }
 
   async ensureSessionUrl(view: OpenCodeView): Promise<void> {
-    if (this.getServerState() !== "running") {
+    if (this.getServiceState() !== "attached") {
       return;
     }
 
@@ -230,16 +220,13 @@ export class ViewManager {
       const latestSessionUrl = this.client.getSessionUrl(latestSessionId);
       this.currentSession.rememberSessionUrl(latestSessionUrl);
       view.setIframeUrl(latestSessionUrl);
-      await this.contextManager.restoreFromServer(latestSessionId);
       if (this.app.workspace.activeLeaf === view.leaf) {
         await this.contextManager.refreshVisibleOpenCodeContext();
       }
       return;
     }
 
-    const currentSessionId = this.currentSession.getSessionIdForLeaf(view.leaf);
-    if (currentSessionId) {
-      await this.contextManager.restoreFromServer(currentSessionId);
+    if (this.currentSession.getSessionIdForLeaf(view.leaf)) {
       return;
     }
 
@@ -251,7 +238,6 @@ export class ViewManager {
     const sessionUrl = this.client.getSessionUrl(sessionId);
     this.currentSession.rememberSessionUrl(sessionUrl);
     view.setIframeUrl(sessionUrl);
-    await this.contextManager.restoreFromServer(sessionId);
 
     if (this.app.workspace.activeLeaf === view.leaf) {
       await this.contextManager.refreshVisibleOpenCodeContext();

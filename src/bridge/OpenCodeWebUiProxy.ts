@@ -5,21 +5,6 @@ import { createLogger } from "../debug/RuntimeDiagnostics";
 import { buildServerAuthHeader } from "../client/ServerAuth";
 import { injectOpenCodeWebUiProxyHtml } from "./ProxyInjection";
 import type { WebViewAppearance, WebViewTheme } from "../types";
-import {
-  mergePromptContextBundlePatchDiagnostics,
-  patchOpenCodePromptContextBundle,
-  type PromptContextBundlePatchDiagnostics,
-} from "./OpenCodePromptContextBundlePatch";
-import {
-  mergeKeyboardBundlePatchDiagnostics,
-  patchOpenCodeKeyboardBundle,
-  type KeyboardBundlePatchDiagnostics,
-} from "./OpenCodeKeyboardBundlePatch";
-import {
-  mergeTerminalBundlePatchDiagnostics,
-  patchOpenCodeTerminalBundle,
-  type TerminalBundlePatchDiagnostics,
-} from "./OpenCodeTerminalBundlePatch";
 
 type WebViewThemeProvider = () => WebViewTheme | null;
 type WebViewThemeSource = WebViewTheme | WebViewThemeProvider | null;
@@ -60,9 +45,6 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   private promptRequestHook: PromptRequestHook | null = null;
   private authPasswordProvider: (() => string | null) | null = null;
   private promptRequestOutcomeHook: PromptRequestOutcomeHook | null = null;
-  private promptContextBundlePatch: PromptContextBundlePatchDiagnostics | null = null;
-  private keyboardBundlePatch: KeyboardBundlePatchDiagnostics | null = null;
-  private terminalBundlePatch: TerminalBundlePatchDiagnostics | null = null;
   private static readonly START_PORT = 4097;
   private static readonly MAX_ATTEMPTS = 10;
 
@@ -113,18 +95,6 @@ export class OpenCodeWebUiProxy extends EventEmitter {
   ): void {
     this.promptRequestHook = hook;
     this.promptRequestOutcomeHook = outcomeHook;
-  }
-
-  getPromptContextBundlePatchDiagnostics(): PromptContextBundlePatchDiagnostics | null {
-    return this.promptContextBundlePatch;
-  }
-
-  getKeyboardBundlePatchDiagnostics(): KeyboardBundlePatchDiagnostics | null {
-    return this.keyboardBundlePatch;
-  }
-
-  getTerminalBundlePatchDiagnostics(): TerminalBundlePatchDiagnostics | null {
-    return this.terminalBundlePatch;
   }
 
   async start(): Promise<boolean> {
@@ -308,17 +278,6 @@ export class OpenCodeWebUiProxy extends EventEmitter {
           clientRes.writeHead(proxyRes.statusCode || 200, headers);
           clientRes.end(injected);
         });
-      } else if (this.shouldPatchJavaScriptAsset(clientReq.url ?? "", contentType)) {
-        let body = "";
-        proxyRes.on("data", (chunk: Buffer) => (body += chunk.toString()));
-        proxyRes.on("end", () => {
-          const patched = this.patchJavaScriptAsset(clientReq.url ?? "", body);
-          const headers = { ...proxyRes.headers };
-          delete headers["content-length"];
-          headers["content-length"] = String(Buffer.byteLength(patched));
-          clientRes.writeHead(proxyRes.statusCode || 200, headers);
-          clientRes.end(patched);
-        });
       } else {
         clientRes.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
         proxyRes.pipe(clientRes);
@@ -384,89 +343,6 @@ export class OpenCodeWebUiProxy extends EventEmitter {
     return contentType.includes("text/html");
   }
 
-  private shouldPatchJavaScriptAsset(path: string, contentType: string): boolean {
-    if (
-      !this.shouldPatchPromptContextBundle(path, contentType) &&
-      !this.shouldPatchKeyboardBundle(path, contentType) &&
-      !this.shouldPatchTerminalBundle(path, contentType)
-    ) {
-      return false;
-    }
-    return (
-      contentType.includes("javascript") ||
-      contentType.includes("application/octet-stream") ||
-      contentType === ""
-    );
-  }
-
-  private shouldPatchPromptContextBundle(path: string, _contentType: string): boolean {
-    return /\/assets\/(?:index|session-composer-state)-[^/?]+\.js(?:$|[?#])/.test(path);
-  }
-
-  private shouldPatchKeyboardBundle(path: string, _contentType: string): boolean {
-    return /\/assets\/index-[^/?]+\.js(?:$|[?#])/.test(path);
-  }
-
-  private shouldPatchTerminalBundle(path: string, _contentType: string): boolean {
-    return /\/assets\/session-(?!composer-state-)[^/?]+\.js(?:$|[?#])/.test(path);
-  }
-
-  private patchJavaScriptAsset(path: string, body: string): string {
-    let code = body;
-    if (this.shouldPatchPromptContextBundle(path, "")) {
-      const patched = patchOpenCodePromptContextBundle(code);
-      this.promptContextBundlePatch = mergePromptContextBundlePatchDiagnostics(
-        this.promptContextBundlePatch,
-        path,
-        patched
-      );
-      this.emit("promptContextBundlePatch", this.promptContextBundlePatch);
-      this.logger.info("prompt context bundle patch", {
-        status: this.promptContextBundlePatch.status,
-        patches: this.promptContextBundlePatch.patches,
-        assetStatus: patched.status,
-        assetPatches: patched.patches,
-        path,
-      });
-      code = patched.code;
-    }
-    if (this.shouldPatchKeyboardBundle(path, "")) {
-      const patched = patchOpenCodeKeyboardBundle(code);
-      this.keyboardBundlePatch = mergeKeyboardBundlePatchDiagnostics(
-        this.keyboardBundlePatch,
-        path,
-        patched
-      );
-      this.emit("keyboardBundlePatch", this.keyboardBundlePatch);
-      this.logger.info("keyboard bundle patch", {
-        status: this.keyboardBundlePatch.status,
-        patches: this.keyboardBundlePatch.patches,
-        assetStatus: patched.status,
-        assetPatches: patched.patches,
-        path,
-      });
-      code = patched.code;
-    }
-    if (this.shouldPatchTerminalBundle(path, "")) {
-      const patched = patchOpenCodeTerminalBundle(code);
-      this.terminalBundlePatch = mergeTerminalBundlePatchDiagnostics(
-        this.terminalBundlePatch,
-        path,
-        patched
-      );
-      this.emit("terminalBundlePatch", this.terminalBundlePatch);
-      this.logger.info("terminal bundle patch", {
-        status: this.terminalBundlePatch.status,
-        patches: this.terminalBundlePatch.patches,
-        assetStatus: patched.status,
-        assetPatches: patched.patches,
-        path,
-      });
-      code = patched.code;
-    }
-    return code;
-  }
-
   private shouldHandlePromptRequest(clientReq: http.IncomingMessage): boolean {
     if (clientReq.method !== "POST") {
       return false;
@@ -496,7 +372,7 @@ export function extractPromptSessionId(path: string | null | undefined): string 
   }
 
   const pathname = new URL(path, "http://proxy.local").pathname;
-  const match = pathname.match(/(?:^|\/)(?:api\/)?session\/([^/]+)\/message$/);
+  const match = pathname.match(/\/api\/session\/([^/]+)\/prompt$/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 

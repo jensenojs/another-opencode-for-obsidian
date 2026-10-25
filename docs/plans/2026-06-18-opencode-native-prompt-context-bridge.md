@@ -1,5 +1,7 @@
 # OpenCode native prompt context bridge
 
+> Superseded by [v2-attach-spec.md](v2-attach-spec.md)。本文记录 0.6.0 之前的 native prompt context card 与 bundle patch 实验；那条路径已整体删除。
+
 日期：2026-06-18
 
 ## 文档地位

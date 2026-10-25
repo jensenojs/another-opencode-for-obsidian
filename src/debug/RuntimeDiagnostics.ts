@@ -1,6 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import type { ServiceSummary } from "../server/ServiceDiscovery";
+import type { ServiceState } from "../server/types";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -12,36 +14,14 @@ export interface RuntimePaths {
 
 export interface RuntimeStatusSnapshot {
   lifecycle: string;
-  serverState: string;
-  lastError: string | null;
-  lastHealthError: string | null;
-  lastCommand: string | null;
-  lastDisplayCommand: string | null;
-  lastStartMode: string | null;
-  lastUsesShell: boolean | null;
-  lastCwd: string | null;
-  lastStdout: string | null;
-  lastStderr: string | null;
-  lastExitCode: number | null;
-  lastExitSignal: string | null;
-  lastProcessErrorStack: string | null;
-  processEnvironment: unknown;
-  lastSpawnEnvironment: unknown;
-  lastResolvedExecutable: string | null;
-  diagnosticHint: string | null;
-  pid: number | null;
-  hostname: string;
-  port: number;
-  apiBaseUrl: string;
-  uiBaseUrl: string;
-  healthUrl: string;
+  serviceState: ServiceState;
+  service: ServiceSummary | null;
+  serviceError: string | null;
   proxyUrl: string | null;
   proxyPort: number | null;
   projectDirectory: string;
-  useCustomCommand: boolean;
   webViewAppearance: string;
   runtimeDiagnostics: RuntimeDiagnosticsSnapshot;
-  autoStart: boolean;
   logFile: string;
   statusFile: string;
 }
@@ -50,8 +30,6 @@ export interface RuntimeDiagnosticsSnapshot {
   theme: unknown | null;
   iframe: unknown | null;
   opencodeEvents: unknown | null;
-  promptContext: unknown | null;
-  keyboard: unknown | null;
 }
 
 const LOG_MAX_BYTES = 1024 * 1024;

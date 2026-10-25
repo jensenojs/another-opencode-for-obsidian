@@ -1,3 +1,5 @@
+> **Archived 2026-10-25.** 这份文档记录的是 0.5.x 的 MVP 行为：插件 spawn 自己的 `opencode serve`，用 500ms 轮询 `/global/health` 判活，并用四态状态机（stopped/starting/running/error）驱动视图。0.6.0 改成 attach-only：服务由用户自己的 `opencode service start` 提供，插件只读 `~/.local/state/opencode/service*.json` 并探 `/api/info`，状态只有 attached/unavailable。当前行为见 [v2-attach-spec.md](../../../../docs/plans/v2-attach-spec.md)。
+
 ## Context
 
 This plugin embeds the OpenCode AI assistant into Obsidian by spawning a local server process and displaying its web UI in an iframe within the Obsidian sidebar. The design prioritizes simplicity and reliability for the MVP.

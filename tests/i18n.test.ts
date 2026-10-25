@@ -189,7 +189,7 @@ describe("i18n", () => {
     setPluginLanguageForTests("zh-CN");
 
     expect(getPluginLanguage()).toBe("zh-CN");
-    expect(getText().settings.serverConfiguration).toBe("服务器配置");
+    expect(getText().settings.serviceConfiguration).toBe("OpenCode 服务");
   });
 
   test("English and Chinese text tables have the same shape", () => {

@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { OpenCodeSettingTab as OpenCodeSettingTabClass } from "../../src/settings/SettingsTab";
+import type { ServiceStatus } from "../../src/server/types";
 import type { OpenCodeSettings } from "../../src/types";
 import { DEFAULT_SETTINGS } from "../../src/types";
 
@@ -133,7 +134,7 @@ describe("OpenCodeSettingTab i18n", () => {
         {} as any,
         {} as any,
         makeSettings(),
-        fakeServerManager(),
+        () => null,
         async () => {}
       );
 
@@ -149,11 +150,11 @@ describe("OpenCodeSettingTab i18n", () => {
       expect(workspaceGroup.cls).toContain("opencode-settings-source-group");
       expect(selectionGroup.cls).toContain("opencode-settings-level-1");
       expect(selectionGroup.cls).toContain("opencode-settings-source-group");
-      expect(visibleText).toContain("服务器配置");
-      expect(visibleText).toContain("自定义命令");
+      expect(visibleText).toContain("OpenCode 服务");
       expect(visibleText).toContain("项目目录");
       expect(visibleText).toContain("上下文辅助");
-      expect(visibleText).toContain("服务器状态");
+      expect(visibleText).not.toContain("自定义命令");
+      expect(visibleText).not.toContain("自动启动");
 
       expect(visibleText).toContain("发送时附加上下文");
       expect(visibleText).toContain("工作区线索");
@@ -169,6 +170,46 @@ describe("OpenCodeSettingTab i18n", () => {
     });
   });
 
+  test("renders the attached service identity and the unavailable reason", () => {
+    setPluginLanguageForTests("zh-CN");
+    withSettingsDom(() => {
+      let current: ServiceStatus = {
+        state: "attached",
+        handle: {
+          name: "service.json",
+          url: "http://127.0.0.1:49374",
+          password: "secret",
+          version: "2.1.3",
+          pid: 96699,
+        },
+      };
+      const tab = new OpenCodeSettingTab(
+        {} as any,
+        {} as any,
+        makeSettings(),
+        () => current,
+        async () => {}
+      );
+      const statusGroup = findGroup(tab.getSettingDefinitions(), "服务");
+      const container = document.createElement("div");
+
+      statusGroup.items[0].render({ settingEl: container });
+      expect(container.textContent).toContain("已连接");
+      expect(container.textContent).toContain("http://127.0.0.1:49374");
+      expect(container.textContent).toContain("service.json · v2.1.3 · pid 96699");
+      expect(container.textContent).not.toContain("secret");
+
+      current = {
+        state: "unavailable",
+        reason: "no reachable service among service.json in /state/opencode",
+      };
+      statusGroup.items[0].render({ settingEl: container });
+      expect(container.textContent).toContain("未发现服务");
+      expect(container.textContent).toContain("no reachable service among service.json");
+      expect(container.textContent).toContain("opencode service start");
+    });
+  });
+
   test("hides source controls when context assist is disabled", () => {
     setPluginLanguageForTests("zh-CN");
     withSettingsDom(() => {
@@ -179,7 +220,7 @@ describe("OpenCodeSettingTab i18n", () => {
         {} as any,
         {} as any,
         settings,
-        fakeServerManager(),
+        () => null,
         async () => {}
       );
 
@@ -206,7 +247,7 @@ describe("OpenCodeSettingTab i18n", () => {
         {} as any,
         {} as any,
         settings,
-        fakeServerManager(),
+        () => null,
         async () => {}
       );
 
@@ -232,7 +273,7 @@ describe("OpenCodeSettingTab i18n", () => {
         {} as any,
         {} as any,
         settings,
-        fakeServerManager(),
+        () => null,
         async () => {}
       );
 
@@ -245,89 +286,6 @@ describe("OpenCodeSettingTab i18n", () => {
       expect(visibleText).not.toContain("单段文本长度上限");
       expect(visibleText).toContain("工作区线索");
       expect(visibleText).toContain("打开的笔记数量上限");
-    });
-  });
-
-  test("renders keyboard bridge conflicts as a warning in settings", () => {
-    setPluginLanguageForTests("zh-CN");
-    withSettingsDom(() => {
-      const tab = new OpenCodeSettingTab(
-        {} as any,
-        {} as any,
-        makeSettings(),
-        fakeServerManager(),
-        async () => {},
-        {
-          getSummary: () => ({
-            status: "available",
-            obsidianShortcutCount: 1,
-            opencodeShortcutCount: 1,
-            conflictCount: 1,
-            obsidianAvailable: true,
-            opencodeAvailable: true,
-            unavailableReason: null,
-            conflicts: [
-              {
-                signature: "meta+comma",
-                display: "⌘,",
-                obsidian: [
-                  {
-                    source: "obsidian",
-                    commandId: "app:open-settings",
-                    title: "打开设置",
-                    signature: "meta+comma",
-                    display: "⌘,",
-                    keybind: "Mod+,",
-                  },
-                ],
-                opencode: [
-                  {
-                    source: "opencode",
-                    commandId: "settings.open",
-                    title: "Open settings",
-                    signature: "meta+comma",
-                    display: "⌘,",
-                    keybind: "mod+comma",
-                  },
-                ],
-                policy: {
-                  signature: "meta+comma",
-                  display: "⌘,",
-                  owner: "obsidian",
-                  commandId: "app:open-settings",
-                  reason: "default-obsidian",
-                },
-              },
-            ],
-          }),
-          setOwner: async () => {},
-          refresh: () => {},
-        }
-      );
-      const definitions = tab.getSettingDefinitions();
-      const keyboardGroup = findGroup(definitions, "快捷键冲突");
-      const container = document.createElement("div");
-
-      keyboardGroup.items[0].render({ settingEl: container });
-
-      expect(container.textContent).toContain("状态：可用");
-      expect(container.textContent).toContain("发现 1 个快捷键冲突。默认由 Obsidian 响应");
-      expect(container.querySelector(".opencode-keyboard-conflict-shortcut")?.textContent).toBe(
-        "⌘,"
-      );
-      expect(container.textContent).toContain("Obsidian");
-      expect(container.textContent).toContain("打开设置");
-      expect(container.textContent).toContain("OpenCode");
-      expect(container.textContent).toContain("Open settings");
-      const ownerButtons = Array.from(
-        container.querySelectorAll(".opencode-keyboard-conflict-owner-option")
-      ) as HTMLButtonElement[];
-      expect(ownerButtons.map((button) => button.textContent)).toEqual(["Obsidian", "OpenCode"]);
-      expect(ownerButtons[0]?.getAttribute("aria-pressed")).toBe("true");
-      expect(ownerButtons[1]?.getAttribute("aria-pressed")).toBe("false");
-      expect(container.querySelector(".opencode-keyboard-bridge-warning")?.textContent).toContain(
-        "发现 1 个快捷键冲突"
-      );
     });
   });
 });
@@ -501,17 +459,6 @@ function installObsidianElementHelpers(window: Window): void {
     }
     this.append(el as any);
     return el as unknown as HTMLElement;
-  };
-}
-
-function fakeServerManager(): any {
-  return {
-    getState: () => "stopped",
-    getDiagnostics: () => ({ lastError: null, hint: null }),
-    getUrl: () => "http://127.0.0.1:4096",
-    start: async () => true,
-    stop: () => {},
-    updateProjectDirectory: () => {},
   };
 }
 

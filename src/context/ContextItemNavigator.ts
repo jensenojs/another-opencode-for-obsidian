@@ -1,6 +1,6 @@
 import { Notice, getLinkpath, parseLinktext, type App, type OpenViewState } from "obsidian";
 import type { GraphIndex, GraphReference, GraphSubpathKind } from "../graph/GraphIndex";
-import type { ContextCandidate, ContextItem } from "../types";
+import type { ContextCandidate } from "../types";
 import { getText } from "../i18n";
 
 export type ContextNavigationUnresolvedReason =
@@ -30,7 +30,7 @@ export type ContextNavigationResolution =
 const SYNTHETIC_CONTEXT_SOURCES = new Set(["Obsidian workspace", "OpenCode session"]);
 
 export type ContextNavigationSource = Pick<
-  ContextItem | ContextCandidate,
+  ContextCandidate,
   "sourceFile" | "navigationSourceFile" | "startLine" | "endLine"
 >;
 

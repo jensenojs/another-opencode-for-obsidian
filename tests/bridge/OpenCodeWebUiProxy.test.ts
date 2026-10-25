@@ -5,18 +5,19 @@ import {
 } from "../../src/bridge/OpenCodeWebUiProxy";
 
 describe("OpenCodeWebUiProxy prompt path helpers", () => {
-  test("extracts session ids from legacy and v2 prompt paths", () => {
-    expect(extractPromptSessionId("/session/ses_123/message")).toBe("ses_123");
-    expect(extractPromptSessionId("/api/session/ses_456/message?directory=%2Fvault")).toBe(
+  test("extracts session ids from the v2 prompt path", () => {
+    expect(extractPromptSessionId("/api/session/ses_456/prompt")).toBe("ses_456");
+    expect(extractPromptSessionId("/api/session/ses_456/prompt?directory=%2Fvault")).toBe(
       "ses_456"
     );
-    expect(extractPromptSessionId("/encoded/project/session/ses_789/message")).toBe("ses_789");
+    expect(extractPromptSessionId("/encoded/project/api/session/ses_789/prompt")).toBe("ses_789");
   });
 
   test("ignores non-prompt paths", () => {
-    expect(extractPromptSessionId("/session/ses_123/message/msg_1")).toBeNull();
-    expect(extractPromptSessionId("/session/ses_123")).toBeNull();
-    expect(extractPromptSessionId("/event")).toBeNull();
+    expect(extractPromptSessionId("/api/session/ses_123/message")).toBeNull();
+    expect(extractPromptSessionId("/api/session/ses_123/prompt/msg_1")).toBeNull();
+    expect(extractPromptSessionId("/api/session/ses_123")).toBeNull();
+    expect(extractPromptSessionId("/api/event")).toBeNull();
   });
 });
 

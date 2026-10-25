@@ -1,5 +1,7 @@
 # TUI and Obsidian plugin coexistence
 
+> Superseded by [v2-attach-spec.md](v2-attach-spec.md). The plugin no longer manages a server process; coexistence is attach-only.
+
 The terminal OpenCode TUI can remain the main conversation surface. The Obsidian plugin should add Obsidian-native evidence and control around that conversation.
 
 ## Product boundary

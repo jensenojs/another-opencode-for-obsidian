@@ -1,5 +1,7 @@
 # OpenCode event source contract
 
+> Superseded by [v2-attach-spec.md](v2-attach-spec.md). The shipped event source is `GET /api/event` only; the v1 `/event` compatibility question is settled.
+
 ## Background
 
 This plugin should not infer OpenCode runtime state from the embedded Web UI. The

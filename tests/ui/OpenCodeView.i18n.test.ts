@@ -36,28 +36,38 @@ afterEach(() => {
 });
 
 describe("OpenCodeView i18n", () => {
-  test("renders the stopped state in Chinese", () => {
+  test("renders the unavailable state in Chinese", () => {
     setPluginLanguageForTests("zh-CN");
     withViewDom((window) => {
-      const view = new OpenCodeView({ app: {} } as any, fakePlugin() as any);
+      const view = new OpenCodeView(
+        { app: {} } as any,
+        fakePlugin({
+          getServiceStatus: () => ({
+            state: "unavailable",
+            reason: "no service*.json in /state/opencode",
+          }),
+        }) as any
+      );
       ensureViewContentEl(view, window);
 
-      (view as any).renderStoppedState();
+      (view as any).renderUnavailableState();
 
-      expect(window.document.body.textContent).toContain("OpenCode 已停止");
-      expect(window.document.body.textContent).toContain("启动 OpenCode");
-      expect(window.document.body.textContent).toContain("点击下面的按钮启动 OpenCode 服务器。");
+      expect(window.document.body.textContent).toContain("未发现 OpenCode 服务");
+      expect(window.document.body.textContent).toContain("opencode service start");
+      expect(window.document.body.textContent).toContain("no service*.json in /state/opencode");
+      expect(window.document.body.textContent).not.toContain("启动 OpenCode");
     });
   });
 
-  test("does not start the server when Obsidian restores the view", async () => {
+  test("does not attach on its own when Obsidian restores the view", async () => {
     await withViewDom(async (window) => {
-      let startCount = 0;
+      let attachCount = 0;
       const view = new OpenCodeView(
         { app: {}, getRoot: () => null } as any,
         fakePlugin({
-          startServer: () => {
-            startCount += 1;
+          attachService: async () => {
+            attachCount += 1;
+            return true;
           },
         }) as any
       );
@@ -65,8 +75,8 @@ describe("OpenCodeView i18n", () => {
 
       await view.onOpen();
 
-      expect(startCount).toBe(0);
-      expect(document.body.textContent).toContain("OpenCode is stopped");
+      expect(attachCount).toBe(0);
+      expect(document.body.textContent).toContain("OpenCode service not found");
     });
   });
 
@@ -169,10 +179,18 @@ function installObsidianElementHelpers(window: Window): void {
 
 function fakePlugin(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    startServer: () => {},
-    getServerState: () => "stopped",
+    attachService: async () => true,
+    getServiceState: () => "unavailable",
+    getServiceStatus: () => null,
     getSettings: () => ({ webViewAppearance: "opencode" }),
-    onServerStateChange: () => () => {},
+    onServiceStateChange: () => () => {},
+    copyServiceDiagnosticsToClipboard: () => {},
+    getServerUrl: () => "http://127.0.0.1:4097/server/abc",
+    getStoredIframeUrl: () => null,
+    ensureSessionUrl: () => {},
+    getProxyOrigin: () => "http://127.0.0.1:4097",
+    getWebViewTheme: () => null,
+    setCachedIframeUrl: () => {},
     ...overrides,
   };
 }

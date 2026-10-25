@@ -40,13 +40,15 @@ describe("obsidian reload harness", () => {
       pluginId: "another-opencode-for-obsidian",
       settleMs: 123,
       openView: true,
-      restartServer: true,
+      reattachService: true,
     });
 
     expect(expression).toContain("obsidianApp.plugins.disablePlugin(pluginId)");
     expect(expression).toContain("obsidianApp.plugins.enablePlugin(pluginId)");
-    expect(expression).toContain("beforePlugin.stopServer");
-    expect(expression).toContain("plugin.startServer");
+    expect(expression).toContain("getServiceState");
+    expect(expression).toContain("plugin.attachService");
+    expect(expression).not.toContain(".stopServer(");
+    expect(expression).not.toContain(".startServer(");
     expect(expression).toContain("open-opencode-view");
     expect(expression).toContain("iframeUrls");
     expect(expression).not.toContain("localStorage");

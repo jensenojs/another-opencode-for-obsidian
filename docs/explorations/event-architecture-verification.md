@@ -1,3 +1,7 @@
+> 2026-10-25 更新：本文评估的架构（`ContextRegistry` + `ContextSyncer` + postMessage 桥接）在 0.6.0 已整体删除。
+> 当前形状见 [v2-attach-spec.md](../plans/v2-attach-spec.md)：候选由 `CandidateRegistry` 持有，随 prompt 请求以 `files` 附件发出；事件流只用于服务存活与诊断。
+> 下面的调研与结论保留为当时的设计记录。
+
 # 上下文事件架构双向集成验证
 
 ## 概述
@@ -226,16 +230,11 @@ opencode 入站事件如果要打开 vault evidence，必须进入 safe navigato
 - 没有监听 opencode SSE 事件的模块
 - 没有从 opencode 事件到 Obsidian API 调用的转换层
 
-**需要的模块**：一个 `OpenCodeEventListener`（或者叫 `InboundEventBridge`），类似于 `ContextSyncer` 但方向相反：
-  - 通过 Node.js `http` 订阅 `GET /event` SSE 流
-  - 解析事件，按类型分发
-  - 通过 safe navigator 调用 Obsidian API 执行操作（打开已解析文件、弹出通知等）
+**当时设想的模块**：一个 `OpenCodeEventListener`（或 `InboundEventBridge`），方向与 `ContextSyncer` 相反——用 Node `http` 订阅 SSE、解析事件按类型分发、通过 safe navigator 调 Obsidian API 产生副作用。
 
-**对架构的影响**：
-- `ContextRegistry` 无需改动——它的职责是持有上下文条目状态，不涉及文件操作
-- `ContextSyncer` 无需改动——它只负责 Obsidian → opencode 方向
-- 新模块独立存在，监听 opencode SSE，产生 Obsidian 副作用
-- postMessage 桥接可用于将事件细节广播到 iframe
+**实际落地的是** `OpenCodeEventSource`：它订阅 `GET /api/event`，按 `location.directory` 过滤，只写诊断快照与「服务是否还活着」这一个信号。它不调 Obsidian API，不打开文件，不弹通知——把 opencode 事件翻译成 Obsidian 操作这条需求没有实现。
+
+`ContextRegistry` 与 `ContextSyncer` 当时被判断为「无需改动」，它们在 0.6.0 整个删除。
 
 #### 场景 B：AI 任务完成 → Obsidian 弹出通知
 
@@ -271,14 +270,9 @@ opencode 入站事件如果要打开 vault evidence，必须进入 safe navigato
 - `ViewManager.ensureSessionUrl()` 在视图激活时检查最新会话
 - `OpenCodeView.onClose()` 将当前 iframe URL 缓存到 `cachedIframeUrl`
 
-缺失：
-- **主动检测**：当用户在 opencode Web UI 内切换会话（URL 变为 `/session/new-id`），Obsidian 侧不知道
-- 注入脚本可以通过 `location.pathname` 轮询或 `popstate` 事件检测 URL 变化 → `postMessage` 通知 Obsidian
-- 或者通过 SSE `session.created` 事件感知新会话
+当时的缺口是：用户在 opencode Web UI 内切换会话时 Obsidian 侧不知道。
 
-**需要增加的**：
-- 注入脚本增加 URL 变化监听 → `postMessage({ type: 'opencode-session-changed', payload: { sessionId } })`
-- `main.ts` 的消息监听器处理此事件 → 更新 `cachedIframeUrl`
+现在的做法不依赖注入脚本上报 URL：`CurrentContextSession` 从 OpenCode leaf 的 iframe URL 解析 session id，解析不出来时回落 `client.getLatestSessionId()`（`GET /api/session?directory=&order=desc&limit=1`），需要在 prompt 边界拿到 session 时才解析。本地 postMessage 没有会话变化消息，也不需要。
 
 ### 4.2 总缺口矩阵
 
@@ -291,96 +285,23 @@ opencode 入站事件如果要打开 vault evidence，必须进入 safe navigato
 | opencode → Obsidian | 会话切换追踪 | `ViewManager`（被动） | 注入脚本 URL 监听 + postMessage | 中 |
 | iframe ↔ Obsidian | 双向结构化数据 | `postMessage`（仅 toggle） | 扩展 postMessage 协议 | 低 |
 
-### 4.3 `ContextSyncer` 命名问题
+### 4.3 `ContextSyncer` 命名问题（已消失）
 
-`ContextSyncer` 的当前职责是「将 ContextRegistry 的变更同步到 opencode 服务器」，方向是 **Obsidian → opencode**。
+当时担心 `ContextSyncer` 的名字暗示双向同步、实际只做 Obsidian → opencode 单向，讨论过改名或拆成两个模块。
 
-如果 Phase 2 需要 opencode → Obsidian 方向的同步（例如从 opencode API 回读 AI 生成的 todo 作为上下文条目），`ContextSyncer` 的名字暗示「双向同步」但实际上只做了单向。
+这个问题随 `ContextSyncer` 一起消失：0.6.0 不再有「把 Obsidian 改动同步成 opencode 消息」的模块，候选只在 prompt 请求边界变成 `files` 附件；opencode → Obsidian 方向的唯一消费者是 `OpenCodeEventSource`，它只写诊断快照与服务存活信号。
 
-**建议**：
-- 将 `ContextSyncer` 重命名为 `OutboundSyncer` 或 `ContextExporter`，明确表示 Obsidian → opencode 方向
-- 预留 `InboundSyncer` 或 `OpenCodeEventListener` 的名字给 opencode → Obsidian 方向
-- 或者拆分为 `ContextSyncOut` + `ContextSyncIn`，共享同一个 `ContextRegistry`
+## 5. 当时的接口冻结决策
 
----
+这一节原本冻结三件事：postMessage 命名空间化、`ContextRegistry` 事件名与 `ContextItem.sourceKey`、`ContextManager` 作为 Obsidian 事件唯一入口。
 
-## 5. 最小接口建议
+前两条的前提已经不存在：`ContextRegistry`、`ContextItem`、`ContextItem.sourceKey` 与 `ContextSyncer` 在 0.6.0 删除；本地 postMessage 只剩 4 条消息（`proxy:loaded`、`theme:diagnostics`、`theme:update`、`vault-file:open`）；上下文只剩 `CandidateRegistry` 一个模型。
 
-基于以上调研，三条现在就该冻结的接口设计决策：
-
-### 决策 1：postMessage 协议版本化
-
-**现在冻结**：
-
-```typescript
-// 消息的 type 字段使用命名空间前缀，避免与未来 opencode 自身的 postMessage 冲突
-// 格式：another-opencode-for-obsidian:<action>
-type ObsidianPostMessage =
-  | { type: 'another-opencode-for-obsidian:proxy-loaded' }
-  | { type: 'another-opencode-for-obsidian:toggle' }
-  // Phase 2 预留：
-  | { type: 'another-opencode-for-obsidian:session-changed', payload: { sessionId: string } }
-  | { type: 'another-opencode-for-obsidian:notification', payload: { level: 'info'|'warn'|'error', message: string } }
-  // 通用事件转发通道：
-  | { type: 'another-opencode-for-obsidian:event', payload: { name: string, data: unknown } };
-```
-
-**理由**：
-- 当前 `opencode-toggle` / `opencode-proxy-loaded` 的扁平命名在扩展时会混乱
-- 命名空间前缀避免与 opencode 自身的 postMessage（如果未来有的话）冲突
-- `another-opencode-for-obsidian:event` 作为通用转发通道，避免为每种 opencode SSE 事件类型都定义一个 postMessage type
-- 不影响 Phase 1 功能，只是重命名现有字符串
-
-**改动量**：`OpenCodeWebUiProxy.ts` 注入脚本中的两处字符串 + `main.ts` 中的两处字符串比较。
-
-### 决策 2：ContextRegistry 预留 `sourceKey` 且冻结事件名
-
-**Phase 1 已冻结（在 context-management 计划中）**，此处再次确认：
-
-```typescript
-// ContextRegistry 事件名冻结：
-'context:added'    → { item: ContextItem }
-'context:removed'  → { item: ContextItem }
-'context:restored' → { items: ContextItem[] }
-
-// ContextItem.sourceKey 语义冻结：
-// - 自动源（BacklinkSource 等）通过 sourceKey 标识条目归属
-// - removeBySourceKey(key) 用于 diff 删除旧条目
-// - sourceKey 格式："{sourceName}:{stableId}"，如 "backlinks:path/to/file.md:42"
-```
-
-**理由**：
-- `sourceKey` 是 Phase 2 自动上下文源（反向链接等）无需重构就能接入的关键字段
-- 如果 Phase 1 不冻结此字段，Phase 2 的 BacklinkSource 将无法做增量 diff（只能全量删除重建，造成消息抖动）
-- 事件名冻结确保 Phase 2 的 `OpenCodeEventListener` 可以直接监听这些事件，无需修改 ContextRegistry
-
-### 决策 3：保留 `ContextManager` 作为 Obsidian 事件的唯一接入点
-
-**冻结接口**：
-
-```typescript
-// ContextManager 是唯一监听 Obsidian workspace 事件的模块
-// 其他模块不直接调用 app.workspace.on() / app.metadataCache.on()
-// 如需感知 Obsidian 事件，通过以下方式之一：
-//   1. ContextRegistry 事件（上下文条目变化）
-//   2. 新增 ContextManager 回调（未来如需新的 Obsidian 事件类型）
-```
-
-**理由**：
-- 当前 `ContextManager.updateListeners()` 已经集中管理了 6 种 Obsidian 事件监听
-- 如果 Phase 2 的 `BacklinkSource` 或 `OpenCodeEventListener` 也各自监听 Obsidian 事件，会导致：
-  - 同一 Obsidian 事件被多个模块重复监听（如 `metadataCache.on('changed')`）
-  - 防抖逻辑分散，容易出现竞态
-- ContextManager 作为「Obsidian → 插件内部事件总线」的适配层，保证事件流向清晰
-
-**对 Phase 2 的影响**：
-- `BacklinkSource` 不直接监听 `metadataCache`，而是由 ContextManager 在 `metadataCache.on('changed')` 时调用 `BacklinkSource.refresh()`
-- 或者更简单：ContextManager 只在 `scheduleRefresh()` 中触发 `registry.add({ sourceKey, ... })`，BacklinkSource 只是一个**纯函数**，接收文件路径返回 `ContextSuggestion[]`
-
----
+第三条仍然成立，并已落进 `ContextManager` 的构造依赖：它依旧是 Obsidian workspace 与 editor 事件的唯一接入点。
 
 ## 总结
 
-当前架构的 `ContextRegistry` + `ContextSyncer` + `postMessage` 桥接**方向正确**，事件驱动解耦使 Phase 2 的扩展无需重构核心模块。但缺少一个对应 `ContextSyncer` 的反向模块来处理 **opencode → Obsidian** 方向的事件流。建议在 Phase 2 规划中新增 `OpenCodeEventListener`（名字待定），通过 Node.js `http` 订阅 `GET /event` SSE 流，将 opencode 事件转化为 Obsidian API 调用。
+这次评估的前提后来被推翻：`ContextRegistry` + `ContextSyncer` + postMessage 的上下文链路整体删除，插件改成 attach-only，事件流只用于服务存活与诊断（`GET /api/event`，客户端按 `location.directory` 过滤）。评估里「需要一个反向监听模块」的判断以 `OpenCodeEventSource` 的形式落地，但它只产出诊断快照与服务存活信号，不写 vault 状态，也不把 opencode 事件翻译成 Obsidian 操作。
 
-三条冻结决策的改动量极小（两条字符串重命名 + 确认已有冻结），现在执行不会阻塞 Phase 1 的交付。
+上面保留当时的调研与结论，作为为什么那样设计、后来为什么放弃的记录；当前形状以 [v2-attach-spec.md](../plans/v2-attach-spec.md) 为准。
+

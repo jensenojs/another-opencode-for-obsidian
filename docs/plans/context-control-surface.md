@@ -1,5 +1,7 @@
 # Context control surface
 
+> Superseded by [v2-attach-spec.md](v2-attach-spec.md). This document describes the pre-0.6.0 context control surface; the shipped surface is the candidate-only status bar plus prompt `files` attachments.
+
 This document is the current source for context UI and interaction.
 
 The current oc-ctx behavior contract is

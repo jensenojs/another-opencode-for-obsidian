@@ -1,5 +1,12 @@
+import type { ContextCandidate } from "../types";
 import type { CandidateRegistry, CandidateSnapshotRef } from "./CandidateRegistry";
-import type { PromptContextProjection } from "./PromptContextProjection";
+import { buildPromptAttachments } from "./PromptAttachments";
+
+export type PromptDelivery = {
+  at: number;
+  count: number;
+  labels: string[];
+};
 
 export interface PromptInjectionPlan {
   id: string;
@@ -12,74 +19,63 @@ interface StoredPromptInjectionPlan {
   sessionId: string;
   candidateRefs: CandidateSnapshotRef[];
   skippedDynamicRefs: CandidateSnapshotRef[];
+  labels: string[];
 }
 
 interface PromptRequestBody {
-  parts: unknown[];
+  files?: unknown;
   [key: string]: unknown;
 }
 
-// Prompt-request-coupled adapter. It turns included local candidates into
-// synthetic parts on the same OpenCode prompt request.
+// Prompt-request-coupled adapter. Included candidates become `files`
+// attachments on the OpenCode /api/session/{id}/prompt body.
 export class PromptContextInjector {
   private plans = new Map<string, StoredPromptInjectionPlan>();
+  private lastDelivery: PromptDelivery | null = null;
 
   constructor(private candidates: CandidateRegistry) {}
 
-  prepare(
-    sessionId: string,
-    requestBody: unknown,
-    projections: PromptContextProjection[]
-  ): PromptInjectionPlan | null {
-    const synthetic = projections.filter(
-      (projection): projection is Extract<PromptContextProjection, { kind: "synthetic-text" }> =>
-        projection.kind === "synthetic-text"
+  getLastDelivery(): PromptDelivery | null {
+    return this.lastDelivery;
+  }
+
+  prepare(sessionId: string, requestBody: unknown): PromptInjectionPlan | null {
+    const candidates = this.candidates.getCandidates();
+    const included = candidates.filter((candidate) => candidate.included);
+    const skippedDynamicRefs = snapshotRefs(
+      candidates.filter((candidate) => candidate.lifetime === "dynamic" && !candidate.included)
     );
-    const candidateIds = uniqueCandidateIds(
-      projections
-        .filter((projection) => projection.kind !== "status-only")
-        .flatMap(projectionCandidateIds)
-    );
-    const hasSkippedDynamic = this.candidates
-      .getCandidates()
-      .some((candidate) => candidate.lifetime === "dynamic" && !candidate.included);
-    if (candidateIds.length === 0 && !hasSkippedDynamic) {
+    if (included.length === 0 && skippedDynamicRefs.length === 0) {
       return null;
     }
 
-    if (synthetic.length > 0 && !isPromptRequestBody(requestBody)) {
+    const body = isPromptRequestBody(requestBody) ? requestBody : null;
+    if (included.length > 0 && !body) {
       this.candidates.markFailed(
-        synthetic.flatMap(projectionCandidateIds),
-        "OpenCode prompt body did not expose a parts array"
+        snapshotRefs(included),
+        "OpenCode prompt body is not a JSON object"
       );
       return null;
     }
 
     const planId = `prompt-plan:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-    const candidateParts = synthetic.map((projection) => ({
-      type: "text",
-      text: projection.text,
-      synthetic: true,
-    }));
-    const nextBody =
-      candidateParts.length > 0 && isPromptRequestBody(requestBody)
-        ? {
-            ...requestBody,
-            parts: [...requestBody.parts, ...candidateParts],
-          }
-        : requestBody;
+    let nextBody = requestBody;
+    if (body && included.length > 0) {
+      const files = Array.isArray(body.files) ? body.files : [];
+      nextBody = { ...body, files: [...files, ...buildPromptAttachments(included)] };
+    }
 
-    const currentCandidates = this.candidates.getCandidates();
     this.plans.set(planId, {
       sessionId,
-      candidateRefs: snapshotCandidateRefs(currentCandidates, candidateIds),
-      skippedDynamicRefs: snapshotSkippedDynamicRefs(currentCandidates),
+      candidateRefs: snapshotRefs(included),
+      skippedDynamicRefs,
+      labels: included.map((candidate) => candidate.label),
     });
 
     return {
       id: planId,
       sessionId,
-      candidateIds,
+      candidateIds: included.map((candidate) => candidate.id),
       requestBody: nextBody,
     };
   }
@@ -94,6 +90,10 @@ export class PromptContextInjector {
     if (this.candidates.getSessionId() !== plan.sessionId) {
       return;
     }
+    this.lastDelivery =
+      plan.labels.length === 0
+        ? this.lastDelivery
+        : { at: Date.now(), count: plan.labels.length, labels: plan.labels };
     this.candidates.consumeSent(plan.candidateRefs, {
       restoreDynamicRefs: plan.skippedDynamicRefs,
     });
@@ -114,46 +114,13 @@ export class PromptContextInjector {
 }
 
 function isPromptRequestBody(value: unknown): value is PromptRequestBody {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Array.isArray((value as { parts?: unknown }).parts)
-  );
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function uniqueCandidateIds(candidateIds: string[]): string[] {
-  return Array.from(new Set(candidateIds));
-}
-
-function projectionCandidateIds(projection: PromptContextProjection): string[] {
-  return projection.candidateIds ?? [projection.candidateId];
-}
-
-function snapshotCandidateRefs(
-  candidates: { id: string; identityKey: string; fingerprint: string }[],
-  candidateIds: string[]
-): CandidateSnapshotRef[] {
-  const candidateIdSet = new Set(candidateIds);
-  return candidates
-    .filter((candidate) => candidateIdSet.has(candidate.id))
-    .map((candidate) => ({
-      id: candidate.id,
-      identityKey: candidate.identityKey,
-      fingerprint: candidate.fingerprint,
-    }));
-}
-
-function snapshotSkippedDynamicRefs(
-  candidates: {
-    id: string;
-    identityKey: string;
-    fingerprint: string;
-    lifetime: string;
-    included: boolean;
-  }[]
-): CandidateSnapshotRef[] {
-  const skippedDynamicIds = candidates
-    .filter((candidate) => candidate.lifetime === "dynamic" && !candidate.included)
-    .map((candidate) => candidate.id);
-  return snapshotCandidateRefs(candidates, skippedDynamicIds);
+function snapshotRefs(candidates: ContextCandidate[]): CandidateSnapshotRef[] {
+  return candidates.map((candidate) => ({
+    id: candidate.id,
+    identityKey: candidate.identityKey,
+    fingerprint: candidate.fingerprint,
+  }));
 }

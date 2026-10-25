@@ -1,3 +1,7 @@
+> 2026-10-25 更新：本文调研的上下文注入方式（`noReply` 静默消息、`updatePart`/`ignored` 的 part 生命周期、`updateContext()`）在 0.6.0 已全部删除。
+> 当前形状见 [v2-attach-spec.md](../plans/v2-attach-spec.md)：上下文是 `POST /api/session/{id}/prompt` body 里的 `files` 附件，不写消息、不改 part。
+> 下文的 API 行为记录保留为当时的调研；涉及「插件应该怎么做」的段落已按现状改写。
+
 # OpenCode Server API 与 Web UI 上下文机制调研
 
 ## 概述
@@ -67,26 +71,11 @@ Web UI 通过 SSE 事件流接收 `message.updated` / `message.part.updated` 事
 
 插件在 `OpenCodeClient.updateContext()` 中通过 `session.prompt({ noReply: true, parts: [{ type: "text", text: contextText }] })` 注入上下文。此消息在 opencode 的 TUI/Web UI 中**不可见**——因为它是静默消息（无 AI 回复），而且如果后续被 `ignore` 后也看不到。
 
-#### 上下文消息的生命周期（obsidian 插件策略）
+#### 上下文消息的生命周期（当时的设计，已废弃）
 
-插件采用「更新而非堆积」的策略管理上下文：
+当时插件用「更新而非堆积」管理上下文：首次注入 `sendPrompt()` 建 UserMessage、上下文变化 `updatePart()` 改 part 文本、清空时 `ignorePreviousPart()` 标 `ignored`、切换会话 `resetTracking()` 重置。这条链路依赖 `POST /session/{id}/message` 与 PATCH part 两个 v1 接口，在 2.1.3 上都没有对应能力。
 
-1. **首次注入** → `sendPrompt()` 创建 UserMessage（带 open note paths 和选中文本）
-2. **上下文变化** → `updatePart()` 更新现有 part 的 text
-3. **上下文清空** → `ignorePreviousPart()` 将 part 标记为 `ignored: true`
-4. **会话切换** → `resetTracking()` 重置追踪状态
-
-```
-ContextManager.refreshContext()
-  └── WorkspaceContext.gatherContext() → 收集打开的笔记路径 + 选中文本
-      └── OpenCodeClient.updateContext({ sessionId, contextText })
-          ├── 首次: sendPrompt(sessionId, contextText) → noReply: true
-          │   └── POST /session/{id}/message  { noReply: true, parts: [...] }
-          ├── 更新: updatePart(lastPart, { text: newContext })
-          │   └── PATCH /session/{id}/message/{mid}/part/{pid}
-          └── 清空: ignorePreviousPart()
-              └── PATCH ... { ignored: true }
-```
+现在的做法不再有消息与 part 生命周期：候选由 `CandidateRegistry` 持有，prompt 请求边界把它们变成 `files` 附件，one-shot 候选在请求成功后消费，失败时保留并标 failed。没有「更新既有上下文消息」这一步。
 
 ### 2. 上下文管理相关 API
 
@@ -246,15 +235,10 @@ AssistantMessage 组件:
 
 ---
 
-## 总结：对 another-opencode-for-obsidian 插件的启示
+## 总结
 
-1. **上下文不可见问题**：当前 `noReply: true` 注入的上下文在 opencode UI 中不可见。用户不知道 AI 收到了哪些 Obsidian 上下文。这是 AGENTS.md 中「已知限制」中描述的问题。
+1. **上下文不可见问题**：`noReply` 静默消息在 opencode UI 中不可见，用户不知道 AI 收到了哪些 Obsidian 上下文。0.6.0 之后上下文通过 prompt `files` 附件随请求发出，Obsidian 侧 status bar 显示候选集与「上一次 prompt 带了几个附件」，UI 侧仍看不到这些内容——这一点没有解决，只是换了载体。
 
-2. **可能的改进方向**：
-   - 使用 `noReply: false` 或显式消息让用户看到上下文
-   - 在 Obsidian 插件侧添加上下文预览面板
-   - 利用 `tui.appendPrompt()` 将上下文预填到输入框（用户可见且可编辑），但需要 TUI 支持
+2. **v1 消息/part 操作已不可用**：`noReply`、`updatePart`、`ignored` 都挂在 v1 消息接口上，2.1.3 没有对应的写接口（`GET /api/session/{id}/message` 只读）。依赖它们的注入策略不能照搬。
 
-3. **Part 更新策略的局限性**：当前「更新而非堆积」的策略依赖 `updatePart()`（PATCH API），要求服务器维护同一个 part 的引用。如果会话切换或服务器重启，`lastPart` 引用可能失效。
-
-4. **ignored 机制的实证故障**：被 ignore 的 synthetic parts 虽不可见，但它们所属的 user message 仍会保留在 Web UI timeline 中。插件 context 移除必须删除插件拥有的 message，不能只 patch part。
+3. **`tui.appendPrompt()` 路径**仍是把上下文交给用户编辑的候选方向，但它属于 TUI，插件当前没有接入。

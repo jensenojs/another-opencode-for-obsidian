@@ -1,3 +1,5 @@
+> 2026-10-25 更新：本文是 0.6.0 之前的产品定位与 GraphRAG 探索记录。context 注入与恢复路径（`ContextSyncer`、`listSessionMessages()`、provenance 状态、`ContextItem`）已随 attach-only 改造删除，相关小节一并移除；当前上下文形状见 [v2-attach-spec.md](../plans/v2-attach-spec.md)。GraphIndex 与候选证据相关的判断仍然有效。
+
 # Obsidian + OpenCode：产品价值定位
 
 本文记录 2026-06-12 对本项目的产品定位判断。判断依据来自当前仓库、用户真实 vault，以及已有的 GraphRAG 讨论文档。
@@ -280,9 +282,9 @@ harness 负责复现和搬运证据。UI 负责让用户第一眼知道去哪里
 
 不存在的目标不能触发 Obsidian 新建文件流程。远端 URL 不纳入本阶段。
 
-### 2. Context provenance 和控制面
+### 2. Context provenance 和控制面（已改写）
 
-现有 `ContextItem` 生命周期要继续作为唯一上下文模型。下一步应把 Bar 从轻量计数扩展为可审查面：
+当时打算让 `ContextItem` 生命周期作为唯一上下文模型，并把 Bar 扩展为可审查面。0.6.0 删掉了 `ContextItem`，上下文模型换成 `CandidateRegistry` 加 prompt `files` 附件；下面这几项目标仍然成立，只是承载对象变了（详见 [v2-attach-spec.md](../plans/v2-attach-spec.md)）：
 
 - 当前 context 列表。
 - 来源、行号、文本长度。
@@ -383,23 +385,6 @@ Seed：
 - `环境与状态.md:82` 明确把调试动作落到 `strace`、`lsof`、`env` 这类观察环境状态的工具。
 
 这个样例说明，GraphRAG 的候选可能连接理论笔记、诊断案例和工具笔记。排序字段至少要能表达路径证据、跨 root segment、heading/block 精度和候选是否已有直接链接。
-
-## Appendix B：context provenance 缺口样例
-
-当前代码和旧计划已经暴露出一个恢复缺口。
-
-可观察事实：
-
-- `docs/plans/context-control-surface.md` 的恢复契约要求 text 以 `<!-- oc-ctx -->` 开头，并通过 `listSessionMessages()` 找到 messageId/partId。
-- `src/context/ContextSyncer.ts` 当前恢复条目时使用固定 `label: "Restored context"` 和 `sourceFile: "OpenCode session"`。
-- `tests/context/ContextSyncer.test.ts` 和 `tests/context/ContextManager.test.ts` 也验证了这个形状。
-
-这个形状只能证明“这是插件注入过的上下文”。它不能证明原始 vault 文件、行号、类型和 provenance 状态。Context surface 如果直接把恢复后的条目当作 vault-backed context 展示，就会让用户误以为它可追溯。
-
-后续实现需要让恢复结果至少分成两类：
-
-- provenance known：有 source path、range、type、textLength、messageId、partId、createdAt，可以走安全导航。
-- provenance uncertain：只能确认来自 OpenCode session，不能确认 vault 来源。UI 和 diagnostics 必须直接显示 uncertain。
 
 ## 参考
 

@@ -1,44 +1,36 @@
 import { App, EventRef, MarkdownView, WorkspaceLeaf } from "obsidian";
-import {
-  OPENCODE_VIEW_TYPE,
-  type ContextCandidate,
-  type ContextItem,
-  type OpenCodeSettings,
-} from "../types";
-import { OpenCodeClient } from "../client/OpenCodeClient";
+import { OPENCODE_VIEW_TYPE, type ContextCandidate, type OpenCodeSettings } from "../types";
 import { WorkspaceContext } from "./WorkspaceContext";
-import { formatWorkspaceContext, type WorkspaceContextSnapshot } from "./ContextFormatter";
+import {
+  formatWorkspaceContext,
+  type SelectedTextContext,
+  type WorkspaceContextSnapshot,
+} from "./ContextFormatter";
 import { ContextAutoSources } from "./ContextAutoSources";
 import { CandidateRegistry } from "./CandidateRegistry";
-import { ContextRegistry } from "./ContextRegistry";
-import { ContextSyncer } from "./ContextSyncer";
+import { buildSelectionCandidate } from "./AutoSelectionContextSource";
 import { CurrentContextSession } from "./ContextSessionResolver";
 import type { ContextCandidateInput, ContextSourceResult } from "./ContextSourceDriver";
-import { PromptContextInjector, type PromptInjectionPlan } from "./PromptContextInjector";
 import {
-  buildPromptContextProjections,
-  createOpenCodeContextPathResolver,
-  filterNativeFileCardProjections,
-  type NativePromptContextProjection,
-  type PromptContextProjection,
-  type PromptContextProjectionFailure,
-} from "./PromptContextProjection";
-import type { OpenCodePromptContextItem } from "../bridge/OpenCodePromptContextAdapter";
-import type { ServerState } from "../server/types";
+  PromptContextInjector,
+  type PromptDelivery,
+  type PromptInjectionPlan,
+} from "./PromptContextInjector";
+import type { ServiceState } from "../server/types";
+
+export type { PromptDelivery };
 
 const WORKSPACE_CONTEXT_LABEL = "Workspace context";
 const WORKSPACE_CONTEXT_SOURCE = "Obsidian workspace";
 const WORKSPACE_SOURCE_ID = "workspace";
 const WORKSPACE_IDENTITY_KEY = "current";
-const OPENCODE_NATIVE_COMMENT_SOURCE_ID = "opencode-native-comment";
 
-// Coordinates Obsidian context sources and local candidates. OpenCode UI
-// adapters receive already decided context from this layer.
+// Coordinates Obsidian context sources and local candidates. Candidates are the
+// only context model; they reach OpenCode as prompt request attachments.
 type ContextManagerDeps = {
   app: App;
   settings: OpenCodeSettings;
-  client: OpenCodeClient;
-  getServerState: () => ServerState;
+  getServiceState: () => ServiceState;
   currentSession: CurrentContextSession;
   registerEvent: (ref: EventRef) => void;
 };
@@ -46,10 +38,8 @@ type ContextManagerDeps = {
 export class ContextManager {
   private app: App;
   private settings: OpenCodeSettings;
-  private client: OpenCodeClient;
-  private syncer: ContextSyncer;
   private workspaceContext: WorkspaceContext;
-  private getServerState: () => ServerState;
+  private getServiceState: () => ServiceState;
   private currentSession: CurrentContextSession;
   private registerEvent: (ref: EventRef) => void;
 
@@ -57,7 +47,6 @@ export class ContextManager {
   private contextRefreshTimer: number | null = null;
   private selectionPollTimer: number | null = null;
   private removeSelectionPollListeners: (() => void) | null = null;
-  private registry = new ContextRegistry();
   private candidateRegistry = new CandidateRegistry();
   private promptInjector = new PromptContextInjector(this.candidateRegistry);
   private autoSources: ContextAutoSources;
@@ -65,10 +54,8 @@ export class ContextManager {
   constructor(deps: ContextManagerDeps) {
     this.app = deps.app;
     this.settings = deps.settings;
-    this.client = deps.client;
-    this.syncer = new ContextSyncer(this.client);
     this.workspaceContext = new WorkspaceContext(this.app);
-    this.getServerState = deps.getServerState;
+    this.getServiceState = deps.getServiceState;
     this.currentSession = deps.currentSession;
     this.registerEvent = deps.registerEvent;
     this.autoSources = new ContextAutoSources({
@@ -276,7 +263,7 @@ export class ContextManager {
     return leaf.getRoot() === rightSplit ? leaf : null;
   }
 
-  async handleServerRunning(): Promise<void> {
+  async handleServiceAttached(): Promise<void> {
     const activeLeaf = this.app.workspace.activeLeaf;
     if (!activeLeaf || activeLeaf.view.getViewType() !== OPENCODE_VIEW_TYPE) {
       return;
@@ -292,14 +279,6 @@ export class ContextManager {
     }
 
     await this.refreshContext(leaf);
-  }
-
-  getItems(): ContextItem[] {
-    return this.registry.getItems();
-  }
-
-  onItemsChanged(callback: (items: ContextItem[]) => void): () => void {
-    return this.registry.onItemsChanged(callback);
   }
 
   getCandidates(): ContextCandidate[] {
@@ -322,23 +301,13 @@ export class ContextManager {
     return this.candidateRegistry.remove(candidateId);
   }
 
-  getPromptContextProjections(): PromptContextProjection[] {
-    return this.buildPromptContextProjectionResult().projections;
-  }
-
-  getNativePromptContextProjections(): NativePromptContextProjection[] {
-    return filterNativeFileCardProjections(this.getPromptContextProjections()).map(
-      (projection) => projection.native
-    );
-  }
-
-  getPromptContextProjectionFailures(): PromptContextProjectionFailure[] {
-    return this.buildPromptContextProjectionResult().failures;
+  getLastPromptDelivery(): PromptDelivery | null {
+    return this.promptInjector.getLastDelivery();
   }
 
   preparePromptContext(sessionId: string, requestBody: unknown): PromptInjectionPlan | null {
     this.candidateRegistry.setSession(sessionId);
-    return this.promptInjector.prepare(sessionId, requestBody, this.getPromptContextProjections());
+    return this.promptInjector.prepare(sessionId, requestBody);
   }
 
   completePromptContext(planId: string): void {
@@ -349,157 +318,38 @@ export class ContextManager {
     this.promptInjector.fail(planId, reason);
   }
 
-  upsertOpenCodeNativeCommentCandidate(item: OpenCodePromptContextItem): ContextCandidate | null {
-    if (!item.commentID || !item.comment?.trim()) {
-      return null;
-    }
-
-    return this.candidateRegistry.upsert(
-      this.createCandidate({
-        sourceId: OPENCODE_NATIVE_COMMENT_SOURCE_ID,
-        sourceKind: "opencode-native-comment",
-        identityKey: `opencode-comment:${item.path}:${item.commentID}`,
-        fingerprint: JSON.stringify({
-          key: item.key,
-          path: item.path,
-          selection: item.selection ?? null,
-          comment: item.comment,
-          commentID: item.commentID,
-          commentOrigin: item.commentOrigin ?? null,
-          preview: item.preview ?? null,
-        }),
-        label: formatOpenCodeNativeCommentLabel(item),
-        text: item.comment,
-        sourceFile: item.path,
-        navigationSourceFile: item.path,
-        startLine: item.selection?.startLine,
-        endLine: item.selection?.endLine,
-        lifetime: "one-shot",
-        sourceData: {
-          kind: "opencode-native-comment",
-          key: item.key,
-          item: {
-            type: "file",
-            path: item.path,
-            selection: item.selection ? { ...item.selection } : undefined,
-            comment: item.comment,
-            commentID: item.commentID,
-            commentOrigin: item.commentOrigin,
-            preview: item.preview,
-          },
-        },
-      })
-    );
-  }
-
-  reconcileOpenCodeNativeCommentCandidates(
-    items: OpenCodePromptContextItem[],
-    options: { removeMissing: boolean } = { removeMissing: false }
-  ): void {
-    const liveIdentities = new Set<string>();
-    for (const item of items) {
-      if (!item.commentID || !item.comment?.trim()) {
-        continue;
-      }
-      this.upsertOpenCodeNativeCommentCandidate(item);
-      liveIdentities.add(`opencode-comment:${item.path}:${item.commentID}`);
-    }
-
-    if (!options.removeMissing) {
-      return;
-    }
-
-    for (const candidate of this.candidateRegistry.getCandidates()) {
-      if (candidate.sourceId !== OPENCODE_NATIVE_COMMENT_SOURCE_ID) {
-        continue;
-      }
-      if (!liveIdentities.has(candidate.identityKey)) {
-        this.candidateRegistry.remove(candidate.id);
-      }
-    }
-  }
-
-  setNativePromptContextIncludedByKey(key: string, included: boolean): ContextCandidate | null {
-    const candidate = this.candidateRegistry
-      .getCandidates()
-      .find(
-        (item) => item.sourceData?.kind === "opencode-native-comment" && item.sourceData.key === key
-      );
-    return candidate ? this.candidateRegistry.setIncluded(candidate.id, included) : null;
-  }
-
-  async addManual(
-    sessionId: string,
-    text: string,
-    sourceFile: string,
-    startLine?: number,
-    endLine?: number
-  ): Promise<ContextItem | null> {
-    return this.addItem({
-      sessionId,
-      type: "manual",
-      label: this.formatContextLabel(sourceFile, startLine, endLine),
-      text,
-      sourceFile,
-      startLine,
-      endLine,
+  includeSelection(selection: SelectedTextContext): ContextCandidate | null {
+    return this.applySourceResult({
+      type: "upsert",
+      candidate: buildSelectionCandidate(
+        selection,
+        this.settings.contextAssist.selection.maxCharsPerSnippet
+      ),
     });
   }
 
-  async addSelectionForCurrentSession(
-    text: string,
-    sourceFile: string,
-    startLine?: number,
-    endLine?: number
-  ): Promise<ContextItem | null> {
-    const sessionId = this.currentSession.getCurrentSessionId();
-    if (!sessionId) {
+  includeNote(input: { path: string; text: string }): ContextCandidate | null {
+    const text = input.text.trim();
+    if (!text) {
       return null;
     }
 
-    return this.addManual(sessionId, text, sourceFile, startLine, endLine);
-  }
-
-  async addCurrentNoteForCurrentSession(
-    sourceFile: string,
-    text: string
-  ): Promise<ContextItem | null> {
-    const endLine = text.length > 0 ? text.split(/\r\n|\r|\n/).length : undefined;
-    return this.addSelectionForCurrentSession(text, sourceFile, 1, endLine);
-  }
-
-  async removeItem(sessionId: string, itemId: string): Promise<boolean> {
-    const item = this.registry.find(itemId);
-    if (!item) {
-      return false;
-    }
-
-    const removed = await this.syncer.remove(sessionId, item);
-    if (!removed) {
-      return false;
-    }
-
-    this.registry.remove(itemId);
-    return true;
-  }
-
-  async removeItemForCurrentSession(itemId: string): Promise<boolean> {
-    const sessionId = this.currentSession.getCurrentSessionId();
-    if (!sessionId) {
-      return false;
-    }
-
-    return this.removeItem(sessionId, itemId);
-  }
-
-  async restoreFromServer(sessionId: string): Promise<ContextItem[]> {
-    const items = await this.syncer.restore(sessionId);
-    if (!items) {
-      this.registry.clear();
-      return this.getItems();
-    }
-
-    return this.registry.replaceAll(await this.normalizeRestoredItems(sessionId, items));
+    return this.applySourceResult({
+      type: "upsert",
+      candidate: {
+        sourceId: "manual",
+        sourceKind: "manual",
+        identityKey: `note:${input.path}`,
+        fingerprint: text,
+        label: input.path,
+        text,
+        sourceFile: input.path,
+        navigationSourceFile: input.path,
+        startLine: 1,
+        endLine: text.split(/\r\n|\r|\n/).length,
+        lifetime: "one-shot",
+      },
+    });
   }
 
   private async refreshContext(leaf: WorkspaceLeaf): Promise<void> {
@@ -507,7 +357,7 @@ export class ContextManager {
       return;
     }
 
-    if (this.getServerState() !== "running") {
+    if (this.getServiceState() !== "attached") {
       return;
     }
 
@@ -606,116 +456,9 @@ export class ContextManager {
       included: true,
       lifetime: input.lifetime,
       status: "active",
-      sourceData: input.sourceData,
       createdAt: now,
       updatedAt: now,
     };
-  }
-
-  private buildPromptContextProjectionResult(): {
-    projections: PromptContextProjection[];
-    failures: PromptContextProjectionFailure[];
-  } {
-    return buildPromptContextProjections(
-      this.candidateRegistry.getCandidates(),
-      createOpenCodeContextPathResolver({
-        vaultBasePath: this.getVaultBasePath(),
-        fileExists: (path) => Boolean(this.app.vault?.getFileByPath?.(path)),
-      })
-    );
-  }
-
-  private getVaultBasePath(): string | null {
-    const adapter = this.app.vault?.adapter as { getBasePath?: () => string } | undefined;
-    return adapter?.getBasePath?.() ?? null;
-  }
-
-  private async addItem(params: {
-    sessionId: string;
-    type: "manual";
-    label: string;
-    text: string;
-    sourceFile: string;
-    navigationSourceFile?: string;
-    startLine?: number;
-    endLine?: number;
-  }): Promise<ContextItem | null> {
-    const text = params.text.trim();
-    if (!text) {
-      return null;
-    }
-
-    if (!this.registry.canAdd()) {
-      return null;
-    }
-
-    const item = await this.syncer.add({ ...params, text });
-
-    return item ? this.registry.add(item) : null;
-  }
-
-  private formatContextLabel(sourceFile: string, startLine?: number, endLine?: number): string {
-    if (startLine === undefined || endLine === undefined) {
-      return sourceFile;
-    }
-    if (startLine === endLine) {
-      return `${sourceFile}:${startLine}`;
-    }
-    return `${sourceFile}:${startLine}-${endLine}`;
-  }
-
-  private async normalizeRestoredItems(
-    sessionId: string,
-    items: ContextItem[]
-  ): Promise<ContextItem[]> {
-    const result: ContextItem[] = [];
-    const autoGroups = new Map<string, ContextItem[]>();
-
-    for (const item of items) {
-      if (item.type !== "auto") {
-        result.push(item);
-        continue;
-      }
-
-      const key = this.autoItemKey(sessionId, item.label, item.sourceFile);
-      const group = autoGroups.get(key) ?? [];
-      group.push(item);
-      autoGroups.set(key, group);
-    }
-
-    for (const group of autoGroups.values()) {
-      const latest = this.latestItem(group);
-      if (!latest) {
-        continue;
-      }
-
-      result.push(latest);
-      for (const stale of group) {
-        if (stale.id === latest.id) {
-          continue;
-        }
-
-        const removed = await this.syncer.remove(sessionId, stale);
-        if (!removed) {
-          result.push(stale);
-        }
-      }
-    }
-
-    return result;
-  }
-
-  private latestItem(items: ContextItem[]): ContextItem | null {
-    return items.reduce<ContextItem | null>((latest, item) => {
-      if (!latest || item.createdAt >= latest.createdAt) {
-        return item;
-      }
-      return latest;
-    }, null);
-  }
-
-  private autoItemKey(sessionId: string, label: string, sourceFile: string): string {
-    return JSON.stringify([sessionId, label, sourceFile]);
   }
 
   private clearDisabledCandidates(previous: OpenCodeSettings, next: OpenCodeSettings): void {
@@ -774,10 +517,4 @@ export class ContextManager {
   destroy(): void {
     this.clearListeners();
   }
-}
-
-function formatOpenCodeNativeCommentLabel(item: OpenCodePromptContextItem): string {
-  const line = item.selection?.startLine;
-  const suffix = line ? `:${line}` : "";
-  return `OpenCode comment: ${item.path}${suffix}`;
 }

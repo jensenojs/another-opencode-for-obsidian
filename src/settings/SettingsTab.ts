@@ -1,29 +1,15 @@
-import { App, Plugin, PluginSettingTab, SettingDefinitionItem, Notice } from "obsidian";
+import { App, Plugin, PluginSettingTab, SettingDefinitionItem } from "obsidian";
 import { existsSync, statSync } from "fs";
 import { homedir } from "os";
-import {
-  CUSTOM_COMMAND_EXAMPLE,
-  OPENCODE_VIEW_TYPE,
-  type KeyboardBridgeShortcutOwner,
-  OpenCodeSettings,
-  ViewLocation,
-  WebViewAppearance,
-} from "../types";
-import { ServerManager } from "../server/ServerManager";
-import { ExecutableResolver } from "../server/ExecutableResolver";
+import { OPENCODE_VIEW_TYPE, OpenCodeSettings, ViewLocation, WebViewAppearance } from "../types";
+import type { ServiceStatus } from "../server/types";
 import { getRuntimePaths } from "../debug/RuntimeDiagnostics";
 import { OpenCodeView } from "../ui/OpenCodeView";
 import { getText } from "../i18n";
-import type { KeyboardConflict, KeyboardShortcutIndex } from "../bridge/KeyboardShortcutIndex";
 
 type SettingsKey =
-  | "port"
-  | "hostname"
-  | "useCustomCommand"
-  | "customCommand"
-  | "opencodePath"
+  | "serviceName"
   | "projectDirectory"
-  | "autoStart"
   | "defaultViewLocation"
   | "webViewAppearance"
   | "contextAssist.enabled"
@@ -33,21 +19,6 @@ type SettingsKey =
   | "contextAssist.selection.enabled"
   | "contextAssist.selection.maxSnippets"
   | "contextAssist.selection.maxCharsPerSnippet";
-
-interface KeyboardBridgeSettingsControl {
-  getSummary: () => {
-    status: KeyboardShortcutIndex["status"];
-    obsidianShortcutCount: number;
-    opencodeShortcutCount: number;
-    conflictCount: number;
-    obsidianAvailable: boolean;
-    opencodeAvailable: boolean;
-    unavailableReason: string | null;
-    conflicts: KeyboardConflict[];
-  };
-  setOwner: (signature: string, owner: KeyboardBridgeShortcutOwner) => Promise<void>;
-  refresh: () => void;
-}
 
 function expandTilde(path: string): string {
   if (path === "~") {
@@ -64,9 +35,8 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     app: App,
     plugin: Plugin,
     private settings: OpenCodeSettings,
-    private serverManager: ServerManager,
-    private onSettingsChange: () => Promise<void>,
-    private keyboardBridge?: KeyboardBridgeSettingsControl
+    private getServiceStatus: () => ServiceStatus | null,
+    private onSettingsChange: () => Promise<void>
   ) {
     super(app, plugin);
   }
@@ -76,79 +46,17 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     return [
       {
         type: "group",
-        heading: text.settings.serverConfiguration,
+        heading: text.settings.serviceConfiguration,
         cls: "opencode-settings-group",
         items: [
           {
-            name: text.settings.port,
-            desc: text.settings.portDesc,
-            control: {
-              type: "number",
-              key: "port",
-              min: 1,
-              max: 65535,
-              step: 1,
-              defaultValue: 14096,
-            },
-          },
-          {
-            name: text.settings.hostname,
-            desc: text.settings.hostnameDesc,
+            name: text.settings.serviceName,
+            desc: text.settings.serviceNameDesc,
             control: {
               type: "text",
-              key: "hostname",
-              placeholder: "127.0.0.1",
-              defaultValue: "127.0.0.1",
-            },
-          },
-          {
-            name: text.settings.useCustomCommand,
-            desc: this.customCommandModeDescription(),
-            control: {
-              type: "toggle",
-              key: "useCustomCommand",
-              defaultValue: false,
-            },
-          },
-          {
-            name: text.settings.customCommand,
-            desc: text.settings.customCommandDesc,
-            visible: () => this.settings.useCustomCommand,
-            control: {
-              type: "textarea",
-              key: "customCommand",
-              placeholder: CUSTOM_COMMAND_EXAMPLE,
-              rows: 3,
-              defaultValue: "",
-            },
-          },
-          {
-            name: text.settings.executablePath,
-            visible: () => !this.settings.useCustomCommand,
-            render: (setting) => {
-              setting
-                .addText((input) =>
-                  input
-                    .setPlaceholder("opencode")
-                    .setValue(this.settings.opencodePath)
-                    .onChange(async (value) => {
-                      this.settings.opencodePath = value;
-                      await this.onSettingsChange();
-                    })
-                )
-                .addButton((button) => {
-                  button.setButtonText(text.settings.autodetect).onClick(async () => {
-                    const detectedPath = ExecutableResolver.resolve("opencode");
-                    if (detectedPath && detectedPath !== "opencode") {
-                      this.settings.opencodePath = detectedPath;
-                      await this.onSettingsChange();
-                      this.update();
-                      new Notice(text.notices.executableFound(detectedPath));
-                    } else {
-                      new Notice(text.notices.executableNotFoundInstallation);
-                    }
-                  });
-                });
+              key: "serviceName",
+              placeholder: text.settings.serviceNamePlaceholder,
+              defaultValue: "auto",
             },
           },
           {
@@ -169,15 +77,6 @@ export class OpenCodeSettingTab extends PluginSettingTab {
         heading: text.settings.behavior,
         cls: "opencode-settings-group",
         items: [
-          {
-            name: text.settings.autoStartServer,
-            desc: text.settings.autoStartServerDesc,
-            control: {
-              type: "toggle",
-              key: "autoStart",
-              defaultValue: false,
-            },
-          },
           {
             name: text.settings.defaultViewLocation,
             desc: text.settings.defaultViewLocationDesc,
@@ -322,30 +221,15 @@ export class OpenCodeSettingTab extends PluginSettingTab {
       },
       {
         type: "group",
-        heading: text.settings.keyboardBridge,
-        cls: "opencode-settings-group opencode-settings-keyboard-bridge",
-        items: [
-          {
-            name: text.settings.keyboardBridge,
-            desc: text.settings.keyboardBridgeDesc,
-            searchable: false,
-            render: (setting) => {
-              this.renderKeyboardBridge(setting.settingEl);
-            },
-          },
-        ],
-      },
-      {
-        type: "group",
-        heading: text.settings.serverStatus,
+        heading: text.settings.serviceStatus,
         cls: "opencode-settings-group opencode-settings-status-group",
         items: [
           {
-            name: text.settings.serverStatus,
-            desc: text.settings.serverStatusDesc,
+            name: text.settings.serviceStatus,
+            desc: text.settings.serviceStatusDesc,
             searchable: false,
             render: (setting) => {
-              this.renderServerStatus(setting.settingEl);
+              this.renderServiceStatus(setting.settingEl);
             },
           },
         ],
@@ -357,20 +241,10 @@ export class OpenCodeSettingTab extends PluginSettingTab {
 
   getControlValue(key: SettingsKey): unknown {
     switch (key) {
-      case "port":
-        return this.settings.port;
-      case "hostname":
-        return this.settings.hostname;
-      case "useCustomCommand":
-        return this.settings.useCustomCommand;
-      case "customCommand":
-        return this.settings.customCommand;
-      case "opencodePath":
-        return this.settings.opencodePath;
+      case "serviceName":
+        return this.settings.serviceName;
       case "projectDirectory":
         return this.settings.projectDirectory;
-      case "autoStart":
-        return this.settings.autoStart;
       case "defaultViewLocation":
         return this.settings.defaultViewLocation;
       case "webViewAppearance":
@@ -394,33 +268,12 @@ export class OpenCodeSettingTab extends PluginSettingTab {
 
   async setControlValue(key: SettingsKey, value: unknown): Promise<void> {
     switch (key) {
-      case "port":
-        this.settings.port = expectNumber(key, value);
-        await this.onSettingsChange();
-        return;
-      case "hostname":
-        this.settings.hostname = expectString(key, value) || "127.0.0.1";
-        await this.onSettingsChange();
-        return;
-      case "useCustomCommand":
-        this.settings.useCustomCommand = expectBoolean(key, value);
-        await this.onSettingsChange();
-        this.update();
-        return;
-      case "customCommand":
-        this.settings.customCommand = expectString(key, value);
-        await this.onSettingsChange();
-        return;
-      case "opencodePath":
-        this.settings.opencodePath = expectString(key, value);
+      case "serviceName":
+        this.settings.serviceName = expectString(key, value).trim() || "auto";
         await this.onSettingsChange();
         return;
       case "projectDirectory":
         await this.setProjectDirectoryFromInput(expectString(key, value));
-        return;
-      case "autoStart":
-        this.settings.autoStart = expectBoolean(key, value);
-        await this.onSettingsChange();
         return;
       case "defaultViewLocation":
         this.settings.defaultViewLocation = expectViewLocation(key, value);
@@ -465,22 +318,6 @@ export class OpenCodeSettingTab extends PluginSettingTab {
     }
   }
 
-  private customCommandModeDescription(): DocumentFragment {
-    const text = getText();
-    const fragment = document.createDocumentFragment();
-    fragment.append(text.settings.useCustomCommandDesc);
-    fragment.append(document.createElement("br"));
-    const linkEl = document.createElement("a");
-    linkEl.textContent = text.settings.learnMore;
-    linkEl.href = "https://github.com/jensenojs/another-opencode-for-obsidian#custom-command-mode";
-    linkEl.addEventListener("click", (event) => {
-      event.preventDefault();
-      window.open(linkEl.href, "_blank");
-    });
-    fragment.append(linkEl);
-    return fragment;
-  }
-
   private validateProjectDirectoryInput(value: string): string | void {
     const text = getText();
     const trimmed = value.trim();
@@ -514,266 +351,50 @@ export class OpenCodeSettingTab extends PluginSettingTab {
       throw new Error(validationMessage);
     }
 
-    const trimmed = value.trim();
-    this.settings.projectDirectory = trimmed;
-    if (!trimmed) {
-      this.serverManager.updateProjectDirectory("");
-      await this.onSettingsChange();
-      return;
-    }
-
-    const expanded = expandTilde(trimmed);
-    this.serverManager.updateProjectDirectory(expanded);
+    this.settings.projectDirectory = value.trim();
     await this.onSettingsChange();
   }
 
-  private renderKeyboardBridge(container: HTMLElement): void {
+  private renderServiceStatus(container: HTMLElement): void {
     const text = getText();
+    const paths = getRuntimePaths();
+    const status = this.getServiceStatus();
     container.empty();
-    container.classList.add("opencode-keyboard-bridge-setting");
-
-    if (!this.keyboardBridge) {
-      container.createDiv({
-        text: text.settings.keyboardBridgeUnavailable,
-        cls: "opencode-keyboard-bridge-status",
-      });
-      return;
-    }
-
-    const panel = container.createDiv({ cls: "opencode-keyboard-bridge-panel" });
-    const summary = this.keyboardBridge.getSummary();
-    const summaryEl = panel.createDiv({ cls: "opencode-keyboard-bridge-summary" });
-    const metricsEl = summaryEl.createDiv({ cls: "opencode-keyboard-bridge-metrics" });
-    const statusEl = metricsEl.createDiv({ cls: "opencode-keyboard-bridge-status" });
-    statusEl.createSpan({ text: text.settings.statusLabel });
-    statusEl.createSpan({
-      text: this.keyboardBridgeStatusText(summary),
-      cls: summary.status === "available" ? "opencode-keyboard-bridge-status-ok" : undefined,
-    });
-
-    const countsEl = metricsEl.createDiv({ cls: "opencode-keyboard-bridge-counts" });
-    countsEl.createSpan({
-      text: text.settings.keyboardBridgeCounts(
-        summary.obsidianShortcutCount,
-        summary.opencodeShortcutCount,
-        summary.conflictCount
-      ),
-    });
-
-    const buttonContainer = summaryEl.createDiv({ cls: "opencode-settings-buttons" });
-    const refreshButton = buttonContainer.createEl("button", {
-      text: text.settings.refreshKeyboardBridge,
-    });
-    refreshButton.addEventListener("click", () => {
-      this.keyboardBridge?.refresh();
-      this.renderKeyboardBridge(container);
-    });
-
-    if (summary.conflictCount > 0) {
-      panel.createDiv({
-        text: text.settings.keyboardBridgeConflictsNeedReview(summary.conflictCount),
-        cls: "opencode-keyboard-bridge-warning",
-      });
-    }
-
-    if (summary.conflicts.length === 0) {
-      panel.createDiv({
-        text: text.settings.keyboardBridgeNoConflicts,
-        cls: "opencode-keyboard-bridge-empty",
-      });
-      return;
-    }
-
-    const listEl = panel.createDiv({ cls: "opencode-keyboard-conflict-list" });
-    for (const conflict of summary.conflicts.slice(0, 20)) {
-      this.renderKeyboardConflict(listEl, conflict, container);
-    }
-  }
-
-  private renderKeyboardConflict(
-    container: HTMLElement,
-    conflict: KeyboardConflict,
-    refreshContainer: HTMLElement
-  ): void {
-    const text = getText();
-    const row = container.createDiv({ cls: "opencode-keyboard-conflict-row" });
-    row.createEl("code", {
-      text: conflict.display,
-      cls: "opencode-keyboard-conflict-shortcut",
-    });
-
-    const detail = row.createDiv({ cls: "opencode-keyboard-conflict-detail" });
-    const obsidianLine = detail.createDiv({ cls: "opencode-keyboard-conflict-command" });
-    obsidianLine.createSpan({ text: "Obsidian", cls: "opencode-keyboard-conflict-label" });
-    obsidianLine.createSpan({
-      text: formatShortcutOwners(conflict.obsidian),
-      cls: "opencode-keyboard-conflict-command-text",
-    });
-
-    const opencodeLine = detail.createDiv({ cls: "opencode-keyboard-conflict-command" });
-    opencodeLine.createSpan({ text: "OpenCode", cls: "opencode-keyboard-conflict-label" });
-    opencodeLine.createSpan({
-      text: formatShortcutOwners(conflict.opencode),
-      cls: "opencode-keyboard-conflict-command-text",
-    });
-
-    const actions = row.createDiv({ cls: "opencode-keyboard-conflict-actions" });
-    const ownerControl = actions.createDiv({
-      cls: "opencode-keyboard-conflict-owner-segment",
-      attr: { "aria-label": text.settings.keyboardConflictOwnerLabel },
-    });
-    const owners: KeyboardBridgeShortcutOwner[] = ["obsidian", "opencode"];
-    for (const owner of owners) {
-      const active = conflict.policy.owner === owner;
-      const button = ownerControl.createEl("button", {
-        text: owner === "obsidian" ? "Obsidian" : "OpenCode",
-        cls: "opencode-keyboard-conflict-owner-option",
-        attr: {
-          type: "button",
-          "aria-pressed": active ? "true" : "false",
-          title: owner === "obsidian" ? text.settings.ownerObsidian : text.settings.ownerOpenCode,
-        },
-      });
-      button.classList.toggle("is-active", active);
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (conflict.policy.owner === owner) {
-          return;
-        }
-        void this.keyboardBridge?.setOwner(conflict.signature, owner).then(() => {
-          this.renderKeyboardBridge(refreshContainer);
-        });
-      });
-    }
-  }
-
-  private keyboardBridgeStatusText(
-    summary: ReturnType<KeyboardBridgeSettingsControl["getSummary"]>
-  ): string {
-    const text = getText();
-    if (!summary.obsidianAvailable) {
-      return text.settings.keyboardBridgeObsidianUnavailable;
-    }
-    if (!summary.opencodeAvailable) {
-      return text.settings.keyboardBridgeOpenCodeUnavailable;
-    }
-    return text.settings.keyboardBridgeAvailable;
-  }
-
-  private renderServerStatus(container: HTMLElement): void {
-    const text = getText();
-    container.empty();
-
-    const state = this.serverManager.getState();
-    const statusText = {
-      stopped: text.settings.stopped,
-      starting: text.settings.starting,
-      running: text.settings.running,
-      error: text.settings.error,
-    };
-
-    const statusClass = {
-      stopped: "status-stopped",
-      starting: "status-starting",
-      running: "status-running",
-      error: "status-error",
-    };
 
     const statusEl = container.createDiv({ cls: "opencode-status-line" });
     statusEl.createSpan({ text: text.settings.statusLabel });
     statusEl.createSpan({
-      text: statusText[state],
-      cls: `opencode-status-badge ${statusClass[state]}`,
+      text: status?.state === "attached" ? text.settings.attached : text.settings.unavailable,
+      cls:
+        status?.state === "attached"
+          ? "opencode-status-badge status-running"
+          : "opencode-status-badge status-error",
     });
 
-    if (state === "error") {
-      const diagnostics = this.serverManager.getDiagnostics();
-      const paths = getRuntimePaths();
-      const errorMsg = diagnostics.lastError;
-      if (errorMsg) {
-        const errorEl = container.createDiv({ cls: "opencode-error-details" });
-        errorEl.createEl("div", {
-          text: errorMsg,
-          cls: "opencode-error-text",
-        });
-        if (diagnostics.hint) {
-          errorEl.createEl("div", {
-            text: diagnostics.hint,
-            cls: "opencode-diagnostic-hint",
-          });
-        }
-        this.renderDiagnosticLine(errorEl, text.settings.command, diagnostics.lastDisplayCommand);
-        this.renderDiagnosticLine(errorEl, text.settings.stderr, diagnostics.lastStderr);
-        this.renderDiagnosticLine(errorEl, text.settings.log, paths.logFile);
-        this.renderDiagnosticLine(errorEl, text.settings.statusFile, paths.statusFile);
-      }
-    }
-
-    if (state === "running") {
+    if (status?.state === "attached") {
+      const { handle } = status;
       const urlEl = container.createDiv({ cls: "opencode-status-line" });
-      urlEl.createSpan({ text: "URL: " });
-      const serverUrl = this.serverManager.getUrl();
-      const linkEl = urlEl.createEl("a", {
-        text: serverUrl,
-        href: serverUrl,
+      const linkEl = urlEl.createEl("a", { text: handle.url, href: handle.url });
+      linkEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        window.open(handle.url, "_blank");
       });
-      linkEl.addEventListener("click", (e) => {
-        e.preventDefault();
-        window.open(serverUrl, "_blank");
+      urlEl.createSpan({
+        text: `${handle.name} · v${handle.version} · pid ${handle.pid}`,
+        cls: "opencode-status-detail",
       });
+      this.renderDiagnosticLine(container, text.settings.log, paths.logFile);
+      return;
     }
 
-    const buttonContainer = container.createDiv({ cls: "opencode-settings-buttons" });
-
-    if (state === "stopped" || state === "error") {
-      const startButton = buttonContainer.createEl("button", {
-        text: text.settings.startServer,
-        cls: "mod-cta",
-      });
-      startButton.addEventListener("click", async () => {
-        await this.serverManager.start();
-        this.renderServerStatus(container);
-      });
-    }
-
-    if (state === "running") {
-      const stopButton = buttonContainer.createEl("button", {
-        text: text.settings.stopServer,
-      });
-      stopButton.addEventListener("click", () => {
-        this.serverManager.stop();
-        this.renderServerStatus(container);
-      });
-
-      const restartButton = buttonContainer.createEl("button", {
-        text: text.settings.restartServer,
-        cls: "mod-warning",
-      });
-      restartButton.addEventListener("click", async () => {
-        this.serverManager.stop();
-        await this.serverManager.start();
-        this.renderServerStatus(container);
-      });
-    }
-
-    if (state === "starting") {
-      buttonContainer.createSpan({
-        text: text.settings.pleaseWait,
-        cls: "opencode-status-waiting",
-      });
-    }
-  }
-
-  private serverStateText(): string {
-    const text = getText();
-    const state = this.serverManager.getState();
-    return {
-      stopped: text.settings.stopped,
-      starting: text.settings.starting,
-      running: text.settings.running,
-      error: text.settings.error,
-    }[state];
+    const detailEl = container.createDiv({ cls: "opencode-error-details" });
+    this.renderDiagnosticLine(detailEl, text.settings.reason, status?.reason);
+    detailEl.createEl("code", {
+      text: text.view.unavailableCommand,
+      cls: "opencode-diagnostic-value",
+    });
+    this.renderDiagnosticLine(detailEl, text.settings.log, paths.logFile);
+    this.renderDiagnosticLine(detailEl, text.settings.statusFile, paths.statusFile);
   }
 
   private renderDiagnosticLine(
@@ -832,8 +453,4 @@ function expectWebViewAppearance(key: SettingsKey, value: unknown): WebViewAppea
     throw new TypeError(`Expected ${key} to be a valid web view appearance`);
   }
   return value;
-}
-
-function formatShortcutOwners(entries: Array<{ title: string; commandId: string }>): string {
-  return entries.map((entry) => entry.title || entry.commandId).join(", ");
 }

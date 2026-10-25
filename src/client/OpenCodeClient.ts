@@ -1,63 +1,15 @@
+import { request as httpRequest } from "http";
 import { createLogger } from "../debug/RuntimeDiagnostics";
 import { buildServerAuthHeader } from "./ServerAuth";
-import {
-  CONTEXT_MESSAGE_PREFIX,
-  formatContextMessageText,
-  type ContextMessageProvenance,
-} from "../context/ContextProvenance";
 
-export { CONTEXT_MESSAGE_PREFIX, type ContextMessageProvenance };
-
-type OpenCodePart = {
+type SessionInfo = {
   id: string;
-  messageID: string;
-  sessionID: string;
-  type: string;
-  text?: string;
-  ignored?: boolean;
-  synthetic?: boolean;
-  metadata?: Record<string, unknown>;
-  time?: {
-    start: number;
-    end?: number;
-  };
 };
 
-type OpenCodeMessageInfo = {
-  id: string;
-  sessionID: string;
-};
-
-type OpenCodeMessageWithParts = {
-  info: OpenCodeMessageInfo;
-  parts: OpenCodePart[];
-};
-
-export type OpenCodeContextMessageRef = {
-  messageId: string;
-  partId: string;
-};
-
-export type OpenCodeMessage = OpenCodeMessageWithParts;
-
-type OpenCodeSession = {
-  id?: string;
-  time?: {
-    created?: number;
-    updated?: number;
-  };
-  created?: number;
-  updated?: number;
-  createdAt?: string | number;
-  updatedAt?: string | number;
-};
-
-type OpenCodeResponse<T> = T | { data?: T } | { message?: T } | null;
-
-type OpenCodeRequestResult<T> = {
+export type OpenCodeRequestResult<T> = {
   ok: boolean;
   status: number;
-  value: OpenCodeResponse<T>;
+  data: T | null;
 };
 
 export class OpenCodeClient {
@@ -73,44 +25,29 @@ export class OpenCodeClient {
     projectDirectory: string,
     getAuthPassword?: () => string | null
   ) {
-    this.apiBaseUrl = this.normalizeBaseUrl(apiBaseUrl);
-    this.uiBaseUrl = this.normalizeBaseUrl(uiBaseUrl);
+    this.apiBaseUrl = normalizeBaseUrl(apiBaseUrl);
+    this.uiBaseUrl = normalizeBaseUrl(uiBaseUrl);
     this.projectDirectory = projectDirectory;
     this.getAuthPassword = getAuthPassword;
   }
 
   updateBaseUrl(apiBaseUrl: string, uiBaseUrl: string, projectDirectory: string): void {
-    const nextApiUrl = this.normalizeBaseUrl(apiBaseUrl);
-    const nextUiUrl = this.normalizeBaseUrl(uiBaseUrl);
-    if (
-      nextApiUrl !== this.apiBaseUrl ||
-      nextUiUrl !== this.uiBaseUrl ||
-      projectDirectory !== this.projectDirectory
-    ) {
-      this.apiBaseUrl = nextApiUrl;
-      this.uiBaseUrl = nextUiUrl;
-      this.projectDirectory = projectDirectory;
-    }
+    this.apiBaseUrl = normalizeBaseUrl(apiBaseUrl);
+    this.uiBaseUrl = normalizeBaseUrl(uiBaseUrl);
+    this.projectDirectory = projectDirectory;
   }
 
   async initializeProject(): Promise<boolean> {
-    try {
-      const response = await this.request<unknown>(
-        "GET",
-        `/session?directory=${encodeURIComponent(this.projectDirectory)}`
-      );
-
-      if (response) {
-        this.logger.info("project initialized", { projectDirectory: this.projectDirectory });
-        return true;
-      } else {
-        this.logger.warn("project initialization failed");
-        return false;
-      }
-    } catch (error) {
-      this.logger.error("project initialization error", error);
-      return false;
+    const sessions = await this.listSessions(1, "asc");
+    if (sessions) {
+      this.logger.info("project initialized", { projectDirectory: this.projectDirectory });
+      return true;
     }
+
+    this.logger.warn("project initialization failed", {
+      projectDirectory: this.projectDirectory,
+    });
+    return false;
   }
 
   getSessionUrl(sessionId: string): string {
@@ -123,96 +60,30 @@ export class OpenCodeClient {
   }
 
   async createSession(): Promise<string | null> {
-    const result = await this.request<OpenCodeSession>("POST", "/session", {
+    const session = await this.request<SessionInfo>("POST", "/api/session", {
       title: "Obsidian",
+      location: { directory: this.projectDirectory },
     });
-    const session = this.unwrap(result);
     return session?.id ?? null;
   }
 
   async getLatestSessionId(): Promise<string | null> {
-    const result = await this.request<OpenCodeSession[]>(
+    const sessions = await this.listSessions(1, "desc");
+    return sessions?.[0]?.id ?? null;
+  }
+
+  /// Path stays at the request call site: the bridge harness reads request paths
+  /// from here, and a helper that returns the URL makes the endpoint invisible.
+  private async listSessions(limit: number, order: "asc" | "desc"): Promise<SessionInfo[] | null> {
+    return this.request<SessionInfo[]>(
       "GET",
-      `/session?directory=${encodeURIComponent(this.projectDirectory)}`
+      `/api/session?directory=${encodeURIComponent(this.projectDirectory)}&limit=${limit}&order=${order}`
     );
-    const sessions = this.unwrap(result);
-    if (!Array.isArray(sessions) || sessions.length === 0) {
-      return null;
-    }
-
-    const latestSession = sessions.reduce((latest, session) => {
-      return this.getSessionTimestamp(session) > this.getSessionTimestamp(latest)
-        ? session
-        : latest;
-    });
-
-    return latestSession.id ?? null;
   }
 
-  async addContextMessage(
-    sessionId: string,
-    contextText: string,
-    provenance?: ContextMessageProvenance
-  ): Promise<OpenCodeContextMessageRef | null> {
-    // Legacy explicit context-message path. Automatic oc-ctx prompt injection does not call this.
-    if (contextText.trim().length === 0) {
-      return null;
-    }
-
-    const text = formatContextMessageText(contextText, provenance);
-    const result = await this.request<OpenCodeMessageWithParts>(
-      "POST",
-      `/session/${sessionId}/message`,
-      {
-        noReply: true,
-        parts: [{ type: "text", text, synthetic: true }],
-      }
-    );
-
-    this.logger.info("injected context message", {
-      sessionId,
-      contextLength: contextText.length,
-    });
-
-    const message = this.unwrap(result);
-    const part = message?.parts.find((candidate) => candidate.type === "text");
-    if (!message?.info?.id || !part?.id) {
-      this.logger.error("failed to inject context message", { sessionId });
-      return null;
-    }
-
-    return {
-      messageId: message.info.id,
-      partId: part.id,
-    };
-  }
-
-  async deleteMessage(sessionId: string, messageId: string): Promise<boolean> {
-    const result = await this.requestResult<boolean>(
-      "DELETE",
-      `/session/${sessionId}/message/${messageId}`
-    );
-
-    if (!result.ok) {
-      return result.status === 404;
-    }
-
-    return result.status === 204 || Boolean(this.unwrap(result.value));
-  }
-
-  async listSessionMessages(sessionId: string): Promise<OpenCodeMessage[] | null> {
-    const result = await this.request<OpenCodeMessage[]>("GET", `/session/${sessionId}/message`);
-    const messages = this.unwrap(result);
-    return Array.isArray(messages) ? messages : null;
-  }
-
-  private async request<T>(
-    method: string,
-    path: string,
-    body?: unknown
-  ): Promise<OpenCodeResponse<T>> {
+  private async request<T>(method: string, path: string, body?: unknown): Promise<T | null> {
     const result = await this.requestResult<T>(method, path, body);
-    return result.ok ? result.value : null;
+    return result.ok ? result.data : null;
   }
 
   private async requestResult<T>(
@@ -220,125 +91,83 @@ export class OpenCodeClient {
     path: string,
     body?: unknown
   ): Promise<OpenCodeRequestResult<T>> {
-    // opencode v2 的 JSON API 挂在 /api 前缀下；v1 无前缀。v2 对无前缀路径返回 SPA HTML，
-    // v1 对 /api 前缀返回 404。按 /api 优先探测，识别到错版本特征时回落另一条路径。
-    const viaApi = await this.attemptRequest(method, `/api${path}`, body);
-    if (viaApi?.ok && !viaApi.isHtml) {
-      return { ok: true, status: viaApi.status, value: viaApi.value as OpenCodeResponse<T> };
-    }
-    const direct = await this.attemptRequest(method, path, body);
-    if (direct?.ok && !direct.isHtml) {
-      return { ok: true, status: direct.status, value: direct.value as OpenCodeResponse<T> };
-    }
-    const failed = viaApi ?? direct;
-    if (!failed) {
-      this.logger.error("api request error", new Error("all attempts failed at network level"));
-      return { ok: false, status: 0, value: null };
-    }
-    if (!failed.ok) {
-      this.logger.error("api request failed", { path, status: failed.status });
-    }
-    return { ok: false, status: failed.status, value: null };
-  }
+    const url = new URL(`${this.apiBaseUrl}${path}`);
+    const authHeader = buildServerAuthHeader(this.getAuthPassword?.() ?? null);
+    const payload = body === undefined ? null : JSON.stringify(body);
 
-  private async attemptRequest(
-    method: string,
-    path: string,
-    body?: unknown
-  ): Promise<{ ok: boolean; status: number; value: unknown; isHtml: boolean } | null> {
     try {
-      const url = `${this.apiBaseUrl}${path}`;
-      const urlObj = new URL(url);
-      const http = require("http");
-      const authHeader = buildServerAuthHeader(this.getAuthPassword?.() ?? null);
-      const options = {
-        hostname: urlObj.hostname,
-        port: urlObj.port,
-        path: urlObj.pathname + urlObj.search,
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          // OpenCode's JS SDK percent-encodes this header; the server decodes it before loading the instance.
-          "x-opencode-directory": encodeURIComponent(this.projectDirectory),
-          ...(authHeader ? { Authorization: authHeader } : {}),
-        },
-      };
-      return await new Promise<{
-        ok: boolean;
-        status: number;
-        value: unknown;
-        isHtml: boolean;
-      } | null>((resolve, reject) => {
-        const req = http.request(options, (res: import("http").IncomingMessage) => {
-          let data = "";
-          res.on("data", (chunk: Buffer) => (data += chunk));
-          res.on("end", () => {
-            const isHtml = data.trimStart().startsWith("<");
-            let value: unknown = null;
-            if (!isHtml) {
-              try {
-                value = JSON.parse(data || "null");
-              } catch {
-                value = null;
-              }
-            }
-            resolve({
-              ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
-              status: res.statusCode ?? 500,
-              value,
-              isHtml,
+      const response = await new Promise<{ status: number; text: string }>((resolve, reject) => {
+        const request = httpRequest(
+          {
+            hostname: url.hostname,
+            port: url.port,
+            path: url.pathname + url.search,
+            method,
+            headers: {
+              "Content-Type": "application/json",
+              ...(authHeader ? { Authorization: authHeader } : {}),
+            },
+          },
+          (incoming) => {
+            let text = "";
+            incoming.setEncoding("utf8");
+            incoming.on("data", (chunk: string) => {
+              text += chunk;
             });
-          });
-        });
-        req.on("error", reject);
-        if (body) req.write(JSON.stringify(body));
-        req.end();
+            incoming.on("end", () => resolve({ status: incoming.statusCode ?? 500, text }));
+          }
+        );
+        request.on("error", reject);
+        if (payload) {
+          request.write(payload);
+        }
+        request.end();
       });
+
+      if (response.status < 200 || response.status >= 300) {
+        this.logger.error("api request failed", { method, path, status: response.status });
+        return { ok: false, status: response.status, data: null };
+      }
+
+      const data = parseApiEnvelope<T>(response.text);
+      if (data === null) {
+        this.logger.error("api response was not an OpenCode envelope", {
+          method,
+          path,
+          status: response.status,
+          bodyLength: response.text.length,
+        });
+        return { ok: false, status: response.status, data: null };
+      }
+
+      return { ok: true, status: response.status, data };
     } catch (error) {
-      this.logger.error("api request error", error);
-      return null;
+      this.logger.error("api request error", {
+        method,
+        path,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { ok: false, status: 0, data: null };
     }
+  }
+}
+
+export function parseApiEnvelope<T>(text: string): T | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
   }
 
-  private unwrap<T>(result: OpenCodeResponse<T>): T | null {
-    if (!result) {
-      return null;
-    }
-    if (typeof result === "object") {
-      const payload = result as { data?: T; message?: T };
-      if (payload.data) {
-        return payload.data;
-      }
-      if (payload.message) {
-        return payload.message;
-      }
-    }
-    return result as T;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
   }
 
-  private getSessionTimestamp(session: OpenCodeSession): number {
-    return Math.max(
-      this.toTimestamp(session.time?.updated),
-      this.toTimestamp(session.updated),
-      this.toTimestamp(session.updatedAt),
-      this.toTimestamp(session.time?.created),
-      this.toTimestamp(session.created),
-      this.toTimestamp(session.createdAt)
-    );
-  }
+  const data = (parsed as { data?: T }).data;
+  return data === undefined ? null : data;
+}
 
-  private toTimestamp(value: string | number | undefined): number {
-    if (typeof value === "number") {
-      return value;
-    }
-    if (typeof value === "string") {
-      const timestamp = Date.parse(value);
-      return Number.isNaN(timestamp) ? 0 : timestamp;
-    }
-    return 0;
-  }
-
-  private normalizeBaseUrl(baseUrl: string): string {
-    return baseUrl.replace(/\/+$/, "");
-  }
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "");
 }

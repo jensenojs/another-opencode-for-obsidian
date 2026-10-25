@@ -13,12 +13,12 @@ export interface ObsidianReloadOptions {
   pluginId?: string;
   settleMs: number;
   openView: boolean;
-  restartServer: boolean;
+  reattachService: boolean;
 }
 
 export interface ObsidianReloadSnapshot {
   enabled: boolean | null;
-  serverState: string | null;
+  serviceState: string | null;
   lastSessionUrl: string | null;
   serverUrl: string | null;
   proxyOrigin: string | null;
@@ -29,10 +29,9 @@ export interface ObsidianReloadRuntimeResult {
   ok: boolean;
   reason?: string;
   before?: ObsidianReloadSnapshot;
-  stoppedBeforeDisable?: boolean;
+  reattached?: unknown;
   afterEnable?: ObsidianReloadSnapshot;
   after?: ObsidianReloadSnapshot;
-  started?: unknown;
   commandExecuted?: boolean;
   error?: string;
   stack?: string | null;
@@ -91,7 +90,7 @@ export async function reloadObsidianPlugin(
         pluginId: options.pluginId ?? defaultPluginId,
         settleMs: options.settleMs,
         openView: options.openView,
-        restartServer: options.restartServer,
+        reattachService: options.reattachService,
       }),
       awaitPromise: true,
       returnByValue: true,
@@ -128,18 +127,18 @@ export function buildReloadExpression(options: {
   pluginId: string;
   settleMs: number;
   openView: boolean;
-  restartServer: boolean;
+  reattachService: boolean;
 }): string {
   return `
     (async () => {
       const pluginId = ${JSON.stringify(options.pluginId)};
       const settleMs = ${JSON.stringify(options.settleMs)};
       const openView = ${JSON.stringify(options.openView)};
-      const restartServer = ${JSON.stringify(options.restartServer)};
+      const reattachService = ${JSON.stringify(options.reattachService)};
       const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const snapshot = (obsidianApp, plugin) => ({
         enabled: obsidianApp?.plugins?.enabledPlugins?.has(pluginId) ?? null,
-        serverState: plugin?.getServerState?.() ?? null,
+        serviceState: plugin?.getServiceState?.() ?? null,
         lastSessionUrl: plugin?.settings?.lastSessionUrl ?? null,
         serverUrl: plugin?.getServerUrl?.() ?? null,
         proxyOrigin: plugin?.getProxyOrigin?.() ?? null,
@@ -158,13 +157,6 @@ export function buildReloadExpression(options: {
           return { ok: false, reason: 'plugin-not-found', before };
         }
 
-        let stoppedBeforeDisable = false;
-        if (restartServer && typeof beforePlugin.stopServer === 'function') {
-          await beforePlugin.stopServer();
-          stoppedBeforeDisable = true;
-          await delay(500);
-        }
-
         await obsidianApp.plugins.disablePlugin(pluginId);
         await delay(500);
         await obsidianApp.plugins.enablePlugin(pluginId);
@@ -176,9 +168,9 @@ export function buildReloadExpression(options: {
           return { ok: false, reason: 'plugin-not-loaded-after-enable', before, afterEnable };
         }
 
-        let started = null;
-        if (restartServer && typeof plugin.startServer === 'function') {
-          started = await plugin.startServer();
+        let reattached = null;
+        if (reattachService && typeof plugin.attachService === 'function') {
+          reattached = await plugin.attachService();
         }
         await delay(settleMs);
 
@@ -190,7 +182,7 @@ export function buildReloadExpression(options: {
         await delay(settleMs);
 
         const after = snapshot(obsidianApp, plugin);
-        return { ok: true, before, stoppedBeforeDisable, afterEnable, after, started, commandExecuted };
+        return { ok: true, before, afterEnable, after, reattached, commandExecuted };
       } catch (error) {
         return {
           ok: false,

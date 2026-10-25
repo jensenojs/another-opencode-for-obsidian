@@ -1,52 +1,37 @@
 import { Notice, setIcon } from "obsidian";
-import type { ContextCandidate, ContextItem } from "../types";
+import type { ContextCandidate } from "../types";
 import {
   formatNavigationResolution,
   noticeContextNavigationResult,
-  type ContextNavigationSource,
   type ContextNavigationResolution,
   type ContextNavigationResult,
 } from "./ContextItemNavigator";
+import type { PromptDelivery } from "./PromptContextInjector";
 import { getText } from "../i18n";
 import { OPENCODE_ICON_NAME } from "../icons";
-import type { PromptContextProjectionFailure } from "./PromptContextProjection";
-
-export interface ContextStatusBarNativeSyncFailure {
-  projectionId: string;
-  candidateId: string | null;
-  key: string | null;
-  status: string;
-  reason: string | null;
-}
 
 interface ContextStatusBarDeps {
   addStatusBarItem: () => HTMLElement;
-  getItems: () => ContextItem[];
-  onItemsChanged: (callback: (items: ContextItem[]) => void) => () => void;
-  getCandidates?: () => ContextCandidate[];
-  onCandidatesChanged?: (callback: (items: ContextCandidate[]) => void) => () => void;
-  getProjectionFailures?: () => PromptContextProjectionFailure[];
-  getNativeSyncFailures?: () => ContextStatusBarNativeSyncFailure[];
-  toggleCandidate?: (candidateId: string) => ContextCandidate | null;
-  removeCandidate?: (candidateId: string) => ContextCandidate | null;
-  resolveItem: (item: ContextStatusBarSource) => ContextNavigationResolution;
-  openItem: (item: ContextStatusBarSource) => Promise<ContextNavigationResult>;
-  removeItem: (itemId: string) => Promise<boolean>;
+  getCandidates: () => ContextCandidate[];
+  onCandidatesChanged: (callback: (candidates: ContextCandidate[]) => void) => () => void;
+  toggleCandidate: (candidateId: string) => ContextCandidate | null;
+  removeCandidate: (candidateId: string) => ContextCandidate | null;
+  getLastPromptDelivery: () => PromptDelivery | null;
+  resolveCandidate: (candidate: ContextCandidate) => ContextNavigationResolution;
+  openCandidate: (candidate: ContextCandidate) => Promise<ContextNavigationResult>;
 }
 
 const ROW_OPEN_DELAY_MS = 180;
-type ContextStatusBarSource = ContextNavigationSource & { id: string };
 
+// Obsidian-native surface for the local candidate set. It renders what the next
+// prompt will carry; it never writes to OpenCode and never owns candidate state.
 export class ContextStatusBar {
   private statusEl: HTMLElement;
   private popoverEl: HTMLElement | null = null;
   private backdropEl: HTMLElement | null = null;
-  private unsubscribeItems: (() => void) | null = null;
   private unsubscribeCandidates: (() => void) | null = null;
   private removeKeydown: (() => void) | null = null;
-  private expandedItemIds = new Set<string>();
   private pendingOpenTimers = new Map<string, number>();
-  private removeFailures = new Map<string, string>();
 
   constructor(private deps: ContextStatusBarDeps) {
     this.statusEl = deps.addStatusBarItem();
@@ -56,44 +41,29 @@ export class ContextStatusBar {
       event.preventDefault();
       this.togglePopover();
     });
-    this.unsubscribeItems = deps.onItemsChanged((items) =>
-      this.render(items, this.getCandidates())
-    );
-    this.unsubscribeCandidates =
-      deps.onCandidatesChanged?.((candidates) => this.render(this.deps.getItems(), candidates)) ??
-      null;
+    this.unsubscribeCandidates = deps.onCandidatesChanged((candidates) => this.render(candidates));
   }
 
-  render(items: ContextItem[] = this.deps.getItems(), candidates = this.getCandidates()): void {
+  render(candidates: ContextCandidate[] = this.deps.getCandidates()): void {
     const text = getText();
-    const total = items.length + candidates.length;
-    const includedCandidates = candidates.filter((candidate) => candidate.included).length;
-    const nativeSyncFailures = this.getNativeSyncFailures();
-    const statusCount = candidates.length > 0 ? includedCandidates : items.length;
+    const included = candidates.filter((candidate) => candidate.included).length;
     this.statusEl.empty();
-    this.statusEl.toggleClass("is-active", total > 0);
-    this.statusEl.toggleClass("is-warning", nativeSyncFailures.length > 0);
-    this.renderStatusLabel(text.context.statusText(statusCount));
-    const statusTitle = text.context.statusTitle(
-      includedCandidates,
-      candidates.length,
-      items.length
+    this.statusEl.toggleClass("is-active", candidates.length > 0);
+    this.statusEl.toggleClass(
+      "is-warning",
+      candidates.some((candidate) => candidate.status === "failed")
     );
-    this.statusEl.title =
-      nativeSyncFailures.length > 0
-        ? `${statusTitle}. ${text.context.nativeSyncFailureSummary(nativeSyncFailures.length)}`
-        : statusTitle;
+    this.renderStatusLabel(text.context.statusText(included));
+    this.statusEl.title = text.context.statusTitle(included, candidates.length);
     if (this.popoverEl) {
-      this.renderPopover(items, candidates);
+      this.renderPopover(candidates);
     }
   }
 
   destroy(): void {
     this.hidePopover();
     this.clearPendingOpenTimers();
-    this.unsubscribeItems?.();
     this.unsubscribeCandidates?.();
-    this.unsubscribeItems = null;
     this.unsubscribeCandidates = null;
     this.statusEl.remove();
   }
@@ -115,7 +85,7 @@ export class ContextStatusBar {
     });
     this.popoverEl = document.body.createDiv({ cls: "opencode-ctx-popover" });
     this.positionPopover();
-    this.renderPopover(this.deps.getItems(), this.getCandidates());
+    this.renderPopover(this.deps.getCandidates());
 
     const handleKeydown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
@@ -138,7 +108,7 @@ export class ContextStatusBar {
     this.backdropEl = null;
   }
 
-  private renderPopover(items: ContextItem[], candidates: ContextCandidate[]): void {
+  private renderPopover(candidates: ContextCandidate[]): void {
     if (!this.popoverEl) {
       return;
     }
@@ -154,7 +124,7 @@ export class ContextStatusBar {
     setIcon(brandIconEl, OPENCODE_ICON_NAME);
     brandEl.createDiv({
       cls: "opencode-ctx-popover-title",
-      text: text.context.popoverTitle(items.length, candidates.length),
+      text: text.context.popoverTitle(candidates.length),
     });
     const copyButton = headerEl.createEl("button", {
       cls: "opencode-ctx-copy",
@@ -165,21 +135,38 @@ export class ContextStatusBar {
       event.preventDefault();
       event.stopPropagation();
       await navigator.clipboard.writeText(
-        formatContextDiagnostics(items, (item) => this.deps.resolveItem(item), candidates)
+        formatContextDiagnostics(candidates, (candidate) => this.deps.resolveCandidate(candidate))
       );
       new Notice(text.notices.contextDiagnosticsCopied);
     });
 
-    this.pruneRowState([...items, ...candidates]);
+    this.prunePendingOpenTimers(candidates);
+    this.renderDeliveryLine();
+    if (candidates.length === 0) {
+      this.popoverEl.createDiv({ cls: "opencode-ctx-empty", text: text.context.noActiveContext });
+      return;
+    }
     this.renderCandidateSection(candidates);
-    this.renderCurrentContextSection(items);
+  }
+
+  private renderDeliveryLine(): void {
+    if (!this.popoverEl) {
+      return;
+    }
+    const delivery = this.deps.getLastPromptDelivery();
+    if (!delivery) {
+      return;
+    }
+    this.popoverEl.createDiv({
+      cls: "opencode-ctx-delivery",
+      text: getText().context.lastDelivery(delivery.count),
+    });
   }
 
   private renderCandidateSection(candidates: ContextCandidate[]): void {
-    if (!this.popoverEl || candidates.length === 0) {
+    if (!this.popoverEl) {
       return;
     }
-
     const sectionEl = this.popoverEl.createDiv({
       cls: "opencode-ctx-section opencode-ctx-candidate-section",
     });
@@ -193,42 +180,24 @@ export class ContextStatusBar {
       text: `${candidates.filter((candidate) => candidate.included).length}/${candidates.length}`,
     });
     const listEl = sectionEl.createDiv({ cls: "opencode-ctx-list" });
-    const failures = new Map(
-      (this.deps.getProjectionFailures?.() ?? []).map((failure) => [failure.candidateId, failure])
-    );
-    const nativeSyncFailures = new Map(
-      this.getNativeSyncFailures()
-        .filter((failure) => failure.candidateId)
-        .map((failure) => [failure.candidateId as string, failure])
-    );
     for (const candidate of candidates) {
-      this.renderCandidateRow(
-        listEl,
-        candidate,
-        failures.get(candidate.id),
-        nativeSyncFailures.get(candidate.id)
-      );
+      this.renderCandidateRow(listEl, candidate);
     }
   }
 
-  private renderCandidateRow(
-    listEl: HTMLElement,
-    candidate: ContextCandidate,
-    projectionFailure?: PromptContextProjectionFailure,
-    nativeSyncFailure?: ContextStatusBarNativeSyncFailure
-  ): void {
+  private renderCandidateRow(listEl: HTMLElement, candidate: ContextCandidate): void {
     const rowEl = listEl.createDiv({ cls: "opencode-ctx-item opencode-ctx-candidate" });
-    const resolution = this.deps.resolveItem(candidate);
+    const resolution = this.deps.resolveCandidate(candidate);
     rowEl.toggleClass("is-unresolved", resolution.status === "unresolved");
     rowEl.toggleClass("is-excluded", !candidate.included);
-    rowEl.toggleClass("is-failed", candidate.status === "failed" || Boolean(nativeSyncFailure));
+    rowEl.toggleClass("is-failed", candidate.status === "failed");
     rowEl.setAttribute("role", "button");
     rowEl.setAttribute("tabindex", "0");
     rowEl.setAttribute("aria-pressed", String(candidate.included));
     rowEl.title = formatNavigationResolution(resolution);
     rowEl.addEventListener("click", (event) => {
       event.preventDefault();
-      this.scheduleOpenItem(candidate, resolution);
+      this.scheduleOpenCandidate(candidate, resolution);
     });
     rowEl.addEventListener("dblclick", (event) => {
       event.preventDefault();
@@ -241,15 +210,15 @@ export class ContextStatusBar {
         return;
       }
       event.preventDefault();
-      this.scheduleOpenItem(candidate, resolution);
+      this.scheduleOpenCandidate(candidate, resolution);
     });
 
     const bodyEl = rowEl.createDiv({ cls: "opencode-ctx-item-body" });
     bodyEl.createDiv({ cls: "opencode-ctx-item-label", text: candidate.label });
     bodyEl.createDiv({ cls: "opencode-ctx-item-source", text: this.formatSource(candidate) });
-    this.renderCandidatePills(bodyEl, candidate, resolution, projectionFailure, nativeSyncFailure);
+    this.renderCandidatePills(bodyEl, candidate, resolution);
 
-    if (resolution.status === "unresolved" || candidate.status === "failed" || nativeSyncFailure) {
+    if (resolution.status === "unresolved" || candidate.status === "failed") {
       rowEl.createSpan({
         cls: "opencode-ctx-warning",
         text: "!",
@@ -282,69 +251,26 @@ export class ContextStatusBar {
     }
   }
 
-  private renderCurrentContextSection(items: ContextItem[]): void {
-    if (!this.popoverEl || items.length === 0) {
-      return;
+  private renderCandidatePills(
+    bodyEl: HTMLElement,
+    candidate: ContextCandidate,
+    resolution: ContextNavigationResolution
+  ): void {
+    const detailsEl = bodyEl.createDiv({ cls: "opencode-ctx-item-details" });
+    detailsEl.createSpan({
+      cls: candidate.included ? "opencode-ctx-pill" : "opencode-ctx-pill is-warning",
+      text: candidate.included ? getText().context.included : getText().context.skipped,
+    });
+    if (candidate.status === "failed") {
+      detailsEl.createSpan({
+        cls: "opencode-ctx-pill is-warning",
+        text: getText().context.failedStatus(candidate.statusReason ?? null),
+      });
     }
-
-    const sectionEl = this.popoverEl.createDiv({ cls: "opencode-ctx-section" });
-    const sectionHeaderEl = sectionEl.createDiv({ cls: "opencode-ctx-section-header" });
-    sectionHeaderEl.createDiv({
-      cls: "opencode-ctx-section-title",
-      text: getText().context.currentSessionContext,
-    });
-    sectionHeaderEl.createDiv({
-      cls: "opencode-ctx-section-count",
-      text: `${items.length}`,
-    });
-
-    const listEl = sectionEl.createDiv({ cls: "opencode-ctx-list" });
-    for (const item of items) {
-      const rowEl = listEl.createDiv({ cls: "opencode-ctx-item" });
-      const resolution = this.deps.resolveItem(item);
-      rowEl.toggleClass("is-unresolved", resolution.status === "unresolved");
-      rowEl.toggleClass("is-expanded", this.expandedItemIds.has(item.id));
-      rowEl.setAttribute("role", "button");
-      rowEl.setAttribute("tabindex", "0");
-      rowEl.setAttribute("aria-expanded", String(this.expandedItemIds.has(item.id)));
-      rowEl.title = formatNavigationResolution(resolution);
-      rowEl.addEventListener("click", (event) => {
-        event.preventDefault();
-        this.scheduleOpenItem(item, resolution);
-      });
-      rowEl.addEventListener("dblclick", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.clearPendingOpenTimer(item.id);
-        this.toggleRowExpansion(item, resolution, rowEl);
-      });
-      rowEl.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-        event.preventDefault();
-        this.scheduleOpenItem(item, resolution);
-      });
-
-      const bodyEl = rowEl.createDiv({ cls: "opencode-ctx-item-body" });
-      bodyEl.createDiv({ cls: "opencode-ctx-item-label", text: item.label });
-      bodyEl.createDiv({ cls: "opencode-ctx-item-source", text: this.formatSource(item) });
-      if (this.expandedItemIds.has(item.id)) {
-        this.renderRowDetails(bodyEl, item, resolution);
-      }
-
-      if (resolution.status === "unresolved") {
-        rowEl.createSpan({
-          cls: "opencode-ctx-warning",
-          text: "!",
-        });
-      }
-
-      const actionsEl = rowEl.createDiv({ cls: "opencode-ctx-item-actions" });
-      actionsEl.createSpan({
-        cls: "opencode-ctx-row-state",
-        text: this.expandedItemIds.has(item.id) ? "⌃" : "›",
-        attr: { "aria-hidden": "true" },
+    if (resolution.status !== "resolved") {
+      detailsEl.createSpan({
+        cls: "opencode-ctx-pill is-warning",
+        text: formatNavigationResolution(resolution),
       });
     }
   }
@@ -367,58 +293,37 @@ export class ContextStatusBar {
     this.statusEl.appendChild(countEl);
   }
 
-  private scheduleOpenItem(
-    item: ContextStatusBarSource,
+  private scheduleOpenCandidate(
+    candidate: ContextCandidate,
     resolution: ContextNavigationResolution
   ): void {
     if (resolution.status !== "resolved") {
       return;
     }
-    this.clearPendingOpenTimer(item.id);
+    this.clearPendingOpenTimer(candidate.id);
     const timer = window.setTimeout(() => {
-      this.pendingOpenTimers.delete(item.id);
-      void this.openItem(item);
+      this.pendingOpenTimers.delete(candidate.id);
+      void this.openCandidate(candidate);
     }, ROW_OPEN_DELAY_MS);
-    this.pendingOpenTimers.set(item.id, timer);
+    this.pendingOpenTimers.set(candidate.id, timer);
   }
 
-  private async openItem(item: ContextStatusBarSource): Promise<void> {
-    const result = await this.deps.openItem(item);
+  private async openCandidate(candidate: ContextCandidate): Promise<void> {
+    const result = await this.deps.openCandidate(candidate);
     noticeContextNavigationResult(result);
   }
 
-  private toggleRowExpansion(
-    item: ContextItem,
-    resolution: ContextNavigationResolution,
-    rowEl: HTMLElement
-  ): void {
-    const itemId = item.id;
-    const expanded = !this.expandedItemIds.has(itemId);
-    if (expanded) {
-      this.expandedItemIds.add(itemId);
-    } else {
-      this.expandedItemIds.delete(itemId);
-    }
-    rowEl.toggleClass("is-expanded", expanded);
-    rowEl.setAttribute("aria-expanded", String(expanded));
-    const bodyEl = rowEl.querySelector(".opencode-ctx-item-body");
-    bodyEl?.querySelector(".opencode-ctx-item-details")?.remove();
-    if (expanded && bodyEl) {
-      this.renderRowDetails(bodyEl as HTMLElement, item, resolution);
-    }
-  }
-
   private toggleCandidate(candidateId: string): void {
-    const candidate = this.deps.toggleCandidate?.(candidateId);
+    const candidate = this.deps.toggleCandidate(candidateId);
     if (candidate && this.popoverEl) {
-      this.renderPopover(this.deps.getItems(), this.getCandidates());
+      this.renderPopover(this.deps.getCandidates());
     }
   }
 
   private removeCandidate(candidateId: string): void {
-    const candidate = this.deps.removeCandidate?.(candidateId);
+    const candidate = this.deps.removeCandidate(candidateId);
     if (candidate && this.popoverEl) {
-      this.renderPopover(this.deps.getItems(), this.getCandidates());
+      this.renderPopover(this.deps.getCandidates());
     }
   }
 
@@ -426,27 +331,22 @@ export class ContextStatusBar {
     return candidate.lifetime === "dynamic" ? getText().context.skipOnce : getText().context.skip;
   }
 
-  private pruneRowState(items: Array<{ id: string }>): void {
-    const itemIds = new Set(items.map((item) => item.id));
-    for (const itemId of this.expandedItemIds) {
-      if (!itemIds.has(itemId)) {
-        this.expandedItemIds.delete(itemId);
-      }
-    }
-    for (const itemId of this.pendingOpenTimers.keys()) {
-      if (!itemIds.has(itemId)) {
-        this.clearPendingOpenTimer(itemId);
+  private prunePendingOpenTimers(candidates: ContextCandidate[]): void {
+    const liveIds = new Set(candidates.map((candidate) => candidate.id));
+    for (const candidateId of this.pendingOpenTimers.keys()) {
+      if (!liveIds.has(candidateId)) {
+        this.clearPendingOpenTimer(candidateId);
       }
     }
   }
 
-  private clearPendingOpenTimer(itemId: string): void {
-    const timer = this.pendingOpenTimers.get(itemId);
+  private clearPendingOpenTimer(candidateId: string): void {
+    const timer = this.pendingOpenTimers.get(candidateId);
     if (timer === undefined) {
       return;
     }
     window.clearTimeout(timer);
-    this.pendingOpenTimers.delete(itemId);
+    this.pendingOpenTimers.delete(candidateId);
   }
 
   private clearPendingOpenTimers(): void {
@@ -469,11 +369,15 @@ export class ContextStatusBar {
     this.popoverEl.style.width = `${width}px`;
   }
 
-  private formatSource(item: ContextNavigationSource): string {
-    const sourceFile = item.navigationSourceFile ?? item.sourceFile;
-    const formattedSource = this.formatSourceRange(sourceFile, item.startLine, item.endLine);
-    if (item.navigationSourceFile && item.navigationSourceFile !== item.sourceFile) {
-      return `${item.sourceFile} -> ${formattedSource}`;
+  private formatSource(candidate: ContextCandidate): string {
+    const sourceFile = candidate.navigationSourceFile ?? candidate.sourceFile;
+    const formattedSource = this.formatSourceRange(
+      sourceFile,
+      candidate.startLine,
+      candidate.endLine
+    );
+    if (candidate.navigationSourceFile && candidate.navigationSourceFile !== candidate.sourceFile) {
+      return `${candidate.sourceFile} -> ${formattedSource}`;
     }
     return formattedSource;
   }
@@ -491,123 +395,16 @@ export class ContextStatusBar {
     }
     return `${sourceFile}:${startLine}-${endLine}`;
   }
-
-  private renderRowDetails(
-    bodyEl: HTMLElement,
-    item: ContextItem,
-    resolution: ContextNavigationResolution
-  ): void {
-    const detailsEl = bodyEl.createDiv({ cls: "opencode-ctx-item-details" });
-    detailsEl.createSpan({ cls: "opencode-ctx-pill", text: item.type });
-    detailsEl.createSpan({
-      cls:
-        item.provenanceStatus === "uncertain"
-          ? "opencode-ctx-pill is-warning"
-          : "opencode-ctx-pill",
-      text: getText().context.provenance(item.provenanceStatus ?? "known"),
-    });
-    detailsEl.createSpan({
-      cls: resolution.status === "resolved" ? "opencode-ctx-pill" : "opencode-ctx-pill is-warning",
-      text: formatNavigationResolution(resolution),
-    });
-    detailsEl.createSpan({
-      cls: "opencode-ctx-pill",
-      text: getText().context.chars(item.textLength ?? item.text.length),
-    });
-    detailsEl.createSpan({
-      cls: "opencode-ctx-pill",
-      text: new Date(item.createdAt).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    });
-    const removeFailure = this.removeFailures.get(item.id);
-    if (removeFailure) {
-      detailsEl.createSpan({
-        cls: "opencode-ctx-pill is-warning",
-        text: removeFailure,
-      });
-    }
-    const removeButton = detailsEl.createEl("button", {
-      cls: "opencode-ctx-detail-action is-danger",
-      text: getText().context.removeCommitted,
-      attr: { type: "button", title: getText().context.removeTitle },
-    });
-    removeButton.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      removeButton.disabled = true;
-      const removed = await this.deps.removeItem(item.id);
-      if (removed) {
-        this.removeFailures.delete(item.id);
-        return;
-      }
-      const reason = getText().context.removeFailed;
-      this.removeFailures.set(item.id, reason);
-      removeButton.disabled = false;
-      bodyEl.querySelector(".opencode-ctx-item-details")?.remove();
-      this.renderRowDetails(bodyEl, item, resolution);
-      new Notice(getText().notices.contextRemoveFailed);
-    });
-  }
-
-  private renderCandidatePills(
-    bodyEl: HTMLElement,
-    candidate: ContextCandidate,
-    resolution: ContextNavigationResolution,
-    projectionFailure?: PromptContextProjectionFailure,
-    nativeSyncFailure?: ContextStatusBarNativeSyncFailure
-  ): void {
-    const detailsEl = bodyEl.createDiv({ cls: "opencode-ctx-item-details" });
-    detailsEl.createSpan({
-      cls: candidate.included ? "opencode-ctx-pill" : "opencode-ctx-pill is-warning",
-      text: candidate.included ? getText().context.included : getText().context.skipped,
-    });
-    if (candidate.status === "failed") {
-      detailsEl.createSpan({
-        cls: "opencode-ctx-pill is-warning",
-        text: getText().context.failedStatus(candidate.statusReason ?? null),
-      });
-    }
-    if (resolution.status !== "resolved") {
-      detailsEl.createSpan({
-        cls: "opencode-ctx-pill is-warning",
-        text: formatNavigationResolution(resolution),
-      });
-    }
-    if (projectionFailure) {
-      detailsEl.createSpan({
-        cls: "opencode-ctx-pill is-warning",
-        text: `native card skipped: ${projectionFailure.reason}`,
-      });
-    }
-    if (nativeSyncFailure) {
-      detailsEl.createSpan({
-        cls: "opencode-ctx-pill is-warning",
-        text: getText().context.nativeSyncFailed(nativeSyncFailure.reason),
-      });
-    }
-  }
-
-  private getCandidates(): ContextCandidate[] {
-    return this.deps.getCandidates?.() ?? [];
-  }
-
-  private getNativeSyncFailures(): ContextStatusBarNativeSyncFailure[] {
-    return this.deps.getNativeSyncFailures?.() ?? [];
-  }
 }
 
 export function formatContextDiagnostics(
-  items: ContextItem[],
-  resolveItem?: (item: ContextStatusBarSource) => ContextNavigationResolution,
-  candidates: ContextCandidate[] = []
+  candidates: ContextCandidate[],
+  resolveCandidate?: (candidate: ContextCandidate) => ContextNavigationResolution
 ): string {
   return JSON.stringify(
     {
-      committedCount: items.length,
       candidateCount: candidates.length,
-      itemCount: items.length,
+      includedCount: candidates.filter((candidate) => candidate.included).length,
       candidates: candidates.map((candidate) => ({
         id: candidate.id,
         sourceId: candidate.sourceId,
@@ -623,50 +420,17 @@ export function formatContextDiagnostics(
         lifetime: candidate.lifetime,
         status: candidate.status,
         statusReason: candidate.statusReason ?? null,
-        sourceData: summarizeCandidateSourceData(candidate),
         textLength: candidate.text.length,
-        navigation: resolveItem ? serializeNavigationResolution(resolveItem(candidate)) : null,
+        navigation: resolveCandidate
+          ? serializeNavigationResolution(resolveCandidate(candidate))
+          : null,
         createdAt: new Date(candidate.createdAt).toISOString(),
         updatedAt: new Date(candidate.updatedAt).toISOString(),
-      })),
-      items: items.map((item) => ({
-        id: item.id,
-        type: item.type,
-        label: item.label,
-        sourceFile: item.sourceFile,
-        navigationSourceFile: item.navigationSourceFile ?? null,
-        startLine: item.startLine ?? null,
-        endLine: item.endLine ?? null,
-        messageId: item.messageId ?? null,
-        partId: item.partId ?? null,
-        textLength: item.textLength ?? item.text.length,
-        provenanceStatus: item.provenanceStatus ?? "known",
-        navigation: resolveItem ? serializeNavigationResolution(resolveItem(item)) : null,
-        createdAt: new Date(item.createdAt).toISOString(),
       })),
     },
     null,
     2
   );
-}
-
-function summarizeCandidateSourceData(candidate: ContextCandidate): Record<string, unknown> | null {
-  if (candidate.sourceData?.kind !== "opencode-native-comment") {
-    return null;
-  }
-  return {
-    kind: candidate.sourceData.kind,
-    key: candidate.sourceData.key,
-    item: {
-      type: candidate.sourceData.item.type,
-      path: candidate.sourceData.item.path,
-      selection: candidate.sourceData.item.selection ?? null,
-      commentID: candidate.sourceData.item.commentID,
-      commentOrigin: candidate.sourceData.item.commentOrigin ?? null,
-      previewLength: candidate.sourceData.item.preview?.length ?? null,
-      commentLength: candidate.sourceData.item.comment.length,
-    },
-  };
 }
 
 function serializeNavigationResolution(

@@ -1,9 +1,4 @@
-import type {
-  CandidateLifetime,
-  ContextCandidateSourceData,
-  ContextCandidateSourceKind,
-  OpenCodeSettings,
-} from "../types";
+import type { CandidateLifetime, ContextCandidateSourceKind, OpenCodeSettings } from "../types";
 
 // Contract for Obsidian-side context sources. Drivers produce source results;
 // managers and adapters decide how those candidates reach OpenCode.
@@ -19,7 +14,6 @@ export interface ContextCandidateInput {
   startLine?: number;
   endLine?: number;
   lifetime: CandidateLifetime;
-  sourceData?: ContextCandidateSourceData;
 }
 
 export type ContextSourceResult =

@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { App } from "obsidian";
-import type { OpenCodeClient } from "../../src/client/OpenCodeClient";
 import type { ContextManager as ContextManagerClass } from "../../src/context/ContextManager";
 import { CurrentContextSession } from "../../src/context/ContextSessionResolver";
 import { DEFAULT_SETTINGS, OPENCODE_VIEW_TYPE, type OpenCodeSettings } from "../../src/types";
@@ -45,30 +44,6 @@ beforeAll(async () => {
 });
 
 describe("ContextManager", () => {
-  test("adds manual context through the legacy explicit command path", async () => {
-    const calls: Array<{ sessionId: string; text: string }> = [];
-    const manager = createManager({
-      client: {
-        addContextMessage: async (sessionId, text) => {
-          calls.push({ sessionId, text });
-          return { messageId: "msg_1", partId: "prt_1" };
-        },
-      },
-    });
-
-    const item = await manager.addManual("ses_1", "selected text", "note.md", 3, 5);
-
-    expect(calls).toEqual([{ sessionId: "ses_1", text: "selected text" }]);
-    expect(item).toMatchObject({
-      id: "msg_1:prt_1",
-      type: "manual",
-      label: "note.md:3-5",
-      sourceFile: "note.md",
-      messageId: "msg_1",
-      partId: "prt_1",
-    });
-  });
-
   test("editor selection events create one-shot candidates with bounded FIFO eviction", async () => {
     const { app, handlers } = createAppWithEvents();
     const settings = createSettings();
@@ -253,7 +228,7 @@ describe("ContextManager", () => {
     expect(manager.getCandidates()).toEqual([]);
   });
 
-  test("keeps the legacy prompt injector behavior isolated from source discovery", () => {
+  test("preparePromptContext turns included candidates into prompt file attachments", () => {
     const manager = createManager({});
     const candidateRegistry = (manager as any).candidateRegistry;
     candidateRegistry.setSession("ses_1");
@@ -273,19 +248,56 @@ describe("ContextManager", () => {
       updatedAt: 1,
     });
 
-    const plan = manager.preparePromptContext("ses_1", {
-      parts: [{ type: "text", text: "user prompt" }],
+    const plan = manager.preparePromptContext("ses_1", { text: "user prompt" });
+    const body = plan?.requestBody as {
+      text: string;
+      files: Array<{ uri: string; name: string }>;
+    };
+
+    expect(body.text).toBe("user prompt");
+    expect(body.files.map((file) => file.name)).toEqual(["obsidian-context:selection:Selection"]);
+    expect(Buffer.from(body.files[0].uri.split(",")[1], "base64").toString("utf8")).toBe(
+      "Obsidian context: Selection\nSource: note.md\n\nselected"
+    );
+  });
+
+  test("includeSelection queues an explicit selection candidate", () => {
+    const manager = createManager({});
+
+    const candidate = manager.includeSelection({
+      text: "picked text",
+      sourcePath: "note.md",
+      selectionStartLine: 4,
+      selectionEndLine: 6,
     });
 
-    expect(plan?.requestBody).toEqual({
-      parts: [
-        { type: "text", text: "user prompt" },
-        {
-          type: "text",
-          text: "Obsidian context: Selection\nSource: note.md\n\nselected",
-          synthetic: true,
-        },
-      ],
+    expect(candidate).toMatchObject({
+      sourceId: "selection",
+      sourceKind: "selection",
+      label: "Selection: note.md:4-6",
+      text: "picked text",
+      startLine: 4,
+      endLine: 6,
+      included: true,
+      lifetime: "one-shot",
+    });
+  });
+
+  test("includeNote queues a one-shot manual candidate and rejects empty notes", () => {
+    const manager = createManager({});
+
+    expect(manager.includeNote({ path: "note.md", text: "   " })).toBeNull();
+
+    const candidate = manager.includeNote({ path: "note.md", text: "line one\nline two" });
+
+    expect(candidate).toMatchObject({
+      sourceId: "manual",
+      sourceKind: "manual",
+      identityKey: "note:note.md",
+      label: "note.md",
+      startLine: 1,
+      endLine: 2,
+      lifetime: "one-shot",
     });
   });
 });
@@ -309,21 +321,11 @@ function createSettings(): OpenCodeSettings {
   };
 }
 
-function createManager(options: {
-  app?: App;
-  settings?: OpenCodeSettings;
-  client?: Partial<OpenCodeClient>;
-}): ContextManagerClass {
+function createManager(options: { app?: App; settings?: OpenCodeSettings }): ContextManagerClass {
   return new ContextManager({
     app: options.app ?? createApp(),
     settings: options.settings ?? createSettings(),
-    client: {
-      addContextMessage: async () => ({ messageId: "msg_1", partId: "prt_1" }),
-      deleteMessage: async () => true,
-      listSessionMessages: async () => [],
-      ...options.client,
-    } as OpenCodeClient,
-    getServerState: () => "running",
+    getServiceState: () => "attached",
     currentSession: createCurrentSession("http://127.0.0.1/session/ses_1"),
     registerEvent: () => {},
   });

@@ -8,8 +8,8 @@ import {
 import { OPENCODE_VIEW_TYPE, type WebViewAppearance, type WebViewTheme } from "../types";
 import { OPENCODE_ICON_NAME } from "../icons";
 import type OpenCodePlugin from "../main";
-import type { ServerState } from "../server/types";
-import { createLogger } from "../debug/RuntimeDiagnostics";
+import type { ServiceState } from "../server/types";
+import { createLogger, getRuntimePaths } from "../debug/RuntimeDiagnostics";
 import { getText } from "../i18n";
 
 const THEME_SYNC_DELAYS_MS = [0, 250, 1000, 2500] as const;
@@ -26,7 +26,7 @@ const PARENT_EDITOR_BACKGROUND_SOURCE_SELECTORS = [
 export class OpenCodeView extends ItemView {
   plugin: OpenCodePlugin;
   private iframeEl: HTMLIFrameElement | null = null;
-  private currentState: ServerState = "stopped";
+  private currentState: ServiceState = "unavailable";
   private unsubscribeStateChange: (() => void) | null = null;
   private themeSyncTimerIds: number[] = [];
   private themeSourceObserver: MutationObserver | null = null;
@@ -59,7 +59,7 @@ export class OpenCodeView extends ItemView {
     this.contentEl.empty();
     this.contentEl.addClass("opencode-container");
 
-    this.unsubscribeStateChange = this.plugin.onServerStateChange((state: ServerState) => {
+    this.unsubscribeStateChange = this.plugin.onServiceStateChange((state: ServiceState) => {
       this.currentState = state;
       this.updateView();
     });
@@ -69,7 +69,7 @@ export class OpenCodeView extends ItemView {
     this.startThemeSourceObserver();
     this.startThemeLayoutObserver();
 
-    this.currentState = this.plugin.getServerState();
+    this.currentState = this.plugin.getServiceState();
     this.updateView();
   }
 
@@ -98,66 +98,75 @@ export class OpenCodeView extends ItemView {
     this.applyAppearanceClass();
 
     switch (this.currentState) {
-      case "stopped":
-        this.renderStoppedState();
+      case "attached":
+        this.renderAttachedState();
         break;
-      case "starting":
-        this.renderStartingState();
-        break;
-      case "running":
-        this.renderRunningState();
-        break;
-      case "error":
-        this.renderErrorState();
+      case "unavailable":
+        this.renderUnavailableState();
         break;
     }
   }
 
-  private renderStoppedState(): void {
+  private renderUnavailableState(): void {
     const text = getText();
     this.contentEl.empty();
 
     const statusContainer = this.contentEl.createDiv({
-      cls: "opencode-status-container",
+      cls: "opencode-status-container opencode-unavailable",
     });
 
     const iconEl = statusContainer.createDiv({ cls: "opencode-status-icon" });
-    setIcon(iconEl, "power-off");
+    setIcon(iconEl, "unplug");
 
-    statusContainer.createEl("h3", { text: text.view.stoppedTitle });
+    statusContainer.createEl("h3", { text: text.view.unavailableTitle });
     statusContainer.createEl("p", {
-      text: text.view.stoppedMessage,
+      text: text.view.unavailableMessage,
       cls: "opencode-status-message",
     });
 
-    const startButton = statusContainer.createEl("button", {
-      text: text.view.startOpenCode,
+    const detailsContainer = statusContainer.createDiv({ cls: "opencode-diagnostics" });
+    const commandRow = detailsContainer.createDiv({ cls: "opencode-diagnostic-row" });
+    commandRow.createDiv({ text: text.view.diagnosticReason, cls: "opencode-diagnostic-label" });
+    commandRow.createEl("code", {
+      text: text.view.unavailableCommand,
+      cls: "opencode-diagnostic-value",
+    });
+
+    const status = this.plugin.getServiceStatus();
+    this.createDiagnosticRow(
+      detailsContainer,
+      text.view.diagnosticReason,
+      status && status.state === "unavailable" ? status.reason : null
+    );
+    this.createDiagnosticRow(detailsContainer, text.view.diagnosticLog, getRuntimePaths().logFile);
+
+    const buttonContainer = statusContainer.createDiv({ cls: "opencode-button-group" });
+
+    const retryButton = buttonContainer.createEl("button", {
+      text: text.view.retry,
       cls: "mod-cta",
     });
-    startButton.addEventListener("click", () => {
-      this.plugin.startServer();
+    retryButton.addEventListener("click", () => {
+      void this.plugin.attachService();
+    });
+
+    const settingsButton = buttonContainer.createEl("button", {
+      text: text.view.openSettings,
+    });
+    settingsButton.addEventListener("click", () => {
+      (this.app as any).setting.open();
+      (this.app as any).setting.openTabById("another-opencode-for-obsidian");
+    });
+
+    const copyButton = buttonContainer.createEl("button", {
+      text: text.view.copyDiagnostics,
+    });
+    copyButton.addEventListener("click", () => {
+      void this.plugin.copyServiceDiagnosticsToClipboard();
     });
   }
 
-  private renderStartingState(): void {
-    const text = getText();
-    this.contentEl.empty();
-
-    const statusContainer = this.contentEl.createDiv({
-      cls: "opencode-status-container",
-    });
-
-    const loadingEl = statusContainer.createDiv({ cls: "opencode-loading" });
-    loadingEl.createDiv({ cls: "opencode-spinner" });
-
-    statusContainer.createEl("h3", { text: text.view.startingTitle });
-    statusContainer.createEl("p", {
-      text: text.view.startingMessage,
-      cls: "opencode-status-message",
-    });
-  }
-
-  private renderRunningState(): void {
+  private renderAttachedState(): void {
     this.clearThemeSyncTimers();
     this.resetThemeDeliveryState();
     this.contentEl.empty();
@@ -213,7 +222,7 @@ export class OpenCodeView extends ItemView {
 
   refreshAppearance(): void {
     this.applyAppearanceClass();
-    if (this.currentState === "running") {
+    if (this.currentState === "attached") {
       this.reloadIframe();
     }
   }
@@ -311,97 +320,6 @@ export class OpenCodeView extends ItemView {
     );
   }
 
-  private renderErrorState(): void {
-    const text = getText();
-    this.contentEl.empty();
-    const diagnostics = this.plugin.getServerDiagnostics();
-
-    const statusContainer = this.contentEl.createDiv({
-      cls: "opencode-status-container opencode-error",
-    });
-
-    const iconEl = statusContainer.createDiv({ cls: "opencode-status-icon" });
-    setIcon(iconEl, "alert-circle");
-
-    statusContainer.createEl("h3", { text: text.view.failedTitle });
-
-    const errorMessage = diagnostics.lastError;
-    if (errorMessage) {
-      statusContainer.createEl("p", {
-        text: errorMessage,
-        cls: "opencode-status-message opencode-error-message",
-      });
-    } else {
-      statusContainer.createEl("p", {
-        text: text.view.genericStartError,
-        cls: "opencode-status-message",
-      });
-    }
-
-    if (diagnostics.hint) {
-      statusContainer.createEl("p", {
-        text: diagnostics.hint,
-        cls: "opencode-status-message opencode-diagnostic-hint",
-      });
-    }
-
-    const detailsContainer = statusContainer.createDiv({
-      cls: "opencode-diagnostics",
-    });
-
-    this.createDiagnosticRow(detailsContainer, text.view.diagnosticMode, diagnostics.lastStartMode);
-    this.createDiagnosticRow(
-      detailsContainer,
-      text.view.diagnosticCommand,
-      diagnostics.lastDisplayCommand
-    );
-    this.createDiagnosticRow(
-      detailsContainer,
-      text.view.diagnosticWorkingDirectory,
-      diagnostics.lastCwd
-    );
-    this.createDiagnosticRow(
-      detailsContainer,
-      text.view.diagnosticHealthCheck,
-      diagnostics.lastHealthError
-    );
-    this.createDiagnosticRow(
-      detailsContainer,
-      text.view.diagnosticStderr,
-      diagnostics.lastStderr,
-      true
-    );
-    this.createDiagnosticRow(detailsContainer, text.view.diagnosticLog, diagnostics.logFile);
-    this.createDiagnosticRow(detailsContainer, text.view.diagnosticStatus, diagnostics.statusFile);
-
-    const buttonContainer = statusContainer.createDiv({
-      cls: "opencode-button-group",
-    });
-
-    const retryButton = buttonContainer.createEl("button", {
-      text: text.view.retry,
-      cls: "mod-cta",
-    });
-    retryButton.addEventListener("click", () => {
-      this.plugin.startServer();
-    });
-
-    const settingsButton = buttonContainer.createEl("button", {
-      text: text.view.openSettings,
-    });
-    settingsButton.addEventListener("click", () => {
-      (this.app as any).setting.open();
-      (this.app as any).setting.openTabById("another-opencode-for-obsidian");
-    });
-
-    const copyButton = buttonContainer.createEl("button", {
-      text: text.view.copyDiagnostics,
-    });
-    copyButton.addEventListener("click", () => {
-      void this.plugin.copyServerDiagnosticsToClipboard();
-    });
-  }
-
   private createDiagnosticRow(
     container: HTMLElement,
     label: string,
@@ -436,7 +354,7 @@ export class OpenCodeView extends ItemView {
     this.contentEl.removeClass("opencode-view-running");
     this.contentEl.addClass(`opencode-appearance-${appearance}`);
     this.applyHostTheme(appearance);
-    if (this.currentState === "running") {
+    if (this.currentState === "attached") {
       this.contentEl.addClass("opencode-view-running");
     }
   }
@@ -733,7 +651,7 @@ export class OpenCodeView extends ItemView {
   }
 
   private scheduleThemeSyncForObservedSourceMutation(mutations: MutationRecord[]): void {
-    if (this.currentState !== "running") {
+    if (this.currentState !== "attached") {
       this.recordThemeSyncHistory("obsidian-theme-source-mutated", "skipped", {
         cause: "view-not-running",
         state: this.currentState,
@@ -775,7 +693,7 @@ export class OpenCodeView extends ItemView {
     }
 
     const observer = new ResizeObserver(() => {
-      if (this.currentState === "running") {
+      if (this.currentState === "attached") {
         this.scheduleThemeSync("opencode-layout-resized");
       }
     });

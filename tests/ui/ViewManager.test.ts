@@ -29,42 +29,32 @@ beforeAll(async () => {
 });
 
 describe("ViewManager", () => {
-  test("starts a stopped server when the user opens an existing OpenCode view", async () => {
+  test("activates an existing OpenCode view", async () => {
     const leaf = createLeaf();
-    const calls: string[] = [];
     const manager = createViewManager({
       leaves: [leaf],
-      state: "stopped",
-      onStart: () => calls.push("start"),
+      state: "unavailable",
     });
 
     await manager.activateView();
-
-    expect(calls).toEqual(["start"]);
   });
 
-  test("does not start the server when the user reveals an already running OpenCode view", async () => {
+  test("reveals an already attached OpenCode view", async () => {
     const leaf = createLeaf();
-    const calls: string[] = [];
     const manager = createViewManager({
       leaves: [leaf],
-      state: "running",
-      onStart: () => calls.push("start"),
+      state: "attached",
     });
 
     await manager.activateView();
-
-    expect(calls).toEqual([]);
   });
 
-  test("starts a stopped server after creating a new OpenCode view from a user action", async () => {
+  test("creates a new OpenCode view from a user action", async () => {
     const createdLeaf = createLeaf();
-    const calls: string[] = [];
     const manager = createViewManager({
       leaves: [],
       newLeaf: createdLeaf,
-      state: "stopped",
-      onStart: () => calls.push("start"),
+      state: "unavailable",
     });
 
     await manager.activateView();
@@ -73,20 +63,17 @@ describe("ViewManager", () => {
       type: OPENCODE_VIEW_TYPE,
       active: true,
     });
-    expect(calls).toEqual(["start"]);
   });
 
   test("opens the side-by-side view from the panel toggle", async () => {
     const sidebarLeaf = createLeaf();
     const mainLeaf = createLeaf();
-    const calls: string[] = [];
     const manager = createViewManager({
       leaves: [],
       newSidebarLeaf: sidebarLeaf,
       newMainLeaf: mainLeaf,
       settings: { ...DEFAULT_SETTINGS, defaultViewLocation: "main" },
-      state: "stopped",
-      onStart: () => calls.push("start"),
+      state: "unavailable",
     });
 
     await manager.toggleView();
@@ -97,19 +84,16 @@ describe("ViewManager", () => {
     });
     expect(sidebarLeaf.activated).toBe(true);
     expect(mainLeaf.viewState).toBeUndefined();
-    expect(calls).toEqual(["start"]);
   });
 
   test("opens the deep view from the deep toggle", async () => {
     const sidebarLeaf = createLeaf();
     const mainLeaf = createLeaf();
-    const calls: string[] = [];
     const manager = createViewManager({
       leaves: [],
       newSidebarLeaf: sidebarLeaf,
       newMainLeaf: mainLeaf,
-      state: "stopped",
-      onStart: () => calls.push("start"),
+      state: "unavailable",
     });
 
     await manager.toggleDeepView();
@@ -120,7 +104,6 @@ describe("ViewManager", () => {
     });
     expect(mainLeaf.activated).toBe(true);
     expect(sidebarLeaf.viewState).toBeUndefined();
-    expect(calls).toEqual(["start"]);
   });
 
   test("switches from side-by-side to deep view", async () => {
@@ -132,8 +115,7 @@ describe("ViewManager", () => {
       newMainLeaf: mainLeaf,
       rightSplit,
       activeLeaf: sidebarLeaf,
-      state: "running",
-      onStart: () => {},
+      state: "attached",
     });
 
     await manager.toggleDeepView();
@@ -153,8 +135,7 @@ describe("ViewManager", () => {
       leaves: [mainLeaf],
       newSidebarLeaf: sidebarLeaf,
       activeLeaf: mainLeaf,
-      state: "running",
-      onStart: () => {},
+      state: "attached",
     });
 
     await manager.toggleView();
@@ -174,8 +155,7 @@ describe("ViewManager", () => {
       leaves: [],
       newMainLeaf: mainLeaf,
       activeLeaf: editorLeaf,
-      state: "running",
-      onStart: () => {},
+      state: "attached",
     });
 
     await manager.toggleDeepView();
@@ -196,8 +176,7 @@ describe("ViewManager", () => {
       rightSplit,
       activeLeaf: sidebarLeaf,
       mostRecentLeaf: previewLeaf,
-      state: "running",
-      onStart: () => {},
+      state: "attached",
     });
 
     await manager.toggleDeepView();
@@ -218,8 +197,7 @@ function createViewManager(options: {
   activeLeaf?: any;
   mostRecentLeaf?: any;
   settings?: typeof DEFAULT_SETTINGS;
-  state: "stopped" | "starting" | "running" | "error";
-  onStart: () => void;
+  state: "attached" | "unavailable";
 }): ViewManagerClass {
   const leaves = [...options.leaves];
   const rightSplit = options.rightSplit ?? createRightSplit();
@@ -256,8 +234,7 @@ function createViewManager(options: {
     client: {} as any,
     contextManager: {} as any,
     currentSession: {} as any,
-    getServerState: () => options.state,
-    startServer: options.onStart,
+    getServiceState: () => options.state,
   });
 }
 

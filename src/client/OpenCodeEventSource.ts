@@ -1,5 +1,6 @@
 import * as http from "http";
 import { createLogger } from "../debug/RuntimeDiagnostics";
+import { buildServerAuthHeader } from "./ServerAuth";
 
 export type OpenCodeEventSourceState =
   | "idle"
@@ -9,64 +10,48 @@ export type OpenCodeEventSourceState =
   | "failed"
   | "unsupported";
 
-export interface OpenCodeEventSourceSnapshot {
+export type OpenCodeEventSourceSnapshot = {
   state: OpenCodeEventSourceState;
   endpoint: string | null;
-  connectedAt: string | null;
-  disconnectedAt: string | null;
+  connectedAt: number | null;
+  disconnectedAt: number | null;
   lastError: string | null;
-  lastEventAt: string | null;
+  lastEventAt: number | null;
   lastEventType: string | null;
   lastEventId: string | null;
   lastEventSessionId: string | null;
-  lastSessionEventAt: string | null;
+  lastSessionEventAt: number | null;
   lastSessionEventType: string | null;
   eventCount: number;
   currentSessionEventCount: number;
-}
+};
 
-import { buildServerAuthHeader } from "./ServerAuth";
-
-export interface OpenCodeEventSourceOptions {
+export type OpenCodeEventSourceOptions = {
   apiBaseUrl: string;
   projectDirectory: string;
   getCurrentSessionId: () => string | null;
   getAuthPassword?: () => string | null;
   onSnapshot?: (snapshot: OpenCodeEventSourceSnapshot) => void;
-}
+};
 
 type EventPayload = {
   id?: unknown;
   type?: unknown;
   data?: unknown;
-  properties?: unknown;
+  location?: unknown;
 };
 
 export class OpenCodeEventSource {
   private apiBaseUrl: string;
   private projectDirectory: string;
+  private request: http.ClientRequest | null = null;
+  private stopped = true;
+  private buffer = "";
+  private snapshot: OpenCodeEventSourceSnapshot = createSnapshot();
   private getCurrentSessionId: () => string | null;
   private getAuthPassword?: () => string | null;
   private onSnapshot?: (snapshot: OpenCodeEventSourceSnapshot) => void;
-  private request: http.ClientRequest | null = null;
-  private buffer = "";
-  private stopped = true;
-  private logger = createLogger("event-source");
-  private snapshot: OpenCodeEventSourceSnapshot = {
-    state: "idle",
-    endpoint: null,
-    connectedAt: null,
-    disconnectedAt: null,
-    lastError: null,
-    lastEventAt: null,
-    lastEventType: null,
-    lastEventId: null,
-    lastEventSessionId: null,
-    lastSessionEventAt: null,
-    lastSessionEventType: null,
-    eventCount: 0,
-    currentSessionEventCount: 0,
-  };
+  private logger = createLogger("events");
 
   constructor(options: OpenCodeEventSourceOptions) {
     this.apiBaseUrl = normalizeBaseUrl(options.apiBaseUrl);
@@ -77,18 +62,8 @@ export class OpenCodeEventSource {
   }
 
   updateConnection(apiBaseUrl: string, projectDirectory: string): void {
-    const nextApiBaseUrl = normalizeBaseUrl(apiBaseUrl);
-    if (nextApiBaseUrl === this.apiBaseUrl && projectDirectory === this.projectDirectory) {
-      return;
-    }
-
-    const wasRunning = this.request !== null;
-    this.stop();
-    this.apiBaseUrl = nextApiBaseUrl;
+    this.apiBaseUrl = normalizeBaseUrl(apiBaseUrl);
     this.projectDirectory = projectDirectory;
-    if (wasRunning) {
-      this.start();
-    }
   }
 
   start(): void {
@@ -96,18 +71,14 @@ export class OpenCodeEventSource {
       return;
     }
 
-    this.stopped = false;
-    this.buffer = "";
-    const endpoint = buildEventEndpoint(this.apiBaseUrl, this.projectDirectory);
-    this.setSnapshot({
-      state: "connecting",
-      endpoint,
-      lastError: null,
-    });
-
+    const endpoint = buildEventEndpoint(this.apiBaseUrl);
     const url = new URL(endpoint);
     const authHeader = buildServerAuthHeader(this.getAuthPassword?.() ?? null);
-    const req = http.request(
+    this.stopped = false;
+    this.buffer = "";
+    this.setSnapshot({ state: "connecting", endpoint });
+
+    const request = http.request(
       {
         hostname: url.hostname,
         port: url.port,
@@ -115,83 +86,71 @@ export class OpenCodeEventSource {
         method: "GET",
         headers: {
           Accept: "text/event-stream",
-          "x-opencode-directory": encodeURIComponent(this.projectDirectory),
           ...(authHeader ? { Authorization: authHeader } : {}),
         },
       },
-      (res) => {
-        const status = res.statusCode ?? 0;
-        const contentType = String(res.headers["content-type"] ?? "");
+      (response) => {
+        const status = response.statusCode ?? 0;
         if (status === 404) {
           this.finishUnsupported("OpenCode /api/event route is not available");
-          res.resume();
+          response.resume();
           return;
         }
         if (status < 200 || status >= 300) {
           this.finishFailed(`OpenCode event stream returned HTTP ${status}`);
-          res.resume();
+          response.resume();
           return;
         }
+
+        const contentType = String(response.headers["content-type"] ?? "");
         if (!contentType.includes("text/event-stream")) {
-          this.finishFailed(
-            `OpenCode event stream returned ${contentType || "unknown content type"}`
-          );
-          res.resume();
+          this.finishFailed("OpenCode event stream returned an unexpected content type");
+          response.resume();
           return;
         }
 
-        this.setSnapshot({
-          state: "connected",
-          connectedAt: new Date().toISOString(),
-          disconnectedAt: null,
-          lastError: null,
+        this.setSnapshot({ state: "connected", connectedAt: Date.now() });
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => {
+          this.consumeChunk(chunk);
         });
-
-        res.on("data", (chunk: Buffer) => {
-          this.consumeChunk(chunk.toString("utf8"));
-        });
-        res.on("end", () => {
+        response.on("end", () => {
           this.request = null;
-          if (!this.stopped) {
-            this.setSnapshot({
-              state: "disconnected",
-              disconnectedAt: new Date().toISOString(),
-            });
+          if (this.stopped) {
+            return;
           }
+          this.setSnapshot({ state: "disconnected", disconnectedAt: Date.now() });
         });
       }
     );
 
-    this.request = req;
-    req.on("error", (error) => {
+    request.on("error", (error) => {
       this.request = null;
       if (this.stopped) {
         return;
       }
-      this.finishFailed(error.message);
+      this.finishFailed(error instanceof Error ? error.message : String(error));
     });
-    req.end();
+    this.request = request;
+    request.end();
   }
 
   stop(): void {
     this.stopped = true;
+    this.buffer = "";
     if (this.request) {
       this.request.destroy();
       this.request = null;
     }
-    this.buffer = "";
-    this.setSnapshot({
-      state: "idle",
-      disconnectedAt: new Date().toISOString(),
-    });
+    this.setSnapshot({ state: "idle" });
   }
 
   getSnapshot(): OpenCodeEventSourceSnapshot {
-    return { ...this.snapshot };
+    return this.snapshot;
   }
 
   private consumeChunk(chunk: string): void {
-    this.buffer += chunk.replace(/\r\n/g, "\n");
+    this.buffer += chunk;
     let frameEnd = this.buffer.indexOf("\n\n");
     while (frameEnd >= 0) {
       const frame = this.buffer.slice(0, frameEnd);
@@ -210,90 +169,121 @@ export class OpenCodeEventSource {
     let payload: EventPayload;
     try {
       payload = JSON.parse(data) as EventPayload;
-    } catch (error) {
-      this.logger.warn("failed to parse OpenCode event payload", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      this.setSnapshot({ lastError: "Failed to parse OpenCode event payload" });
+    } catch {
+      this.logger.warn("failed to parse event payload");
+      return;
+    }
+
+    // /api/event is a global stream: every frame carries the directory it
+    // belongs to, and only this project's frames are plugin events.
+    if (getEventDirectory(payload) !== this.projectDirectory) {
       return;
     }
 
     const eventType = typeof payload.type === "string" ? payload.type : null;
     const eventId = typeof payload.id === "string" ? payload.id : null;
-    const sessionId = extractSessionId(payload);
-    const now = new Date().toISOString();
+    const sessionId = getEventSessionId(payload);
     const currentSessionId = this.getCurrentSessionId();
-    const isCurrentSessionEvent = Boolean(
-      sessionId && currentSessionId && sessionId === currentSessionId
-    );
+    const now = Date.now();
 
-    this.setSnapshot({
+    const next: Partial<OpenCodeEventSourceSnapshot> = {
       lastEventAt: now,
       lastEventType: eventType,
       lastEventId: eventId,
       lastEventSessionId: sessionId,
       eventCount: this.snapshot.eventCount + 1,
-      ...(isCurrentSessionEvent
-        ? {
-            lastSessionEventAt: now,
-            lastSessionEventType: eventType,
-            currentSessionEventCount: this.snapshot.currentSessionEventCount + 1,
-          }
-        : {}),
-    });
-  }
-
-  private finishUnsupported(message: string): void {
-    this.request = null;
-    this.setSnapshot({
-      state: "unsupported",
-      lastError: message,
-      disconnectedAt: new Date().toISOString(),
-    });
-  }
-
-  private finishFailed(message: string): void {
-    this.request = null;
-    this.setSnapshot({
-      state: "failed",
-      lastError: message,
-      disconnectedAt: new Date().toISOString(),
-    });
-  }
-
-  private setSnapshot(update: Partial<OpenCodeEventSourceSnapshot>): void {
-    this.snapshot = {
-      ...this.snapshot,
-      ...update,
     };
-    this.onSnapshot?.(this.getSnapshot());
+
+    if (currentSessionId && sessionId === currentSessionId) {
+      next.lastSessionEventAt = now;
+      next.lastSessionEventType = eventType;
+      next.currentSessionEventCount = this.snapshot.currentSessionEventCount + 1;
+    }
+
+    this.setSnapshot(next);
+  }
+
+  private finishUnsupported(reason: string): void {
+    this.request = null;
+    if (this.stopped) {
+      return;
+    }
+    this.setSnapshot({ state: "unsupported", lastError: reason });
+  }
+
+  private finishFailed(reason: string): void {
+    this.request = null;
+    if (this.stopped) {
+      return;
+    }
+    this.setSnapshot({ state: "failed", lastError: reason });
+  }
+
+  private setSnapshot(patch: Partial<OpenCodeEventSourceSnapshot>): void {
+    this.snapshot = { ...this.snapshot, ...patch };
+    this.onSnapshot?.(this.snapshot);
   }
 }
 
-export function buildEventEndpoint(apiBaseUrl: string, projectDirectory: string): string {
-  const url = new URL(`${normalizeBaseUrl(apiBaseUrl)}/api/event`);
-  url.searchParams.set("location[directory]", projectDirectory);
-  return url.toString();
+export function buildEventEndpoint(apiBaseUrl: string): string {
+  return `${normalizeBaseUrl(apiBaseUrl)}/api/event`;
 }
 
 export function parseSseData(frame: string): string | null {
-  const dataLines = frame
-    .split("\n")
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice("data:".length).trimStart());
-  return dataLines.length > 0 ? dataLines.join("\n") : null;
-}
+  const lines = frame.split("\n");
+  const dataLines: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
 
-function extractSessionId(payload: EventPayload): string | null {
-  return sessionIdFromObject(payload.data) ?? sessionIdFromObject(payload.properties);
-}
-
-function sessionIdFromObject(value: unknown): string | null {
-  if (!value || typeof value !== "object") {
+  if (dataLines.length === 0) {
     return null;
   }
-  const sessionID = (value as { sessionID?: unknown }).sessionID;
-  return typeof sessionID === "string" ? sessionID : null;
+
+  return dataLines.join("\n");
+}
+
+function getEventDirectory(payload: EventPayload): string | null {
+  const location = payload.location;
+  if (!location || typeof location !== "object") {
+    return null;
+  }
+  const directory = (location as { directory?: unknown }).directory;
+  return typeof directory === "string" ? directory : null;
+}
+
+function getEventSessionId(payload: EventPayload): string | null {
+  const candidates = [payload.data, (payload as { properties?: unknown }).properties];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") {
+      continue;
+    }
+    const sessionID = (candidate as { sessionID?: unknown }).sessionID;
+    if (typeof sessionID === "string") {
+      return sessionID;
+    }
+  }
+  return null;
+}
+
+function createSnapshot(): OpenCodeEventSourceSnapshot {
+  return {
+    state: "idle",
+    endpoint: null,
+    connectedAt: null,
+    disconnectedAt: null,
+    lastError: null,
+    lastEventAt: null,
+    lastEventType: null,
+    lastEventId: null,
+    lastEventSessionId: null,
+    lastSessionEventAt: null,
+    lastSessionEventType: null,
+    eventCount: 0,
+    currentSessionEventCount: 0,
+  };
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

@@ -2,36 +2,33 @@ import { MarkdownView, Notice, Plugin } from "obsidian";
 import {
   DEFAULT_SETTINGS,
   OPENCODE_VIEW_TYPE,
-  createServerEndpoint,
   normalizeOpenCodeSettings,
-  type KeyboardBridgeShortcutOwner,
   type OpenCodeSettings,
   type WebViewTheme,
 } from "./types";
 import { OpenCodeView } from "./ui/OpenCodeView";
 import { ViewManager } from "./ui/ViewManager";
 import { OpenCodeSettingTab } from "./settings/SettingsTab";
-import { ServerManager, type ServerDiagnostics, type ServerState } from "./server/ServerManager";
+import {
+  attachService as attachToService,
+  defaultServiceDir,
+  discoverServices,
+  summarizeService,
+  type ServiceHandle,
+  type ServiceSummary,
+} from "./server/ServiceDiscovery";
+import type { ServiceState, ServiceStatus } from "./server/types";
 import { registerOpenCodeIcons, OPENCODE_ICON_NAME } from "./icons";
 import { OpenCodeClient } from "./client/OpenCodeClient";
 import { ContextManager } from "./context/ContextManager";
 import { ContextItemNavigator } from "./context/ContextItemNavigator";
 import { CurrentContextSession } from "./context/ContextSessionResolver";
-import {
-  ContextStatusBar,
-  type ContextStatusBarNativeSyncFailure,
-} from "./context/ContextStatusBar";
+import { ContextStatusBar } from "./context/ContextStatusBar";
 import { getSelectionLineRange } from "./context/SelectionLineRange";
 import type { GraphIndex } from "./graph/GraphIndex";
 import { createObsidianGraphIndex, isMarkdownTFile, toGraphFile } from "./graph/ObsidianGraphIndex";
-import { ExecutableResolver } from "./server/ExecutableResolver";
 import { OpenCodeWebUiProxy, extractPromptSessionId } from "./bridge/OpenCodeWebUiProxy";
 import { OpenCodeBridge } from "./bridge/OpenCodeBridge";
-import {
-  NativePromptContextBridge,
-  PostMessagePromptContextPort,
-  type NativePromptContextProjectionSyncResult,
-} from "./bridge/NativePromptContextBridge";
 import {
   createLogger,
   getRuntimePaths,
@@ -39,67 +36,18 @@ import {
   writeRuntimeStatus,
 } from "./debug/RuntimeDiagnostics";
 import {
-  formatServerDiagnosticsForClipboard,
-  formatStartFailureNotice,
-} from "./debug/ServerDiagnosticsText";
-import {
-  BRIDGE_MESSAGES,
-  isBridgeMessage,
-  isKeyboardCatalogPayload,
-  isKeyboardDispatchPayload,
-  isKeyboardUnavailablePayload,
-  isPromptContextActivatedPayload,
-  isPromptContextChangedPayload,
-  isPromptContextCommandPayload,
-  isPromptContextCommandResultPayload,
-  isPromptContextReadyPayload,
-  isPromptContextRemovedPayload,
-  isPromptContextUnavailablePayload,
-  isVaultFileOpenPayload,
-  type KeyboardDecisionPayload,
-  type PromptContextCommandPayload,
-} from "./bridge/BridgeProtocol";
-import {
-  buildKeyboardShortcutIndex,
-  collectObsidianShortcuts,
-  createKeyboardPolicyUpdatePayload,
-  detectShortcutPlatform,
-  isNormalizedShortcutSignature,
-  summarizeKeyboardShortcutIndex,
-  type KeyboardConflict,
-  type KeyboardShortcutIndex,
-  type OpenCodeKeyboardCatalogSnapshot,
-} from "./bridge/KeyboardShortcutIndex";
-import {
-  buildPromptContextSurfaceTrace,
-  planPromptContextSurfaceCleanup,
-  summarizePromptContextSurfaceTrace,
-  type PromptContextSurfaceCleanupSkippedItem,
-  type PromptContextSurfaceTrace,
-} from "./bridge/PromptContextSurfaceTrace";
-import type {
-  NativePromptContextProjection,
-  PromptContextClickAction,
-} from "./context/PromptContextProjection";
+  formatServiceDiagnosticsForClipboard,
+  type ServiceDiagnosticsSnapshot,
+} from "./debug/ServiceDiagnosticsText";
+import { BRIDGE_MESSAGES, isBridgeMessage, isVaultFileOpenPayload } from "./bridge/BridgeProtocol";
 import { captureObsidianWebViewTheme, findObsidianWebViewThemeSource } from "./theme/WebViewTheme";
 import { getText } from "./i18n";
 
-interface PromptContextSurfaceCleanupTrace {
-  reason: string;
-  checkedAt: string;
-  attempted: number;
-  removeKeys: string[];
-  removedKeys: string[];
-  missingKeys: string[];
-  skipped: PromptContextSurfaceCleanupSkippedItem[];
-  failed: Array<{ key: string; error: string }>;
-  results: Array<{ key: string; status: string }>;
-}
-
 export default class OpenCodePlugin extends Plugin {
   settings: OpenCodeSettings = DEFAULT_SETTINGS;
-  private processManager: ServerManager;
-  private stateChangeCallbacks: Array<(state: ServerState) => void> = [];
+  private serviceStatus: ServiceStatus | null = null;
+  private serviceChangeCallbacks: Array<(state: ServiceState) => void> = [];
+  private attachRetryTimer: ReturnType<typeof setInterval> | null = null;
   private openCodeClient: OpenCodeClient;
   private openCodeBridge: OpenCodeBridge;
   private currentContextSession: CurrentContextSession;
@@ -115,17 +63,8 @@ export default class OpenCodePlugin extends Plugin {
     theme: null,
     iframe: null,
     opencodeEvents: null,
-    promptContext: null,
-    keyboard: null,
   };
   private openCodeWebUiProxy: OpenCodeWebUiProxy;
-  private promptContextPort: PostMessagePromptContextPort;
-  private nativePromptContextBridge: NativePromptContextBridge;
-  private unsubscribeNativePromptContextSync: (() => void) | null = null;
-  private promptContextPortReady = false;
-  private nativePromptContextSyncFailures: ContextStatusBarNativeSyncFailure[] = [];
-  private openCodeKeyboardCatalog: OpenCodeKeyboardCatalogSnapshot | null = null;
-  private keyboardPolicyRevision = 0;
   private eventStatusWriteTimer: ReturnType<typeof setTimeout> | null = null;
   private logger = createLogger("plugin");
 
@@ -138,51 +77,17 @@ export default class OpenCodePlugin extends Plugin {
     await this.loadSettings();
     this.cachedIframeUrl = this.settings.lastSessionUrl || null;
 
-    await this.attemptAutodetect();
-
     const projectDirectory = this.getProjectDirectory();
 
-    this.processManager = new ServerManager(this.settings, projectDirectory);
-    this.processManager.on("stateChange", (state: ServerState) => {
-      this.notifyStateChange(state);
-      this.writeStatus(`server:${state}`);
-    });
-
-    const endpoint = createServerEndpoint(this.settings, projectDirectory);
-
-    this.openCodeWebUiProxy = new OpenCodeWebUiProxy(endpoint.hostname, endpoint.port);
-    this.openCodeWebUiProxy.setAuthPasswordProvider(() => this.processManager.getServerPassword());
+    this.openCodeWebUiProxy = new OpenCodeWebUiProxy("127.0.0.1", 0);
+    this.openCodeWebUiProxy.setAuthPasswordProvider(() => this.attachedHandle?.password ?? null);
     this.refreshProxyAppearance();
     const proxyStarted = await this.openCodeWebUiProxy.start();
     if (!proxyStarted) {
       this.logger.error("proxy failed to start");
     }
-    this.promptContextPort = new PostMessagePromptContextPort((payload) =>
-      this.postPromptContextCommand(payload)
-    );
-    this.nativePromptContextBridge = new NativePromptContextBridge(this.promptContextPort);
-    this.openCodeWebUiProxy.on("promptContextBundlePatch", (payload) => {
-      this.runtimeDiagnostics.promptContext = {
-        ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
-        bundlePatch: summarizeDiagnosticPayload(payload),
-      };
-      this.writeStatus("prompt-context-bundle-patch");
-    });
-    this.openCodeWebUiProxy.on("keyboardBundlePatch", (payload) => {
-      this.runtimeDiagnostics.keyboard = {
-        ...(asRecord(this.runtimeDiagnostics.keyboard) ?? {}),
-        bundlePatch: summarizeDiagnosticPayload(payload),
-      };
-      this.writeStatus("keyboard-bundle-patch");
-    });
-    this.openCodeWebUiProxy.on("terminalBundlePatch", (payload) => {
-      this.runtimeDiagnostics.theme = {
-        ...(asRecord(this.runtimeDiagnostics.theme) ?? {}),
-        terminalBundlePatch: summarizeDiagnosticPayload(payload),
-      };
-      this.writeStatus("terminal-bundle-patch");
-    });
 
+    await this.attachService();
     this.registerDomEvent(window, "message", (event: MessageEvent) => {
       if (event.origin !== this.openCodeWebUiProxy.getOrigin() || !isBridgeMessage(event.data)) {
         return;
@@ -190,141 +95,17 @@ export default class OpenCodePlugin extends Plugin {
       if (event.data.type === BRIDGE_MESSAGES.proxyLoaded) {
         this.logger.info("bridge script loaded", { origin: event.origin });
         this.syncOpenCodeViewThemes("proxy-loaded");
-        if (this.openCodeKeyboardCatalog) {
-          this.syncKeyboardBridgePolicy("proxy-loaded");
-        }
       }
       if (event.data.type === BRIDGE_MESSAGES.themeDiagnostics) {
-        const terminalBundlePatch =
-          asRecord(this.runtimeDiagnostics.theme)?.terminalBundlePatch ??
-          summarizeDiagnosticPayload(this.openCodeWebUiProxy.getTerminalBundlePatchDiagnostics());
-        const nextThemeDiagnostics = asRecord(event.data.payload);
-        this.runtimeDiagnostics.theme = terminalBundlePatch
-          ? { ...(nextThemeDiagnostics ?? {}), terminalBundlePatch }
-          : (event.data.payload ?? null);
+        this.runtimeDiagnostics.theme = event.data.payload ?? null;
         this.logger.info(
           "theme diagnostics",
           summarizeDiagnosticPayload(this.runtimeDiagnostics.theme)
         );
         this.writeStatus("theme-diagnostics");
       }
-      if (event.data.type === BRIDGE_MESSAGES.keyboardReady) {
-        if (isKeyboardCatalogPayload(event.data.payload)) {
-          this.openCodeKeyboardCatalog = {
-            options: event.data.payload.options,
-            catalog: event.data.payload.catalog,
-          };
-          this.syncKeyboardBridgePolicy("keyboard-ready");
-        } else {
-          this.runtimeDiagnostics.keyboard = {
-            ...(asRecord(this.runtimeDiagnostics.keyboard) ?? {}),
-            readyInvalid: summarizeDiagnosticPayload(event.data.payload),
-          };
-          this.writeStatus("keyboard-ready-invalid");
-        }
-      }
-      if (event.data.type === BRIDGE_MESSAGES.keyboardUnavailable) {
-        if (isKeyboardUnavailablePayload(event.data.payload)) {
-          this.openCodeKeyboardCatalog = null;
-          this.runtimeDiagnostics.keyboard = {
-            ...(asRecord(this.runtimeDiagnostics.keyboard) ?? {}),
-            unavailable: event.data.payload,
-          };
-          this.syncKeyboardBridgePolicy("keyboard-unavailable");
-        }
-      }
-      if (event.data.type === BRIDGE_MESSAGES.keyboardCatalogChanged) {
-        if (isKeyboardCatalogPayload(event.data.payload)) {
-          this.openCodeKeyboardCatalog = {
-            options: event.data.payload.options,
-            catalog: event.data.payload.catalog,
-          };
-          this.syncKeyboardBridgePolicy("keyboard-catalog-changed");
-        }
-      }
-      if (event.data.type === BRIDGE_MESSAGES.keyboardDispatch) {
-        void this.executeKeyboardBridgeDispatch(event.data.payload);
-      }
       if (event.data.type === BRIDGE_MESSAGES.vaultFileOpen) {
         void this.openVaultFileFromBridge(event.data.payload);
-      }
-      if (event.data.type === BRIDGE_MESSAGES.promptContextReady) {
-        if (isPromptContextReadyPayload(event.data.payload)) {
-          this.promptContextPortReady = true;
-          this.runtimeDiagnostics.promptContext = {
-            ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
-            ready: event.data.payload,
-          };
-          this.syncNativePromptContext("prompt-context-ready");
-        } else {
-          this.promptContextPortReady = false;
-          this.runtimeDiagnostics.promptContext = {
-            ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
-            readyInvalid: summarizeDiagnosticPayload(event.data.payload),
-          };
-          this.writeStatus("prompt-context-ready-invalid");
-        }
-      }
-      if (event.data.type === BRIDGE_MESSAGES.promptContextUnavailable) {
-        if (isPromptContextUnavailablePayload(event.data.payload)) {
-          this.promptContextPortReady = false;
-          this.runtimeDiagnostics.promptContext = {
-            ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
-            unavailable: event.data.payload,
-          };
-          this.writeStatus("prompt-context-unavailable");
-        }
-      }
-      if (event.data.type === BRIDGE_MESSAGES.promptContextCommandResult) {
-        if (isPromptContextCommandResultPayload(event.data.payload)) {
-          this.nativePromptContextBridge.resolveCommandResult(event.data.payload);
-        }
-      }
-      if (event.data.type === BRIDGE_MESSAGES.promptContextChanged) {
-        if (isPromptContextChangedPayload(event.data.payload)) {
-          this.contextManager.reconcileOpenCodeNativeCommentCandidates(event.data.payload.items, {
-            removeMissing: event.data.payload.origin === "opencode-comment-delete",
-          });
-          this.runtimeDiagnostics.promptContext = {
-            ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
-            changed: {
-              origin: event.data.payload.origin,
-              itemCount: event.data.payload.items.length,
-              transactionId: event.data.payload.transactionId ?? null,
-            },
-          };
-          this.writeStatus("prompt-context-changed");
-        }
-      }
-      if (event.data.type === BRIDGE_MESSAGES.promptContextRemoved) {
-        if (isPromptContextRemovedPayload(event.data.payload)) {
-          const candidateId = this.nativePromptContextBridge.getCandidateIdForKey(
-            event.data.payload.key
-          );
-          if (candidateId) {
-            this.contextManager.setCandidateIncluded(candidateId, false);
-          } else {
-            this.contextManager.setNativePromptContextIncludedByKey(event.data.payload.key, false);
-          }
-          this.syncNativePromptContext("prompt-context-card-close");
-        }
-      }
-      if (event.data.type === BRIDGE_MESSAGES.promptContextActivated) {
-        if (isPromptContextActivatedPayload(event.data.payload)) {
-          const action = this.nativePromptContextBridge.getActivationAction(event.data.payload.key);
-          void this.executePromptContextClickAction(action);
-        }
-      }
-    });
-
-    this.processManager.on("projectDirectoryChanged", async (newDirectory: string) => {
-      this.settings.projectDirectory = newDirectory;
-      await this.saveData(this.settings);
-      this.refreshClientState();
-      this.writeStatus("project-directory-changed");
-      if (this.getServerState() === "running") {
-        await this.stopServer();
-        await this.startServer();
       }
     });
 
@@ -332,7 +113,7 @@ export default class OpenCodePlugin extends Plugin {
       this.getApiBaseUrl(),
       this.getServerUrl(),
       projectDirectory,
-      () => this.processManager.getServerPassword()
+      () => this.attachedHandle?.password ?? null
     );
     this.lastBaseUrl = this.getServerUrl();
     this.lastApiBaseUrl = this.getApiBaseUrl();
@@ -345,10 +126,16 @@ export default class OpenCodePlugin extends Plugin {
       apiBaseUrl: this.getApiBaseUrl(),
       projectDirectory,
       getCurrentSessionId: () => this.currentContextSession.getCurrentSessionId(),
-      getAuthPassword: () => this.processManager.getServerPassword(),
+      getAuthPassword: () => this.attachedHandle?.password ?? null,
       onEventSnapshot: (snapshot) => {
         this.runtimeDiagnostics.opencodeEvents = snapshot;
         this.scheduleEventStatusWrite();
+        if (snapshot.state === "disconnected" && this.getServiceState() === "attached") {
+          this.applyServiceStatus({
+            state: "unavailable",
+            reason: "OpenCode event stream ended",
+          });
+        }
       },
     });
     this.graphIndex = createObsidianGraphIndex(this.app);
@@ -358,29 +145,21 @@ export default class OpenCodePlugin extends Plugin {
     this.contextManager = new ContextManager({
       app: this.app,
       settings: this.settings,
-      client: this.openCodeClient,
-      getServerState: () => this.getServerState(),
+      getServiceState: () => this.getServiceState(),
       currentSession: this.currentContextSession,
       registerEvent: (ref) => this.registerEvent(ref),
-    });
-    this.unsubscribeNativePromptContextSync = this.contextManager.onCandidatesChanged(() => {
-      this.syncNativePromptContext("candidates-changed");
     });
     this.installPromptContextHook();
     this.contextItemNavigator = new ContextItemNavigator(this.app, this.graphIndex);
     this.contextStatusBar = new ContextStatusBar({
       addStatusBarItem: () => this.addStatusBarItem(),
-      getItems: () => this.contextManager.getItems(),
-      onItemsChanged: (callback) => this.contextManager.onItemsChanged(callback),
       getCandidates: () => this.contextManager.getCandidates(),
       onCandidatesChanged: (callback) => this.contextManager.onCandidatesChanged(callback),
-      getProjectionFailures: () => this.contextManager.getPromptContextProjectionFailures(),
-      getNativeSyncFailures: () => this.nativePromptContextSyncFailures,
       toggleCandidate: (candidateId) => this.contextManager.toggleCandidate(candidateId),
       removeCandidate: (candidateId) => this.contextManager.removeCandidate(candidateId),
-      resolveItem: (item) => this.contextItemNavigator.resolve(item),
-      openItem: (item) => this.contextItemNavigator.open(item),
-      removeItem: (itemId) => this.contextManager.removeItemForCurrentSession(itemId),
+      getLastPromptDelivery: () => this.contextManager.getLastPromptDelivery(),
+      resolveCandidate: (candidate) => this.contextItemNavigator.resolve(candidate),
+      openCandidate: (candidate) => this.contextItemNavigator.open(candidate),
     });
 
     this.viewManager = new ViewManager({
@@ -389,10 +168,7 @@ export default class OpenCodePlugin extends Plugin {
       client: this.openCodeClient,
       contextManager: this.contextManager,
       currentSession: this.currentContextSession,
-      getServerState: () => this.getServerState(),
-      startServer: () => {
-        void this.startServer();
-      },
+      getServiceState: () => this.getServiceState(),
     });
 
     this.logger.info("configured project directory", { projectDirectory });
@@ -403,13 +179,8 @@ export default class OpenCodePlugin extends Plugin {
         this.app,
         this,
         this.settings,
-        this.processManager,
-        () => this.saveSettings(),
-        {
-          getSummary: () => this.getKeyboardBridgeSettingsSummary(),
-          setOwner: (signature, owner) => this.setKeyboardBridgeShortcutOwner(signature, owner),
-          refresh: () => this.syncKeyboardBridgePolicy("settings-refresh"),
-        }
+        () => this.getServiceStatus(),
+        () => this.saveSettings()
       )
     );
 
@@ -457,7 +228,7 @@ export default class OpenCodePlugin extends Plugin {
       id: "copy-opencode-diagnostics",
       name: text.commands.copyDiagnostics,
       callback: () => {
-        void this.copyServerDiagnosticsToClipboard();
+        void this.copyServiceDiagnosticsToClipboard();
       },
     });
 
@@ -473,18 +244,15 @@ export default class OpenCodePlugin extends Plugin {
         }
 
         const range = getSelectionLineRange(editor.listSelections()[0]);
-        void this.contextManager
-          .addSelectionForCurrentSession(
-            selectedText,
-            sourcePath,
-            range.selectionStartLine,
-            range.selectionEndLine
-          )
-          .then((item) => {
-            if (!item) {
-              new Notice(getText().notices.contextNotAddedNoSession);
-            }
-          });
+        const candidate = this.contextManager.includeSelection({
+          text: selectedText,
+          sourcePath,
+          selectionStartLine: range.selectionStartLine,
+          selectionEndLine: range.selectionEndLine,
+        });
+        if (!candidate) {
+          new Notice(getText().notices.contextCandidateNotQueued);
+        }
       },
       hotkeys: [
         {
@@ -502,35 +270,13 @@ export default class OpenCodePlugin extends Plugin {
       },
     });
 
-    this.addCommand({
-      id: "start-opencode-server",
-      name: text.commands.startServer,
-      callback: () => {
-        this.startServer();
-      },
-    });
-
-    this.addCommand({
-      id: "stop-opencode-server",
-      name: text.commands.stopServer,
-      callback: () => {
-        this.stopServer();
-      },
-    });
-
-    if (this.settings.autoStart) {
-      this.app.workspace.onLayoutReady(async () => {
-        await this.startServer();
-      });
-    }
-
     this.contextManager.updateSettings(this.settings);
-    this.processManager.on("stateChange", (state: ServerState) => {
-      if (state === "running") {
-        void this.contextManager.handleServerRunning();
-      }
-      this.openCodeBridge.syncServerState(state);
-    });
+
+    if (this.getServiceState() === "attached") {
+      void this.handleServiceAttached();
+    } else {
+      this.startAttachRetry();
+    }
 
     this.registerCleanupHandlers();
     this.registerEvent(
@@ -554,29 +300,10 @@ export default class OpenCodePlugin extends Plugin {
       clearTimeout(this.eventStatusWriteTimer);
       this.eventStatusWriteTimer = null;
     }
-    try {
-      const clearResult = await this.nativePromptContextBridge?.clearOwner();
-      if (clearResult) {
-        this.runtimeDiagnostics.promptContext = {
-          ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
-          ownerClear: {
-            reason: "unload",
-            revision: clearResult.revision,
-            results: clearResult.results,
-          },
-        };
-      }
-    } catch (error) {
-      this.logger.warn("prompt context owner clear failed during unload", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
     this.openCodeWebUiProxy?.stop();
-    this.unsubscribeNativePromptContextSync?.();
-    this.unsubscribeNativePromptContextSync = null;
     this.contextStatusBar?.destroy();
     this.contextManager.destroy();
-    await this.stopServer();
+    this.stopAttachRetry();
     this.app.workspace.detachLeavesOfType(OPENCODE_VIEW_TYPE);
     this.writeStatus("unloaded");
   }
@@ -585,56 +312,75 @@ export default class OpenCodePlugin extends Plugin {
     this.settings = normalizeOpenCodeSettings(await this.loadData());
   }
 
-  private async attemptAutodetect(): Promise<void> {
-    if (this.settings.opencodePath || this.settings.useCustomCommand) {
-      return;
-    }
-
-    this.logger.info("attempting to autodetect opencode executable");
-
-    const detectedPath = ExecutableResolver.resolve("opencode");
-
-    if (detectedPath && detectedPath !== "opencode") {
-      this.logger.info("autodetected opencode executable", { path: detectedPath });
-      this.settings.opencodePath = detectedPath;
-      await this.saveData(this.settings);
-      new Notice(getText().notices.executableFound(detectedPath));
-    } else {
-      this.logger.warn("could not autodetect opencode executable");
-      new Notice(getText().notices.executableNotFoundSettings);
-    }
-  }
-
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-    this.processManager.updateSettings(this.settings);
-    this.refreshClientState();
     this.contextManager.updateSettings(this.settings);
     this.viewManager.updateSettings(this.settings);
-    this.syncKeyboardBridgePolicy("settings-saved");
-    this.writeStatus("settings-saved");
+    await this.attachService();
   }
 
-  async startServer(): Promise<boolean> {
-    const success = await this.processManager.start();
-    if (success) {
-      new Notice(getText().notices.serverStarted);
-      const initialized = await this.openCodeClient.initializeProject();
-      if (!initialized) {
-        this.logger.warn("failed to initialize project on server");
+  async attachService(): Promise<boolean> {
+    const dir = defaultServiceDir();
+    const prefer = this.settings.serviceName || "auto";
+    const handle = await attachToService({ dir, prefer });
+
+    if (!handle) {
+      const reason = await describeUnavailableService(dir, prefer);
+      if (this.serviceStatus?.state === "unavailable" && this.serviceStatus.reason === reason) {
+        return false;
       }
-      await this.restoreKnownSessionContext();
-    } else {
-      new Notice(formatStartFailureNotice(this.getServerDiagnostics()), 15000);
+      this.applyServiceStatus({ state: "unavailable", reason });
+      return false;
     }
-    this.writeStatus(success ? "start-success" : "start-failed");
-    return success;
+
+    const url = new URL(handle.url);
+    this.openCodeWebUiProxy.updateTarget(url.hostname, Number(url.port));
+    this.applyServiceStatus({ state: "attached", handle });
+    return true;
   }
 
-  async stopServer(): Promise<void> {
-    await this.processManager.stop();
-    new Notice(getText().notices.serverStopped);
-    this.writeStatus("stop");
+  private applyServiceStatus(status: ServiceStatus): void {
+    this.serviceStatus = status;
+    this.openCodeBridge?.syncServiceState(status.state);
+
+    if (status.state === "attached") {
+      this.stopAttachRetry();
+      void this.handleServiceAttached();
+    } else {
+      this.startAttachRetry();
+    }
+
+    for (const callback of this.serviceChangeCallbacks) {
+      callback(status.state);
+    }
+
+    this.refreshClientState();
+    this.writeStatus(`service:${status.state}`);
+  }
+
+  private async handleServiceAttached(): Promise<void> {
+    const initialized = await this.openCodeClient?.initializeProject();
+    if (initialized === false) {
+      this.logger.warn("failed to initialize project on service");
+    }
+    await this.contextManager?.handleServiceAttached();
+  }
+
+  private startAttachRetry(): void {
+    if (this.attachRetryTimer) {
+      return;
+    }
+    this.attachRetryTimer = setInterval(() => {
+      void this.attachService();
+    }, ATTACH_RETRY_INTERVAL_MS);
+  }
+
+  private stopAttachRetry(): void {
+    if (!this.attachRetryTimer) {
+      return;
+    }
+    clearInterval(this.attachRetryTimer);
+    this.attachRetryTimer = null;
   }
 
   private async addCurrentNoteToContext(): Promise<void> {
@@ -662,42 +408,41 @@ export default class OpenCodePlugin extends Plugin {
       return;
     }
 
-    const item = await this.contextManager.addCurrentNoteForCurrentSession(file.path, text);
-    if (!item) {
-      new Notice(getText().notices.contextNotAddedNoSession);
+    const candidate = this.contextManager.includeNote({ path: file.path, text });
+    if (!candidate) {
+      new Notice(getText().notices.contextCandidateNotQueued);
     }
   }
 
-  getServerState(): ServerState {
-    return this.processManager.getState() ?? "stopped";
+  getServiceState(): ServiceState {
+    return this.serviceStatus?.state ?? "unavailable";
   }
 
-  getLastError(): string | null {
-    return this.processManager.getLastError() ?? null;
+  getServiceStatus(): ServiceStatus | null {
+    return this.serviceStatus;
+  }
+
+  private get attachedHandle(): ServiceHandle | null {
+    return this.serviceStatus?.state === "attached" ? this.serviceStatus.handle : null;
   }
 
   getSettings(): OpenCodeSettings {
     return this.settings;
   }
 
-  getServerDiagnostics(): ServerDiagnostics & {
-    logFile: string;
-    statusFile: string;
-    runtimeDiagnostics: RuntimeDiagnosticsSnapshot;
-  } {
-    const paths = getRuntimePaths();
+  getServiceDiagnostics(): ServiceDiagnosticsSnapshot {
     return {
-      ...this.processManager.getDiagnostics(),
+      state: this.getServiceState(),
+      service: summarizeAttachedHandle(this.attachedHandle),
+      reason: this.serviceStatus?.state === "unavailable" ? this.serviceStatus.reason : null,
       runtimeDiagnostics: this.runtimeDiagnostics,
-      logFile: paths.logFile,
-      statusFile: paths.statusFile,
     };
   }
 
-  async copyServerDiagnosticsToClipboard(): Promise<boolean> {
+  async copyServiceDiagnosticsToClipboard(): Promise<boolean> {
     try {
       await navigator.clipboard.writeText(
-        formatServerDiagnosticsForClipboard(this.getServerDiagnostics())
+        formatServiceDiagnosticsForClipboard(this.getServiceDiagnostics())
       );
       new Notice(getText().notices.diagnosticsCopied);
       return true;
@@ -711,17 +456,11 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   getServerUrl(): string {
-    const endpoint = createServerEndpoint(this.settings, this.getProjectDirectory());
-    const version = this.processManager.getServerVersion();
-    const major = version ? Number.parseInt(version.split(".")[0] ?? "", 10) : Number.NaN;
-    if (Number.isFinite(major) && major >= 2) {
-      return this.openCodeWebUiProxy.getV2ServerUrl();
-    }
-    return this.openCodeWebUiProxy.getProxyUrl(endpoint.encodedProjectDirectory);
+    return this.openCodeWebUiProxy.getV2ServerUrl();
   }
 
   getApiBaseUrl(): string {
-    return createServerEndpoint(this.settings, this.getProjectDirectory()).apiBaseUrl;
+    return this.attachedHandle?.url ?? "";
   }
 
   getStoredIframeUrl(): string | null {
@@ -737,27 +476,17 @@ export default class OpenCodePlugin extends Plugin {
     }
   }
 
-  onServerStateChange(callback: (state: ServerState) => void): () => void {
-    this.stateChangeCallbacks.push(callback);
+  onServiceStateChange(callback: (state: ServiceState) => void): () => void {
+    this.serviceChangeCallbacks.push(callback);
     return () => {
-      const index = this.stateChangeCallbacks.indexOf(callback);
+      const index = this.serviceChangeCallbacks.indexOf(callback);
       if (index > -1) {
-        this.stateChangeCallbacks.splice(index, 1);
+        this.serviceChangeCallbacks.splice(index, 1);
       }
     };
   }
 
-  private notifyStateChange(state: ServerState): void {
-    if (state === "running" && this.openCodeClient) {
-      this.refreshClientState();
-    }
-    for (const callback of this.stateChangeCallbacks) {
-      callback(state);
-    }
-  }
-
   private refreshClientState(): void {
-    this.openCodeWebUiProxy.updateTarget(this.settings.hostname, this.settings.port);
     this.refreshProxyAppearance();
 
     const nextUiBaseUrl = this.getServerUrl();
@@ -867,408 +596,6 @@ export default class OpenCodePlugin extends Plugin {
     this.writeStatus("iframe-diagnostics");
   }
 
-  postPromptContextCommand(payload: PromptContextCommandPayload): void {
-    if (!isPromptContextCommandPayload(payload)) {
-      this.logger.warn(
-        "ignored invalid prompt context command",
-        summarizeDiagnosticPayload(payload)
-      );
-      return;
-    }
-    for (const leaf of this.app.workspace.getLeavesOfType(OPENCODE_VIEW_TYPE)) {
-      if (leaf.view instanceof OpenCodeView) {
-        leaf.view.postBridgeMessage(BRIDGE_MESSAGES.promptContextCommand, payload);
-      }
-    }
-  }
-
-  getKeyboardBridgeSettingsSummary(): {
-    status: KeyboardShortcutIndex["status"];
-    obsidianShortcutCount: number;
-    opencodeShortcutCount: number;
-    conflictCount: number;
-    obsidianAvailable: boolean;
-    opencodeAvailable: boolean;
-    unavailableReason: string | null;
-    conflicts: KeyboardConflict[];
-  } {
-    const index = this.refreshKeyboardShortcutIndex("settings-summary", false);
-    return {
-      status: index.status,
-      obsidianShortcutCount: index.obsidianShortcutCount,
-      opencodeShortcutCount: index.opencodeShortcutCount,
-      conflictCount: index.conflictCount,
-      obsidianAvailable: index.obsidian.available,
-      opencodeAvailable: index.opencodeAvailable,
-      unavailableReason: index.obsidian.reason ?? null,
-      conflicts: index.conflicts,
-    };
-  }
-
-  async setKeyboardBridgeShortcutOwner(
-    signature: string,
-    owner: KeyboardBridgeShortcutOwner
-  ): Promise<void> {
-    if (!isNormalizedShortcutSignature(signature)) {
-      this.logger.warn("ignored invalid keyboard shortcut policy signature", { signature });
-      return;
-    }
-    if (owner !== "opencode" && owner !== "obsidian") {
-      this.logger.warn("ignored invalid keyboard shortcut policy owner", { signature, owner });
-      return;
-    }
-
-    const previousOwner = this.settings.keyboardBridge.conflictOwners[signature];
-    this.settings.keyboardBridge.conflictOwners[signature] = owner;
-    await this.saveSettings();
-    if (previousOwner !== owner) {
-      this.syncKeyboardBridgePolicy("settings-owner-change");
-    }
-  }
-
-  private syncKeyboardBridgePolicy(reason: string): void {
-    if (!this.openCodeWebUiProxy) {
-      return;
-    }
-    const index = this.refreshKeyboardShortcutIndex(reason, true);
-    const payload = createKeyboardPolicyUpdatePayload(index, ++this.keyboardPolicyRevision);
-    for (const leaf of this.app.workspace.getLeavesOfType(OPENCODE_VIEW_TYPE)) {
-      if (leaf.view instanceof OpenCodeView) {
-        leaf.view.postBridgeMessage(BRIDGE_MESSAGES.keyboardPolicyUpdate, payload);
-      }
-    }
-    this.runtimeDiagnostics.keyboard = {
-      ...(asRecord(this.runtimeDiagnostics.keyboard) ?? {}),
-      lastPolicyUpdate: {
-        reason,
-        revision: payload.revision,
-        entries: payload.entries,
-      },
-    };
-    this.writeStatus(`keyboard-policy:${reason}`);
-  }
-
-  private refreshKeyboardShortcutIndex(
-    reason: string,
-    writeDiagnostics: boolean
-  ): KeyboardShortcutIndex {
-    const platform = detectShortcutPlatform();
-    const obsidian = collectObsidianShortcuts(this.app, platform);
-    const index = buildKeyboardShortcutIndex({
-      obsidian,
-      opencode: this.openCodeKeyboardCatalog,
-      platform,
-      conflictOwners: this.settings.keyboardBridge.conflictOwners,
-    });
-
-    if (writeDiagnostics) {
-      this.runtimeDiagnostics.keyboard = {
-        ...(asRecord(this.runtimeDiagnostics.keyboard) ?? {}),
-        reason,
-        summary: summarizeKeyboardShortcutIndex(index),
-        index,
-        bundlePatch: summarizeDiagnosticPayload(
-          this.openCodeWebUiProxy.getKeyboardBundlePatchDiagnostics()
-        ),
-      };
-    }
-    return index;
-  }
-
-  private async executeKeyboardBridgeDispatch(payload: unknown): Promise<void> {
-    if (!isKeyboardDispatchPayload(payload)) {
-      this.recordKeyboardDecision({
-        signature: "invalid",
-        owner: "opencode",
-        handled: false,
-        reason: "invalid-dispatch-payload",
-        at: Date.now(),
-      });
-      this.logger.warn(
-        "ignored invalid keyboard dispatch payload",
-        summarizeDiagnosticPayload(payload)
-      );
-      this.writeStatus("keyboard-dispatch-invalid");
-      return;
-    }
-
-    const index = this.refreshKeyboardShortcutIndex("keyboard-dispatch", true);
-    const policy = index.policy[payload.signature];
-    if (
-      !policy ||
-      policy.owner !== "obsidian" ||
-      !policy.commandId ||
-      policy.commandId !== payload.commandId
-    ) {
-      this.recordKeyboardDecision({
-        signature: payload.signature,
-        commandId: payload.commandId,
-        owner: policy?.owner ?? "opencode",
-        handled: false,
-        reason: "policy-mismatch",
-        at: Date.now(),
-      });
-      this.writeStatus("keyboard-dispatch-policy-mismatch");
-      return;
-    }
-
-    const commands = (
-      this.app as unknown as {
-        commands?: { executeCommandById?: (id: string) => unknown };
-      }
-    ).commands;
-    if (typeof commands?.executeCommandById !== "function") {
-      this.recordKeyboardDecision({
-        signature: payload.signature,
-        commandId: payload.commandId,
-        owner: "obsidian",
-        handled: false,
-        reason: "obsidian-command-executor-unavailable",
-        at: Date.now(),
-      });
-      this.writeStatus("keyboard-dispatch-executor-unavailable");
-      return;
-    }
-
-    try {
-      commands.executeCommandById(payload.commandId);
-      this.recordKeyboardDecision({
-        signature: payload.signature,
-        commandId: payload.commandId,
-        owner: "obsidian",
-        handled: true,
-        reason: "executed",
-        at: Date.now(),
-      });
-      this.writeStatus("keyboard-dispatch-executed");
-    } catch (error) {
-      this.recordKeyboardDecision({
-        signature: payload.signature,
-        commandId: payload.commandId,
-        owner: "obsidian",
-        handled: false,
-        reason: error instanceof Error ? error.message : String(error),
-        at: Date.now(),
-      });
-      this.writeStatus("keyboard-dispatch-failed");
-    }
-  }
-
-  private recordKeyboardDecision(decision: KeyboardDecisionPayload): void {
-    this.runtimeDiagnostics.keyboard = {
-      ...(asRecord(this.runtimeDiagnostics.keyboard) ?? {}),
-      lastDecision: decision,
-    };
-    for (const leaf of this.app.workspace.getLeavesOfType(OPENCODE_VIEW_TYPE)) {
-      if (leaf.view instanceof OpenCodeView) {
-        leaf.view.postBridgeMessage(BRIDGE_MESSAGES.keyboardDecision, decision);
-      }
-    }
-  }
-
-  private syncNativePromptContext(reason: string): void {
-    if (!this.contextManager || !this.nativePromptContextBridge) {
-      return;
-    }
-    if (!this.promptContextPortReady) {
-      this.runtimeDiagnostics.promptContext = {
-        ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
-        lastSyncSkipped: {
-          reason,
-          skippedBecause: "prompt-context-port-not-ready",
-        },
-      };
-      this.writeStatus("prompt-context-sync-skipped");
-      return;
-    }
-
-    const projections = this.contextManager.getNativePromptContextProjections();
-    void this.nativePromptContextBridge
-      .sync(projections)
-      .then(async (result) => {
-        this.nativePromptContextSyncFailures = this.extractNativePromptContextSyncFailures(
-          result.results,
-          projections
-        );
-        let surfaceTrace = await this.tracePromptContextSurfaceConsistency(
-          reason,
-          projections,
-          result.revision,
-          result.results
-        );
-        const surfaceCleanup =
-          surfaceTrace && !surfaceTrace.consistent
-            ? await this.cleanupPromptContextSurfaceOrphans(reason, surfaceTrace)
-            : null;
-        if (surfaceCleanup && surfaceCleanup.attempted > 0) {
-          surfaceTrace = await this.tracePromptContextSurfaceConsistency(
-            `${reason}:after-surface-cleanup`,
-            projections,
-            result.revision,
-            result.results
-          );
-        }
-        const surfaceSummary = surfaceTrace
-          ? summarizePromptContextSurfaceTrace(surfaceTrace)
-          : null;
-        this.runtimeDiagnostics.promptContext = {
-          ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
-          lastSync: {
-            reason,
-            revision: result.revision,
-            projections: projections.length,
-            results: result.results,
-          },
-          projectionFailures: this.contextManager.getPromptContextProjectionFailures(),
-          bundlePatch: summarizeDiagnosticPayload(
-            this.openCodeWebUiProxy.getPromptContextBundlePatchDiagnostics()
-          ),
-          surfaceConsistency: surfaceSummary,
-          surfaceTrace: surfaceTrace && !surfaceTrace.consistent ? surfaceTrace : undefined,
-          surfaceCleanup: surfaceCleanup ?? undefined,
-        };
-        this.contextStatusBar?.render();
-        this.writeStatus(
-          surfaceTrace?.consistent === false
-            ? "prompt-context-surface-mismatch"
-            : surfaceCleanup && surfaceCleanup.attempted > 0
-              ? "prompt-context-surface-cleaned"
-              : "prompt-context-sync"
-        );
-      })
-      .catch((error) => {
-        this.nativePromptContextSyncFailures = [];
-        this.runtimeDiagnostics.promptContext = {
-          ...(asRecord(this.runtimeDiagnostics.promptContext) ?? {}),
-          lastSyncError: error instanceof Error ? error.message : String(error),
-        };
-        this.logger.warn("prompt context native sync failed", {
-          reason,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        this.writeStatus("prompt-context-sync-failed");
-      });
-  }
-
-  private async tracePromptContextSurfaceConsistency(
-    reason: string,
-    projections: NativePromptContextProjection[],
-    syncRevision: number,
-    syncResults: NativePromptContextProjectionSyncResult[]
-  ) {
-    if (!this.promptContextPortReady) {
-      this.logger.info("prompt context surface consistency skipped", {
-        reason,
-        syncRevision,
-        portReady: false,
-      });
-      return null;
-    }
-
-    const trace = buildPromptContextSurfaceTrace({
-      reason,
-      syncRevision,
-      candidates: this.contextManager.getCandidates(),
-      nativeProjections: projections,
-      projectionFailures: this.contextManager.getPromptContextProjectionFailures(),
-      nativeSyncResults: syncResults,
-      webUiItems: await this.nativePromptContextBridge.getWebUiItems(),
-    });
-    const summary = summarizePromptContextSurfaceTrace(trace);
-    if (trace.consistent) {
-      this.logger.info("prompt context surface consistency", summary);
-      return trace;
-    }
-
-    this.logger.warn("prompt context surface mismatch", trace);
-    return trace;
-  }
-
-  private extractNativePromptContextSyncFailures(
-    results: NativePromptContextProjectionSyncResult[],
-    projections: NativePromptContextProjection[]
-  ): ContextStatusBarNativeSyncFailure[] {
-    const expectedProjectionIds = new Set(projections.map((projection) => projection.projectionId));
-    return results
-      .filter((result) => {
-        if (!expectedProjectionIds.has(result.projectionId)) {
-          return false;
-        }
-        return result.status !== "synced" && result.status !== "unchanged";
-      })
-      .map((result) => ({
-        projectionId: result.projectionId,
-        candidateId: result.candidateId ?? null,
-        key: result.key ?? null,
-        status: result.status,
-        reason: result.reason ?? null,
-      }));
-  }
-
-  private async cleanupPromptContextSurfaceOrphans(
-    reason: string,
-    trace: PromptContextSurfaceTrace
-  ): Promise<PromptContextSurfaceCleanupTrace | null> {
-    const plan = planPromptContextSurfaceCleanup(trace);
-    if (plan.removeKeys.length === 0 && plan.skipped.length === 0) {
-      return null;
-    }
-
-    const cleanup: PromptContextSurfaceCleanupTrace = {
-      reason,
-      checkedAt: new Date().toISOString(),
-      attempted: plan.removeKeys.length,
-      removeKeys: [...plan.removeKeys],
-      removedKeys: [],
-      missingKeys: [],
-      skipped: [...plan.skipped],
-      failed: [],
-      results: [],
-    };
-
-    for (const key of plan.removeKeys) {
-      try {
-        const result = await this.nativePromptContextBridge.removeWebUiItem(key);
-        cleanup.results.push({ key, status: result.status });
-        if (result.status === "removed") {
-          cleanup.removedKeys.push(key);
-          continue;
-        }
-        cleanup.missingKeys.push(key);
-      } catch (error) {
-        cleanup.failed.push({
-          key,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    const logPayload = summarizeDiagnosticPayload(cleanup);
-    if (cleanup.failed.length > 0 || cleanup.skipped.length > 0) {
-      this.logger.warn("prompt context surface cleanup completed with caveats", logPayload);
-      return cleanup;
-    }
-
-    this.logger.info("prompt context surface cleanup completed", logPayload);
-    return cleanup;
-  }
-
-  private async executePromptContextClickAction(
-    action: PromptContextClickAction | null
-  ): Promise<void> {
-    if (!action || action.type === "none" || action.type === "opencode-open-comment") {
-      return;
-    }
-
-    const result = await this.contextItemNavigator.openSource(action.path, action.line);
-    this.logger.info("prompt context activation requested Obsidian navigation", result);
-    this.writeStatus(
-      result.status === "opened"
-        ? "prompt-context-activation-opened"
-        : "prompt-context-activation-unresolved"
-    );
-  }
-
   private async openVaultFileFromBridge(payload: unknown): Promise<void> {
     if (!isVaultFileOpenPayload(payload)) {
       this.logger.warn(
@@ -1298,15 +625,6 @@ export default class OpenCodePlugin extends Plugin {
     await this.viewManager.ensureSessionUrl(view);
   }
 
-  private async restoreKnownSessionContext(): Promise<void> {
-    const sessionId = this.currentContextSession.getCurrentSessionId();
-    if (!sessionId) {
-      return;
-    }
-
-    await this.contextManager.restoreFromServer(sessionId);
-  }
-
   getProjectDirectory(): string {
     return this.resolveProjectDirectory();
   }
@@ -1315,7 +633,7 @@ export default class OpenCodePlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("quit", () => {
         this.logger.info("obsidian quitting; performing cleanup");
-        this.stopServer();
+        this.stopAttachRetry();
       })
     );
   }
@@ -1368,55 +686,40 @@ export default class OpenCodePlugin extends Plugin {
   }
 
   private writeStatus(lifecycle: string): void {
-    if (!this.processManager) {
-      return;
-    }
-
     const projectDirectory = this.resolveProjectDirectory();
-    const endpoint = createServerEndpoint(this.settings, projectDirectory);
     const proxyPort = this.openCodeWebUiProxy?.getPort() || null;
-    const diagnostics = this.processManager.getDiagnostics();
-    const proxyUrl =
-      proxyPort && proxyPort > 0
-        ? this.openCodeWebUiProxy.getProxyUrl(endpoint.encodedProjectDirectory)
-        : null;
 
     writeRuntimeStatus({
       lifecycle,
-      serverState: this.getServerState(),
-      lastError: diagnostics.lastError,
-      lastHealthError: diagnostics.lastHealthError,
-      lastCommand: diagnostics.lastCommand,
-      lastDisplayCommand: diagnostics.lastDisplayCommand,
-      lastStartMode: diagnostics.lastStartMode,
-      lastUsesShell: diagnostics.lastUsesShell,
-      lastCwd: diagnostics.lastCwd,
-      lastStdout: diagnostics.lastStdout,
-      lastStderr: diagnostics.lastStderr,
-      lastExitCode: diagnostics.lastExitCode,
-      lastExitSignal: diagnostics.lastExitSignal,
-      lastProcessErrorStack: diagnostics.lastProcessErrorStack,
-      processEnvironment: diagnostics.processEnvironment,
-      lastSpawnEnvironment: diagnostics.lastSpawnEnvironment,
-      lastResolvedExecutable: diagnostics.lastResolvedExecutable,
-      diagnosticHint: diagnostics.hint,
-      pid: this.processManager.getPid(),
-      hostname: endpoint.hostname,
-      port: endpoint.port,
-      apiBaseUrl: endpoint.apiBaseUrl,
-      uiBaseUrl: endpoint.uiBaseUrl,
-      healthUrl: endpoint.healthUrl,
-      proxyUrl,
+      serviceState: this.getServiceState(),
+      service: summarizeAttachedHandle(this.attachedHandle),
+      serviceError: this.serviceStatus?.state === "unavailable" ? this.serviceStatus.reason : null,
+      proxyUrl: proxyPort && proxyPort > 0 ? this.openCodeWebUiProxy.getV2ServerUrl() : null,
       proxyPort,
       projectDirectory,
-      useCustomCommand: this.settings.useCustomCommand,
       webViewAppearance: this.settings.webViewAppearance,
       runtimeDiagnostics: this.runtimeDiagnostics,
-      autoStart: this.settings.autoStart,
       logFile: getRuntimePaths().logFile,
       statusFile: getRuntimePaths().statusFile,
     });
   }
+}
+
+const ATTACH_RETRY_INTERVAL_MS = 10_000;
+
+function summarizeAttachedHandle(handle: ServiceHandle | null): ServiceSummary | null {
+  return handle ? summarizeService(handle) : null;
+}
+
+async function describeUnavailableService(dir: string, prefer: string): Promise<string> {
+  const candidates = await discoverServices(dir);
+  if (candidates.length === 0) {
+    return `no service*.json in ${dir}`;
+  }
+  const names = candidates.map((candidate) => candidate.name).join(", ");
+  return prefer === "auto"
+    ? `no reachable service among ${names} in ${dir}`
+    : `no reachable service among ${names} in ${dir} (preferred ${prefer})`;
 }
 
 function summarizeDiagnosticPayload(value: unknown): unknown {
@@ -1445,11 +748,4 @@ function summarizeDiagnosticValue(value: unknown): unknown {
     return { keyCount: keys.length, keys: keys.slice(0, 16) };
   }
   return value;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
 }

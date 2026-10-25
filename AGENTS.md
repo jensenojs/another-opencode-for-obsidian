@@ -5,34 +5,38 @@ AI 编码代理在 Another OpenCode for Obsidian 插件上工作的指南。
 ## 项目概述
 
 这个插件把 OpenCode 接进 Obsidian。当前主目标已经收敛为：让 OpenCode 在
-Obsidian 里可日常使用，同时保留 OpenCode 自己的 Web UI。插件负责 Obsidian
-才能判断的部分：视图位置、主题适配、快捷键归属、vault 安全导航、context
-provenance、runtime diagnostics，以及 status bar / Web UI context surface 的一致性。
+Obsidian 里可日常使用，同时保留 OpenCode 自己的 Web UI。
+
+插件不拥有 OpenCode 进程。它读取 opencode 自己的运行时注册
+（`~/.local/state/opencode/service*.json`），attach 到已在运行的服务，通过本地代理把
+Web UI 嵌进 Obsidian，并在 prompt 发送边界把 Obsidian 上下文作为文件附件交给 OpenCode。
+找不到服务时插件只显示状态和用户动作；它不启动、不重启、不终止任何进程。
 
 当前产品边界：
 
-1. OpenCode in Obsidian usability：OpenCode server 管理、侧边栏视图、主编辑区 deep
-   view、Obsidian 外观、快捷键桥接、设置页冲突控制。
+1. OpenCode in Obsidian usability：服务发现与 attach、侧边栏视图、主编辑区 deep view、
+   Obsidian 外观适配、status bar。
 2. Safe vault navigation：context source 和 OpenCode iframe 里的 vault path 只能跳到已有
    vault 内容，不能通过 Obsidian link 语义创建文件。
-3. Context provenance/control：当前 OpenCode session 的 context 必须可见、可诊断、可显式移除或排除候选。
+3. Context attachments：Obsidian 上下文只有一个载体——prompt body 的 `files` 附件。候选由
+   `CandidateRegistry` 管理，发送时转成 `data:` 附件。
 4. GraphIndex：消费 Obsidian Vault + MetadataCache，提供 vault link graph 的事实 read
    model，供导航和以后可能的 graph 实验使用。
-5. OpenCode event bridge：上游稳定 event surface 是 OpenCode dev 的 `GET /api/event` /
-   `v2.event.subscribe`。当前只接 read-only session diagnostics，不复制 Web UI 已有的
-   permission/question 弹窗。
+5. OpenCode event bridge：上游稳定 event surface 是 `GET /api/event`（SSE）。当前只接
+   read-only session diagnostics，并把流结束当作服务死亡的权威信号。
 
 GraphRAG 是可能的个人探索方向，不是当前产品主线。除非用户明确要求，不要主动把
 GraphRAG 排进实现计划。任何 graph-derived source 都必须消费 GraphIndex facts，不能替代
-Obsidian resolver，也不能绕过 CandidateRegistry 直接写 OpenCode session。
+Obsidian resolver，也不能绕过 CandidateRegistry。
 
-产品定位文档：
+产品与结构文档：
 
 - [docs/explorations/another-opencode-for-obsidian-product-positioning.md](docs/explorations/another-opencode-for-obsidian-product-positioning.md)
 - [docs/explorations/graphrag-known-to-unknown.md](docs/explorations/graphrag-known-to-unknown.md)
-- [docs/plans/opencode-event-source-contract.md](docs/plans/opencode-event-source-contract.md)
+- [docs/plans/v2-attach-spec.md](docs/plans/v2-attach-spec.md)（当前结构的规范文档）
 
-**技术栈:** TypeScript · Obsidian Plugin API · esbuild · Node.js child_process / http
+**技术栈:** TypeScript · Obsidian Plugin API · esbuild · Node.js `http` / `fs` / `os` /
+`path`（桌面端 Electron 进程内；进程生命周期归 opencode 自己）
 
 ## 构建命令
 
@@ -52,119 +56,131 @@ bun run dev:theme    # 检查真实 vault 里的 Web UI 外观注入
 
 ```
 src/
-├── main.ts              # 插件入口，extends Plugin
-├── types.ts             # Settings 接口、常量定义
-├── icons.ts             # SVG 图标注册（openCode、cut）
-├── client/
-│   └── OpenCodeClient.ts  # HTTP API 客户端（用 Node.js http.request 绕开 CORS）
+├── main.ts                     # 插件入口：attach 装配、命令、status.json
+├── types.ts                    # Settings 接口、context 类型、常量
+├── i18n.ts                     # EN / ZH 文案
+├── icons.ts                    # SVG 图标注册
 ├── server/
-│   ├── ServerManager.ts   # 进程生命周期管理、/global/health JSON 健康检查
-│   ├── ExecutableResolver.ts  # opencode 可执行文件路径解析
-│   ├── types.ts           # 服务端相关类型
-│   └── process/
-│       ├── OpenCodeProcess.ts   # 进程抽象（平台无关接口）
-│       ├── PosixProcess.ts      # Unix/macOS 进程实现
-│       └── WindowsProcess.ts    # Windows 进程实现
+│   ├── ServiceDiscovery.ts     # state 文件发现 + /api/info 探活 + attach
+│   └── types.ts                # ServiceState / ServiceStatus
+├── client/
+│   ├── OpenCodeClient.ts       # v2 HTTP 客户端（只打 /api/*，{data} envelope）
+│   ├── OpenCodeEventSource.ts  # /api/event SSE，按 location.directory 过滤
+│   └── ServerAuth.ts           # Basic auth header
 ├── bridge/
-│   ├── OpenCodeWebUiProxy.ts # 本地 Web UI HTTP 代理：剥离 CSP 头、注入 iframe hook
-│   ├── ProxyInjection.ts  # HTML/CSS/JS 注入入口
-│   ├── BridgeInjection.ts # iframe 内 UI hook 安装
-│   ├── BridgeProtocol.ts  # 本项目自己的 iframe -> Obsidian postMessage 协议
-│   ├── KeyboardShortcutIndex.ts # Obsidian/OpenCode 快捷键归一化、冲突和 policy
-│   ├── OpenCodeKeyboardBundlePatch.ts # OpenCode command/keybind port bundle patch
-│   ├── OpenCodeBridge.ts  # OpenCode server event diagnostics
-│   └── OpenCodePromptContextAdapter.ts # native prompt context card adapter contract
-├── debug/
-│   └── RuntimeDiagnostics.ts # XDG 日志、status.json、运行时路径
+│   ├── OpenCodeWebUiProxy.ts   # 本地 Web UI HTTP 代理 + prompt request hook
+│   ├── ProxyInjection.ts       # HTML head 注入：外观 token、bridge 脚本、theme payload
+│   ├── BridgeInjection.ts      # iframe 内 vault 文件点击与 proxy 就绪脚本
+│   ├── BridgeProtocol.ts       # iframe <-> Obsidian 本地消息协议
+│   └── OpenCodeBridge.ts       # event source 生命周期
 ├── context/
-│   ├── ContextManager.ts    # 监听 Obsidian workspace 事件，维护本地上下文候选
-│   ├── CandidateRegistry.ts # 本地候选状态：include、source clear、one-shot 消费、bounded queue
-│   ├── PromptContextInjector.ts # 在发送边界把 included candidate 追加到 prompt request
-│   ├── ContextSyncer.ts     # legacy/manual context message 的写入、删除、恢复
-│   ├── ContextProvenance.ts # context marker + provenance 载荷格式
+│   ├── ContextManager.ts       # Obsidian 事件 -> candidate 编排
+│   ├── CandidateRegistry.ts    # candidate 状态：include、clear-source、one-shot 消费
+│   ├── PromptAttachments.ts    # candidate -> PromptFileAttachment
+│   ├── PromptContextInjector.ts# 发送边界把附件写进 prompt body.files
+│   ├── ContextStatusBar.ts     # 候选控制面 + 上次投递摘要
 │   ├── ContextItemNavigator.ts # context source 安全打开入口
 │   ├── ContextSessionResolver.ts # 当前 OpenCode session id 的唯一解析入口
-│   ├── ContextAutoSources.ts # 自动上下文编排：第一阶段只路由 selection source
-│   ├── AutoSelectionContextSource.ts # 自动选区策略：fingerprint 去重、截断、产出 one-shot candidate
-│   └── WorkspaceContext.ts  # 收集打开的笔记路径 + 活动位置
+│   ├── ContextAutoSources.ts   # 自动来源编排
+│   ├── AutoSelectionContextSource.ts # 选区策略
+│   ├── ContextSourceDriver.ts  # source result / candidate input 类型
+│   ├── ContextFormatter.ts     # workspace / selection 文本格式化
+│   ├── SelectionLineRange.ts   # 选区行号
+│   └── WorkspaceContext.ts     # 打开的笔记路径 + 活动位置
 ├── graph/
-│   └── GraphIndex.ts        # Obsidian Vault + MetadataCache 的内存图索引和查询 API
-├── ui/
-│   ├── OpenCodeView.ts      # ItemView：iframe + 基于状态的渲染
-│   └── ViewManager.ts       # 切换逻辑、焦点管理、会话 URL
-└── settings/
-    └── SettingsTab.ts       # 插件设置 UI（PluginSettingTab）
+│   ├── GraphIndex.ts           # Obsidian link graph 内存索引
+│   └── ObsidianGraphIndex.ts   # Vault + MetadataCache 适配
+├── debug/
+│   ├── RuntimeDiagnostics.ts   # XDG 日志、status.json
+│   └── ServiceDiagnosticsText.ts # 诊断复制文本
+├── settings/SettingsTab.ts     # 插件设置 UI
+├── theme/WebViewTheme.ts       # Obsidian -> OpenCode 外观 token
+└── ui/
+    ├── OpenCodeView.ts         # ItemView：iframe + attached/unavailable 两态
+    └── ViewManager.ts          # 切换逻辑、焦点管理、会话 URL
 scripts/
-└── harness.ts        # dev harness：安装、状态、日志、doctor、bridge contract checks
+└── harness.ts                  # dev harness：安装、状态、日志、doctor、bridge/theme 检查
 ```
 
 ## 模块职责
 
 ### `main.ts` — 插件生命周期
 
-- `onload()`: 注册视图、命令、设置；加载并启动 opencode 服务器；初始化 ContextManager
-- `onunload()`: 清理定时器、关闭上下文监听、终止服务器进程、移除 postMessage 监听
-- 状态变更时写入 XDG `status.json`
+- `onload()`：读设置 → `new OpenCodeWebUiProxy("127.0.0.1", 0)` 并把 auth provider 指向当前
+  attached handle → `proxy.start()` → `attachService()` → 构造 client / bridge /
+  ContextManager / 导航 / status bar / ViewManager / 设置页 → 注册命令 → 已 attached 则
+  `handleServiceAttached()`，否则 `startAttachRetry()`。
+- `attachService()`：`defaultServiceDir()` + `settings.serviceName` → `attachService()`。成功时用
+  `new URL(handle.url)` 更新 proxy target 并写入 `ServiceStatus{state:"attached"}`；失败时写入
+  `{state:"unavailable", reason}`，reason 由候选文件列表拼出。
+- `applyServiceStatus()` 是服务状态的唯一写入口：同步 `OpenCodeBridge.syncServiceState`、
+  通知订阅者、`refreshClientState()`、`writeStatus()`。attached 时停止重试，unavailable 时启动
+  10s 重试定时器。
+- `handleServiceAttached()`：`initializeProject()` 探活式确认，然后交给
+  `ContextManager.handleServiceAttached()`。服务从缺失恢复时由重试定时器接上，无需重启 Obsidian。
+- `onEventSnapshot()`：SSE 状态为 `disconnected` 且当前 attached 时，把状态切回 unavailable，
+  reason 为 `OpenCode event stream ended`，由同一重试定时器接管。
+- 命令：`toggle-opencode-view`、`toggle-opencode-deep-view`、`open-opencode-view`、
+  `copy-opencode-diagnostics`、`add-selection-to-context`、`add-current-note-to-context`。
+  没有启动或停止服务的命令。
+- `onunload()`：写 status、停止 bridge、`proxy.stop()`、销毁 status bar 与 ContextManager、
+  `stopAttachRetry()`、detach leaves。不终止任何 opencode 进程。
 
-### `OpenCodeClient.ts` — API 客户端
+### `server/ServiceDiscovery.ts` — 服务发现与 attach
 
-- 封装对 opencode HTTP API 的调用（`/session`、`/session/{id}/message` 等）
-- **关键**: 使用 Node.js `http.request` 而非 `fetch`——因为 opencode 服务器默认没有 `--cors app://obsidian.md`，浏览器 fetch 会被 CORS 阻止，但 Node.js 的 http 模块不受此限制
-- `x-opencode-directory` 必须使用 `encodeURIComponent(projectDirectory)`。OpenCode JS SDK 也是这样发送 header，server 侧会 decode；原始中文路径会被 Node.js 拒绝为非法 header value
-- 在插件主线程中执行（非渲染进程），通过 IPC 或直接调用
+- 唯一服务来源是 opencode 自己的运行时注册：`defaultServiceDir()` =
+  `$XDG_STATE_HOME`（缺省 `~/.local/state`）+ `opencode`。
+- `discoverServices(dir)` 只读目录，不验活；`readdir` 失败返回空数组。候选按
+  `service.json` 优先、其余文件名字典序排列，非 `service*.json` 的文件忽略。
+- `attachService({dir, prefer})` 依次对可读候选发 `GET <url>/api/info`（Basic auth，
+  2s 超时，响应必须是 JSON 且带 `version: string` 与有限 `pid: number`），首个成功者返回
+  `ServiceHandle{name,url,password,version,pid}`；全部失败返回 `null`。
+- `prefer` 是严格匹配：指名某个文件时只连它，不存在或验活失败就返回 `null`，不会静默换连
+  另一个服务。静默回落会让用户以为在用一个二进制，实际连到另一个。
+- `summarizeService()` 是 password 的模块边界；诊断、status.json、UI 只用 summary。
 
-### `ServerManager.ts` — 服务器生命周期
+### `client/OpenCodeClient.ts` — API 客户端
 
-- `start()`: 先检查现有 `/global/health` → 构造启动计划 → 启动子进程 → 轮询健康检查
-- 空 `customCommand` 使用 path 模式：解析 `opencodePath`，直接 spawn executable + args，不经过 shell
-- 非空 `customCommand` 使用 custom 模式：模板替换后通过 shell 执行，调用者需要为 PATH 和绝对路径负责
-- `stop()`: 发送 SIGTERM → 等待退出 → 超时 SIGKILL
-- 健康检查: 请求 `http://{hostname}:{port}/global/health`，响应必须是 JSON 且 `healthy === true`
-- `getDiagnostics()` 是 UI、设置页、XDG `status.json` 消费启动错误、stderr、命令、hint 的唯一结构化入口
-- 状态机: `stopped | starting | running | error`
-- 通过回调通知 UI 状态变更
+- 只打 `/api/*`，一次请求一种形状。成功判定是 HTTP 2xx + body 能经
+  `parseApiEnvelope()` 解出 `{data: ...}`；其余一律失败并记日志。没有裸路径回落：v1 路径在
+  2.1.3 上返回 200 + SPA HTML。
+- 用 Node.js `http.request` 而不是 `fetch`：opencode 服务不返回
+  `Access-Control-Allow-Origin: app://obsidian.md`，浏览器 fetch 会被 CORS 拒绝。
+- 方法：`initializeProject()`（`GET /api/session?directory=&limit=1`）、
+  `createSession()`（`POST /api/session`，body `{title, location:{directory}}`）、
+  `getLatestSessionId()`（同 GET + `order=desc`）、`getSessionUrl()`、`resolveSessionId()`、
+  `updateBaseUrl()`。
+- 目录只走 query 参数 `directory=`，不放在请求头里。`POST /api/session` 忽略 query 与 header，
+  目录必须写在 body 的 `location.directory`。
+- 不读写 session message：上下文载体是 prompt 的 `files` 附件，不是独立 context message。
 
-### `ExecutableResolver.ts`
+### `client/OpenCodeEventSource.ts` — event 源
 
-- 在 PATH 中查找 `opencode` 可执行文件
-- 支持用户手动指定路径（设置项 `opencodePath`）
+- `GET /api/event`，`Accept: text/event-stream`。`buildEventEndpoint()` 不附加查询参数；
+  upstream 不接受过滤参数。
+- 帧形如 `data: {"id","type","data","created","location":{"directory"}}`。只有
+  `payload.location.directory === projectDirectory` 的帧才计入 snapshot；目录过滤是客户端职责。
+- 响应流结束且不是主动 `stop()` 时状态转 `disconnected`。这是服务死亡的权威信号，由 main 转成
+  unavailable，不额外加轮询。
+- 404 记为 `unsupported`，非 2xx 或 content-type 不匹配记为 `failed`。
 
-### `OpenCodeBridge.ts` — Obsidian/OpenCode bridge 入口
+### `bridge/OpenCodeBridge.ts` — event bridge 生命周期
 
-- 这是产品层 Obsidian/OpenCode 互联互通入口。它承接 OpenCode event diagnostics：
-  根据 server lifecycle 启停 `OpenCodeEventSource`，把 read-only OpenCode event
-  facts 写入 runtime diagnostics。
-- hooks / callbacks / events 类能力先看本地 export surface：`node_modules/obsidian/obsidian.d.ts`、
-  OpenCode package exports、`@opencode-ai/plugin` hooks、TUI API、SDK generated
-  client、Web UI app exports。官方文档用于确认版本背景。
-- 生产代码 owner map：
-  - `src/context/*` 拥有 Obsidian context source、candidate lifecycle、可选 graph-derived source、
-    Obsidian link/subpath resolution 和 safe navigation。
-  - `src/bridge/*` 拥有 OpenCode Web UI transport、HTML 注入、iframe 内 UI hook 安装、
-    iframe 本地 message shape、keyboard bridge、OpenCode server event diagnostics 和 Web UI bridge 执行点。
-  - `OpenCodePromptContextAdapter` 是 OpenCode Web UI prompt context adapter 的生产类型位置；
-    它表达 Web UI `PromptProvider` / `prompt.context.add(item)` 这类 internal source
-    contract，并把 internal shape 集中在一个代码入口。
-- harness 的角色是本地 OpenCode/Obsidian 版本漂移检查。生产边界由上面的 owner map、
-  TypeScript imports 和 adapter 类型表达。
+- `syncServiceState(state)`：attached 时 `eventSource.start()`，其余状态 `stop()`。
+- `updateOpenCodeLocation(apiBaseUrl, projectDirectory)` 在 attach 后同步连接参数。
+- event snapshot 由 main 写入 `runtimeDiagnostics.opencodeEvents`。
 
-### `OpenCodeWebUiProxy.ts` — bridge 内的本地 Web UI HTTP 代理
+### `bridge/OpenCodeWebUiProxy.ts` — 本地 Web UI HTTP 代理
 
-- 启动本地代理服务器（端口从 4097 起自动检测）
-- 转发请求到 opencode 服务器，同时在响应中:
-  1. **剥离 Content-Security-Policy 头**——否则注入的脚本会被浏览器阻止执行
-  2. **注入键盘桥接脚本**——iframe 根据父窗口下发的 normalized policy 同步决定是否拦截快捷键；不要恢复 `Cmd/Ctrl+L` 特判
-  3. **注入文件点击监听脚本**——只从 OpenCode iframe DOM 中提取用户点击的 vault path 字符串，并发送 `vault-file:open` 本地 bridge message；proxy 不解析 wikilink，不判断文件是否存在
-- 注入层 UI hook 是插件的产品能力之一。它用于承接“事实发生在 OpenCode iframe
-  里，但结果需要 Obsidian API 或 vault 事实完成”的动作，例如插件拥有的
-  context card 点击后跳回 Obsidian。hook 可以捕获 iframe 里的 UI 事实，也可以在
-  iframe/Web UI bridge 中执行已经由 context 层决定好的 OpenCode UI 动作，例如
-  `prompt.context.add(item)`。hook 不能拥有 context source 策略、graph-derived source
-  策略、link resolver、selection queue 或 OpenCode prompt 写入策略。
-- OpenCode 原生 review / diff comment card 继续交给 OpenCode 自己处理。本插件
-  写入的 Obsidian-owned card 不允许伪造 `commentID` 或 `commentOrigin: "review"`；
-  若无法稳定识别 ownership marker，注入层必须不拦截点击，并把证据写入
-  diagnostics。
+- 启动本地代理（端口从 4097 起，最多尝试 10 个），转发请求到当前 attach 的服务，并在转发时
+  补 `authorization`（password 来自 ServiceHandle）。
+- HTML 响应剥离 `Content-Security-Policy` 后交给 `ProxyInjection` 注入；JS/CSS asset 原样
+  直通，不解析、不改写。
+- `getV2ServerUrl()` 返回 `http://127.0.0.1:<proxyPort>/server/<base64(origin)>`，是 OpenCode
+  v2 Web UI 的深链形态；`getProxyUrl(encodedPath)` 用于普通路径。
+- prompt 请求 hook：只匹配 `POST /api/session/<id>/prompt`（`extractPromptSessionId()`），
+  把 Obsidian 上下文附件交给 `PromptContextInjector`。
+
 - `webViewAppearance === "obsidian"` 时读取 Obsidian 当前 CSS 变量，并在 proxied HTML 里覆盖 OpenCode 的设计 token
 - Obsidian 外观的 theme payload 必须在 proxy 注入 HTML 时读取当前 CSS 变量。不要在插件 `onload()` 早期缓存 theme 快照；Obsidian layout、社区主题和 CSS snippets 可能还没把变量写到最终容器上，早期快照会让重启后的首次 iframe 使用陈旧背景。proxy 初始注入只是首帧快照；`OpenCodeView` 必须在 iframe 创建、iframe load、`proxy:loaded` 后通过本地 `theme:update` bridge 把父窗口当前 `WebViewTheme` 推给 iframe。冷启动验收以这个运行态同步后的 diagnostics 为准。
 - Obsidian 外观模式的 theme source 优先当前 active Markdown/editor view，其次才回退到 OpenCode ItemView 和 `body`。Obsidian 主题和社区插件常把最终颜色写到编辑器容器上；从 OpenCode pane 或 `body` 早读会拿到不匹配的背景。
@@ -196,20 +212,29 @@ scripts/
 - `harness theme` 会读取本地 OpenCode `packages/ui/src/v2/styles/theme.css` 和 `packages/ui/src/styles/tailwind/colors.css`。如果 OpenCode 新增或改名 v2 appearance token，fixture/runtime 检查必须显示缺失 token；不要把这类上游事实改成插件里的手写清单。runtime diagnostics 必须包含 `largeElementSamples` 和相关 token 值，用来定位真正拥有大面积背景的 DOM 层；只看 root/token 不足以判定视觉问题已修好。
 - 代理在插件卸载时自动关闭
 
+### `bridge/ProxyInjection.ts` / `bridge/BridgeInjection.ts` / `bridge/BridgeProtocol.ts`
+
+- `ProxyInjection.injectOpenCodeWebUiProxyHtml()` 负责 HTML head 注入：外观 token、bridge
+  脚本、首帧 theme payload。它只动 head 与已知 HTML 结构，不改 JS bundle。
+- `BridgeInjection` 只承接 OpenCode Web UI DOM 才能观察的事实：vault 文件路径点击、proxy 就绪。
+  它不解析 wikilink，不判断文件是否存在，不拥有 context 策略。
+- `BridgeProtocol` 定义本项目 iframe 本地消息，当前只有 4 条：`proxy:loaded`、
+  `theme:diagnostics`、`theme:update`、`vault-file:open`。不要加入上游 event name 或
+  已删除机制的占位消息。
+
 ### `OpenCodeView.ts` — 侧边栏视图
 
-- `ItemView` 子类，使用 iframe 加载 opencode Web UI
-- 基于状态的渲染: 根据服务器状态（stopped/starting/running/error）显示不同 UI
-- 加载状态: spinner + "正在加载 OpenCode..."
-- 错误状态: 错误信息、hint、启动命令、stderr、XDG log/status 路径、重试/设置/复制诊断按钮
-- 运行状态: iframe 指向代理 URL
-- 点击或聚焦 iframe 时只允许同步 Obsidian workspace active leaf 到 OpenCode leaf。不要在 iframe focus/pointer 事件里刷新 context、读取 Markdown editor 或触发 OpenCode message；context 只来自 workspace/editor 事件和显式命令。
-- `syncThemeToIframe()` 只推送当前 `WebViewTheme`，不附加父窗口 geometry。`window-resize`、iframe load、`proxy:loaded`、theme source mutation 和 layout resize 只表示“重新读取当前 Obsidian 变量并推给 iframe”；它们不能生成 parent/iframe plane variables，也不能把 iframe rect 写入 theme payload。
-- `ResizeObserver` 和 delayed theme sync 只用于跨过 Obsidian layout/theme 的异步稳定期。不要为某个视觉问题增加新的长尾延迟队列；如果需要观测瞬时问题，用临时 ring-buffer diagnostics，验收后删除或降级到 summary。
-- 监听 `window` 的 `message` 事件，处理来自 iframe 的 postMessage:
-  - `view:toggle`: 触发视图切换
-  - `proxy:loaded`: iframe 初始化确认
-  - `vault-file:open`: 对来自 Web UI 的文件点击请求走 `ContextItemNavigator.openSource()`；解析失败静默记录 diagnostics，不弹 Notice，不创建文件
+- `ItemView` 子类，使用 iframe 加载 OpenCode Web UI。
+- 两态渲染：`attached` 建 iframe 并同步主题；`unavailable` 显示未发现服务的原因、
+  `opencode service start` 指令、log 路径，以及 retry / open settings / copy diagnostics 三个按钮。
+- `syncThemeToIframe()` 只推送当前 `WebViewTheme`，不附加父窗口 geometry。`window-resize`、
+  iframe load、`proxy:loaded`、theme source mutation 和 layout resize 只表示「重新读取当前
+  Obsidian 变量并推给 iframe」。
+- 点击或聚焦 iframe 时只允许同步 Obsidian workspace active leaf 到 OpenCode leaf。不要在 iframe
+  focus/pointer 事件里刷新 context 或触发 OpenCode message。
+- 监听 `window` 的 `message` 事件：`proxy:loaded`（重新同步主题）、`theme:diagnostics`
+  （写入 runtime diagnostics）、`vault-file:open`（交给 `ContextItemNavigator`，解析失败静默记录，
+  不弹 Notice，不创建文件）。
 
 ### `ViewManager.ts` — 视图切换逻辑
 
@@ -223,48 +248,41 @@ scripts/
 - `lastSessionUrl`: 保存会话 URL 到插件设置，重启时恢复；同时通过时间戳比较查询服务器最新会话
 - `toggle-opencode-view` 保留给用户快捷键；harness 和调试脚本使用 `open-opencode-view`，它只调用 `activateView()`，不会因为当前 leaf 已经活跃而折叠右侧栏
 
-### `ContextManager.ts` — 上下文注入
+### `ContextManager.ts` — 候选编排
 
-- 监听 Obsidian workspace 事件（active-leaf-change、editor-change 等）
-- 防抖后刷新 workspace candidate；editor-change 也会把选中文本交给 selection source
-- 调用 `WorkspaceContext` 收集 workspace candidate 数据；自动来源不能直接通过 `OpenCodeClient` 写入 OpenCode 会话
-- 当前 session id 只从 `CurrentContextSession` 获取。`ContextManager` 不解析 iframe URL，也不维护 cached iframe URL
-- `add-selection-to-context` 和 `add-current-note-to-context` 仍走 legacy/manual `ContextItem` 路径；自动 oc-ctx 主路径不能调用它们
-- `contextAssist.enabled` 是 oc-ctx 总开关；关闭时必须清空全部 candidate 并停止 source 监听
-- `contextAssist.workspace.enabled` 控制动态 workspace candidate。workspace candidate 只包含打开笔记列表和可选活动位置；活动位置属于 workspace，不再有顶层 cursor source
-- `contextAssist.selection.enabled` 控制 one-shot selection candidate。选区 source 只产候选，registry 负责最近 N 条 FIFO 队列
-- 当前不维护 backlinks source，不监听 metadata resolvedLinks，不把 backlinks 当默认候选。GraphRAG、块引用、链接证据只有在用户明确要求时才作为新的 source driver 产出 candidate
-- 关闭任一 source 时，`ContextManager.updateSettings()` 必须清掉该 source 已有候选；关闭总开关时必须清空 CandidateRegistry，避免已禁用来源随 prompt 发送
-- oc-ctx 演进必须按 source driver → CandidateRegistry → PromptContextInjector → OpenCode prompt request parts 的链路收拢。source driver 不能直接写 OpenCode session。
-- candidate 是本地 Obsidian 插件状态，没有 `messageId` / `partId`，toggle included/excluded 时不能调用 OpenCode API。committed context 才是 `ContextItem`，只属于 legacy/manual context message 生命周期。
-- CandidateRegistry 第一阶段按当前 OpenCode session 作用域处理。`CurrentContextSession` 变化时必须清空候选，不能把旧 session 的 candidate attach 到新 session。
-- source driver 输出必须表达 `upsert`、`remove`、`clear-source`、`failed`。不要把 source 消失、刷新失败或内容未变硬塞进 `ContextManager` 的临时分支。
-- ContextStatusBar 是当前自动 oc-ctx 的用户可见控制面。用户在状态栏切换 included/skipped 或移除 one-shot 候选；发送成功后，PromptContextInjector 消费 one-shot candidates 并恢复临时跳过的 dynamic candidates。
-- 旧 `ContextSuggestion` 不能和 `ContextCandidate` 作为两套运行时候选模型长期并存。实现 candidate 层时必须删除、迁移或明确降级它。
-- oc-ctx 注入策略属于 `src/context`。source driver、CandidateRegistry、可选 graph-derived candidate lifecycle 留在 context 层；`src/bridge` 提供 Web UI transport、HTML 注入、iframe hook、本地 message protocol、prompt request hook 和 native prompt context card adapter。
-- 当前行为合同见 [docs/plans/2026-06-17-oc-ctx-prompt-coupled-behavior-design.md](docs/plans/2026-06-17-oc-ctx-prompt-coupled-behavior-design.md)。
+- 监听 Obsidian workspace 事件（active-leaf-change、editor-change、layout-change），防抖后刷新
+  workspace candidate；editor-change 也把选中文本交给 selection source。
+- `CandidateRegistry` 是候选的唯一模型。`ContextManager` 透传
+  `getCandidates/onCandidatesChanged/toggleCandidate/setCandidateIncluded/removeCandidate`，
+  自身不维护第二套队列。
+- `contextAssist.enabled` 是总开关；关闭时必须清空全部 candidate 并停止 source 监听。关闭任一
+  source 时清掉该 source 已有候选。
+- workspace candidate 只包含打开笔记列表和可选活动位置；selection source 产 one-shot candidate。
+  不维护 backlinks source，不监听 resolvedLinks。
+- `includeSelection(selection)` 和 `includeNote({path, text})` 是两条显式命令的入口，产出同一形状的
+  candidate（`sourceKind` 分别是 `selection` / `manual`，后者 one-shot）。显式命令不受自动采集
+  开关影响，但复用同一 fingerprint / 截断逻辑。
+- `preparePromptContext(sessionId, requestBody)` 先绑定 session，再交给
+  `PromptContextInjector`；`completePromptContext` / `failPromptContext` 表示转发结果。
+- 候选只在本地存活，没有服务端 message 生命周期，也没有 restore 路径。session 切换时清空候选，
+  不把旧 session 的 candidate 带到新 session。
+- source driver 输出必须表达 `upsert`、`remove`、`clear-source`、`failed`。
 
-### `PromptContextInjector.ts` — 自动 oc-ctx 到 prompt request
+### `PromptAttachments.ts` — candidate 到 prompt 附件
 
-- 自动 oc-ctx 主路径不提前写独立 context message
-- `PromptContextInjector` 只在 `POST /session/{id}/message` 的发送边界读取 included candidates
-- injector 把候选追加为同一条 request 的 `synthetic: true` text parts
-- 主路径不写 `noReply`
-- OpenCode 返回 2xx 后才消费 one-shot candidates；非 2xx 或网络错误时保留候选并标记 failed
+- `buildPromptAttachments(candidates)` 是唯一转换出口，产出
+  `{uri: "data:text/plain;base64,<utf8 base64>", name: "obsidian-context:<sourceKind>:<label>"}`。
+- body 保留人能读的来源：`Obsidian context: <label>` / `Source: <sourceFile>[:Lx-Ly]` / 正文。
+- `name` 只做标识，不承担范围信息；范围已经在 label 与 body 的 `Source:` 行里。
 
-### `ContextSyncer.ts` / `ContextProvenance.ts` — legacy/manual context message 协议
+### `PromptContextInjector.ts` — prompt body 附件
 
-- `ContextSyncer` 是 legacy/manual Obsidian → OpenCode context message 的写入、删除、恢复入口
-- 自动 oc-ctx 主路径不调用 `ContextSyncer.add()`，也不依赖 `noReply`
-- `ContextProvenance` 是 `<!-- oc-ctx -->` marker 和 `oc-ctx-provenance` JSON 注释的唯一格式化/解析模块
-- 新写入的 context message 必须持久化 source path、range、type、label、textLength、createdAt
-- `sourceFile` 是用户可见来源标签；`navigationSourceFile` 是可选 vault path 跳转目标。Workspace context 这类聚合来源必须保留 `sourceFile: "Obsidian workspace"`，有单一明确目标时才写 `navigationSourceFile`，禁止从 formatted context text 里解析 `- note.md` 来推导跳转
-- 新写入的 context message 必须使用 OpenCode `TextPartInput.synthetic = true`。`noReply` 只表示不触发模型回复，不表示隐藏；OpenCode Web UI 以 `synthetic` 跳过用户可见 text part
-- 插件移除自己创建的 context message 时必须删除整条 OpenCode message，不能只把 part 标成 `ignored`。OpenCode Web UI 会隐藏 ignored synthetic text，但仍会保留空的 timeline row，造成 session 中间大块空白和滚动到底异常。
-- restore 时必须清理已经遗留的 ignored plugin context message。只有整条 message 的所有 part 都能解析为 `<!-- oc-ctx -->` context part 时才允许删除；混入普通用户 part 的 message 不能删。
-- restore 时有有效 provenance 才输出 `provenanceStatus: "known"`；缺失或无效 provenance 必须输出 `provenanceStatus: "uncertain"`
-- server start 成功后，如果 `CurrentContextSession` 已经能解析出当前 session id，插件必须调用 `ContextManager.restoreFromServer()`。这保证重启后可恢复 context provenance，也会清理旧版本遗留的 ignored plugin context message；不要把 cleanup 只绑在 OpenCode view 的 `ensureSessionUrl()` 上。
-- diagnostics 可以显示 `textLength` 和 `provenanceStatus`，不能复制完整 context text
+- `prepare(sessionId, requestBody)` 在发送边界读取 included candidates，把附件追加到
+  `body.files`（已有 `files` 保留）。它不看 `parts`，也不因为缺 `parts` 记失败。
+- 只有 skipped dynamic candidate、没有 included candidate 时不动 body，不写空 `files: []`。
+- 请求成功转发后 `complete(planId)`：先记录 `PromptDelivery{at,count,labels}`，再消费 one-shot
+  candidate、恢复临时跳过的 dynamic candidate。
+- 失败时 `fail(planId, reason)` 标记候选 failed，保留候选供重试。
 
 ### Obsidian resolution contract
 
@@ -287,22 +305,20 @@ scripts/
 - 这是 context source opening 的唯一生产入口
 - 只打开已有 vault file：使用 Obsidian `Vault.getFileByPath()` / `WorkspaceLeaf.openFile()`
 - 禁止用 `workspace.openLinkText()` 作为 context source 的生产打开入口；它是 link-open API，不提供“已解析到既有 `TFile` 后再打开”的窄合同
-- missing path、folder、URL、workspace synthetic source、restored uncertain source、unresolved heading/block subpath 都返回明确 unresolved reason
+- missing path、folder、URL、聚合来源、unresolved heading/block subpath 都返回明确 unresolved reason
 - 当前代码已通过 GraphIndex-backed resolution 解析 linkpath 和 heading/block/footnote subpath；生产入口仍保持单一
 - 合法引用点击应打开已有目标 file/heading/block/footnote；非法引用点击应打开写出该坏引用的已有 source Markdown occurrence。永远不要尝试打开或创建 missing target。
 
-### `ContextStatusBar.ts` — 轻量状态面
+### `ContextStatusBar.ts` — 轻量候选控制面
 
-- StatusBar 第一阶段做 context count、当前 session context 胶囊、复制 diagnostics、安全导航和显式 session remove
-- OpenCode session URL 确定后先 restore 当前 session 里已有的 plugin context message，再渲染 status bar。StatusBar 不能只反映本次插件窗口内存里刚创建的条目
-- 默认 context 胶囊只显示 title 和 source；source、type、range、textLength、createdAt、provenanceStatus、navigation resolution 等审计字段进入详情或 diagnostics
-- context 胶囊是紧凑可点击 cell：单击通过 `ContextItemNavigator` 或 GraphIndex-backed navigator 做 evidence navigation，双击切换 candidate included/excluded 或本地 dim/selected 状态。第一阶段不要恢复独立 `Open source` 按钮
-- remove 必须是明确的 session-scoped 动作，可以用右侧小图标加 tooltip，但不能用含义不明的角落小叉，也不能暗示删除 vault 文件或撤回历史回答
-- 后续 context panel 可以提供显式删除动作，但语义必须仍然是删除插件创建的 remote context message，不是 vault 内容删除
-- ContextStatusBar 只负责把 context、candidate、broken-link evidence 和后续 permission/question/event/hook signals 渲染成 Obsidian-native 胶囊和交互。它不解析 wikilink、不消费 MetadataCache、不维护 GraphIndex、不直接调用 OpenCode API、不调用 `workspace.openLinkText()`。
-- 默认胶囊只显示 title 和 source。`known`、`resolved`、字符数、createdAt、message id、part id 等审计字段进入详情或 diagnostics，不在默认行里堆 chip。异常状态用小的 warning accent 表达，点击后再看详情。
-- 单击胶囊是 evidence navigation：合法引用跳目标，非法引用跳 source occurrence，普通 context 跳来源。双击和右侧状态图标用于 candidate included/excluded 切换；active session context 的 remove 仍是单独的显式动作。
-- 参考设计文档：[docs/plans/context-control-surface.md](docs/plans/context-control-surface.md)
+- 状态栏显示 included/total 计数；popover 只渲染候选：label、source、included/skipped pill、
+  failed pill、navigation pill、one-shot 的 remove 按钮。
+- 单击做 evidence navigation（合法引用跳目标，非法引用跳写出坏引用的 source occurrence），
+  双击切换 included/excluded，Enter/Space 打开。
+- 顶部额外显示 `getLastPromptDelivery()` 的摘要：上一次 prompt 带了几个上下文附件。它只是事实
+  展示，不代表服务端消息状态。
+- `formatContextDiagnostics(candidates, resolveCandidate?)` 只输出候选摘要，不包含正文。
+- 它不解析 wikilink、不消费 MetadataCache、不维护 GraphIndex、不直接调用 OpenCode API。
 
 ### `GraphIndex.ts` — Obsidian link graph 机制层
 
@@ -315,45 +331,33 @@ scripts/
 - GraphIndex 后续必须保留 reference occurrence：sourcePath、raw link/embed、linkpath、source position、target resolution、subpath resolution。broken link 是可维护的 Markdown evidence，surface 点击时应回到 source occurrence。
 - 参考文档：[docs/plans/graph-index.md](docs/plans/graph-index.md)
 
-### TUI / plugin coexistence
+### `ContextAutoSources.ts` / `AutoSelectionContextSource.ts`
 
-- Terminal OpenCode TUI 可以继续作为主要对话入口；插件负责 Obsidian-native evidence/control
-- 默认插件能力不能依赖用户本地 patched OpenCode branch；patched serve/attach 只能通过 custom command 配置
-- `ServerManager` 拥有 server lifecycle 和 health diagnostics；`CurrentContextSession` 拥有当前 session id；`ContextManager` 拥有 context 生命周期
-- 后续 attach/session selection 需要单独 implementation bead，不能把用户 custom command 分支写成默认假设
-- 参考文档：[docs/plans/tui-plugin-coexistence.md](docs/plans/tui-plugin-coexistence.md)
-
-### `ContextAutoSources.ts` — 自动上下文编排
-
-- 第一阶段只组合 `AutoSelectionContextSource`
-- 只接收普通对象：file path 和选区 snapshot
-- 不 import Obsidian，不调用 OpenCodeClient，不持有 ContextItem[]；新增自动源时先确认它是否必须存在，且必须产出 `ContextSourceResult`
-- `ContextManager` 是唯一 Obsidian 事件监听入口；`ContextAutoSources` 是这些事件进入自动源策略前的唯一编排入口
+- `ContextManager` 是唯一 Obsidian 事件监听入口；`ContextAutoSources` 是这些事件进入自动源策略前
+  的唯一编排入口，只组合 `AutoSelectionContextSource`。
+- 选区 source 只处理策略：开关、fingerprint 去重、长度截断、产出 one-shot candidate。
+  `buildSelectionCandidate()` 是它对外唯一的候选构造入口，显式命令也复用它。
+- 不 import Obsidian、不调用 OpenCodeClient、不持有候选队列。registry 负责 bounded queue。
 
 ### `ContextSessionResolver.ts` — 当前 session 解析
 
 - `CurrentContextSession` 是当前 OpenCode session id 的唯一解析入口
 - 输入只有 cached iframe URL、OpenCode leaf iframe URL 和 `OpenCodeClient.resolveSessionId`
 - 输出只有 session id，并在 leaf URL 可解析时更新 cached iframe URL
-- 它不知道 `ContextItem`、registry、syncer、auto source、workspace event、permission/question/event/tui 策略
+- 它不知道 registry、auto source、workspace event、permission/question/event/tui 策略
 - 新增 context panel、permission、question、event、tui 或 hooks 相关代码时，先消费这个入口，不要在策略层重新解析 iframe URL
 
 ### OpenCode event source contract
 
-- 事件源合同见 [docs/plans/opencode-event-source-contract.md](docs/plans/opencode-event-source-contract.md)
-- 新的 Obsidian-side event code 首选 OpenCode dev 的 `GET /api/event` / `v2.event.subscribe`，因为它携带 location 语义；`GET /event` 只作为 legacy compatibility 参考
-- 产品层的 `src/bridge` 是 Obsidian 与 OpenCode 的互联互通代码边界，必须基于两边的金标准：OpenCode OpenAPI/source contract 和 Obsidian API/runtime facts
-- `OpenCodeBridge.ts` 是广义 bridge 层的代码入口。当前通过 Node 侧 `src/client/OpenCodeEventSource.ts` 接 OpenCode event，状态写入 runtime diagnostics
-- 具体实现类 `OpenCodeWebUiProxy.ts` 只负责 Web UI transport 和 HTML 注入。它可以透传 SSE 字节，但不能解析 OpenCode event 并维护插件状态
-- `BridgeProtocol.ts` 只定义本项目 iframe 本地消息，不加入 `session.*`、`permission.*`、`question.*` 或 `tui.*` 这类上游 event name
-- 第一阶段只做 connected/disconnected/failed/unsupported、last event、current-session read-only state diagnostics。不要复制 OpenCode Web UI 已有的 permission/question 交互弹窗
-
-### `AutoSelectionContextSource.ts` — 自动选区策略
-
-- 只处理自动选区策略：开关判断、fingerprint 去重、长度截断、产出 one-shot candidate
-- 空选区不清空 selection queue。关闭 selection source 时由 `ContextManager` 通过 registry clear source
-- 不持有 ContextItem[]，不调用 OpenCodeClient，不读取 Obsidian workspace
-- registry 负责 bounded queue。不要在 source 内维护“最近 N 条”的第二套队列
+- 事件源合同见 [docs/plans/opencode-event-source-contract.md](docs/plans/opencode-event-source-contract.md)（历史记录，顶部有 superseded 说明）。
+- 只使用 `GET /api/event`。它携带 `location.directory`，目录过滤在客户端完成；没有 legacy
+  `/event` 回落路径。
+- 产品层的 `src/bridge` 是 Obsidian 与 OpenCode 的互联互通代码边界，必须基于两边的金标准：
+  OpenCode OpenAPI/source contract 和 Obsidian API/runtime facts。
+- `OpenCodeWebUiProxy.ts` 只负责 Web UI transport 和 HTML 注入。它可以透传 SSE 字节，但不能
+  解析 OpenCode event 并维护插件状态。
+- 当前只做 connected/disconnected/failed/unsupported、last event、current-session read-only
+  state diagnostics。
 
 ### `WorkspaceContext.ts` — 上下文收集
 
@@ -363,20 +367,26 @@ scripts/
 
 ### `SettingsTab.ts` — 设置面板
 
-- `opencodePath`: opencode 可执行文件路径
-- `customCommand`: 非空时是 shell command template，必须包含 `{hostname}` 和 `{port}`
-- textarea 显示真实配置值；示例命令只作为 placeholder。空字符串必须保持为空，因为它表示 path 模式
-- `webViewAppearance`: 默认 `obsidian`，让 Web UI 继承 Obsidian pane 背景并使用半透明局部 surface；`opencode` 保留 OpenCode Web UI 原生风格
-- `contextAssist` 是自动 oc-ctx 的运行时真相源。旧 `candidateSources`、`contextCommitMode`、`maxNotesInContext`、`maxSelectionLength`、`injectWorkspaceContext`、`autoAddSelectionContext`、`autoAddBacklinksContext`、`autoAddCursorContext` 加载时直接丢弃，不迁移、不保存回去
-- 设置页只显示：上下文辅助、工作区线索、选中文本，以及各自必要的上限选项。不要恢复 backlinks、cursor、manual attach UI
+- 四组：`serviceConfiguration`（`serviceName` + `projectDirectory`）、behavior
+  （`defaultViewLocation` + `webViewAppearance`）、contextAssist（workspace / selection 开关与上限）、
+  `serviceStatus`（只读：attached 显示 name / url / version / pid，unavailable 显示原因与
+  `opencode service start`，无启停按钮）。
+- `serviceName` 是 `service*.json` 文件名或 `auto`；`auto` 表示按 `service.json` 优先、其余
+  文件名字典序尝试。
+- `projectDirectory` 校验绝对路径 / `~` / `C:\` 前缀、存在性、目录性；它只影响插件请求里的
+  `directory` 参数，不改变服务注册。
 
-### `RuntimeDiagnostics.ts` — 运行时观测
+### `RuntimeDiagnostics.ts` / `ServiceDiagnosticsText.ts` — 运行时观测
 
-- 唯一运行时文件位置由 `getRuntimePaths()` 决定
-- `$XDG_STATE_HOME/another-opencode-for-obsidian/another-opencode-for-obsidian.log`
-- `$XDG_STATE_HOME/another-opencode-for-obsidian/status.json`
-- 若 `XDG_STATE_HOME` 未设置，使用 `~/.local/state`
-- 依据: [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/)
+- 唯一运行时文件位置由 `getRuntimePaths()` 决定：`$XDG_STATE_HOME`（缺省 `~/.local/state`）下
+  `another-opencode-for-obsidian/another-opencode-for-obsidian.log` 与 `status.json`。
+  依据: [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/)
+- `status.json` 只写事实：`lifecycle`、`serviceState`、`service{name,url,version,pid}`、
+  `serviceError`、`proxyUrl`、`proxyPort`、`projectDirectory`、`webViewAppearance`、
+  `runtimeDiagnostics{theme,iframe,opencodeEvents}`、`logFile`、`statusFile`。
+- password 永远不进入日志、status.json、错误消息或测试快照。`RuntimeLogger` 按 key 名脱敏
+  （token/secret/password/authorization/cookie）。
+- `formatServiceDiagnosticsForClipboard()` 是「Copy OpenCode diagnostics」的唯一文本来源。
 
 ### 视觉异常诊断纪律
 
@@ -410,12 +420,12 @@ scripts/
 
 ### `harness bridge` — 桥接契约检查
 
-- 一阶真相源只读本地依赖，不联网、不静默重试、不维护手写能力清单
-- OpenCode HTTP 以 `/path/to/opencode/packages/sdk/openapi.json` 为准
-- OpenCode hooks 以 `/path/to/opencode/packages/plugin/src/index.ts` 为准
-- Obsidian workspace events、`Editor.getCursor()`、`MetadataCache.resolvedLinks` 以 `node_modules/obsidian/obsidian.d.ts` 为准
-- `BridgeProtocol.ts` 只定义本项目自己的 postMessage 协议，不替 OpenCode 或 Obsidian 定义能力
-- Event bridge 后续验收必须从本地 OpenCode OpenAPI 确认 `/api/event` / `v2.event.subscribe`，不能在插件里维护手写 event type 清单
+- 一阶真相源只读本地依赖，不联网、不静默重试、不维护手写能力清单。
+- OpenCode HTTP 以本地 checkout 的 `packages/protocol/openapi.json` 为准；旧位置
+  `packages/sdk/openapi.json` 只作为回退。
+- Obsidian workspace events 以 `node_modules/obsidian/obsidian.d.ts` 为准。
+- `BridgeProtocol.ts` 自己声明消息集合，harness 断言注入脚本实际发送的消息与它一致。
+- 插件不消费 OpenCode plugin hooks，因此 harness 不检查 hooks 契约。
 
 ### `harness theme` — Web UI 外观检查
 
@@ -430,42 +440,42 @@ scripts/
 
 ## 关键架构决策
 
-### 1. `http.request` 替代 `fetch` —— 绕过 CORS
+### 1. attach-only，不拥有进程
 
-opencode 服务器默认启动不带 `--cors` 参数，意味着它不会返回 `Access-Control-Allow-Origin: app://obsidian.md`。浏览器的 `fetch` 会因此拒绝请求。Node.js 的 `http` 模块运行在插件主线程，**不受浏览器 CORS 策略约束**，可以直接发 HTTP 请求。
+插件读取 opencode 自己的运行时注册并 attach。它不启动、不终止、不轮询进程，也没有启停命令。
+找不到服务时唯一正确动作是显示「未发现服务」和用户要跑的命令（`opencode service start`），
+然后由 10s 重试定时器在服务出现后自动接上。
 
-### 2. 健康检查只认 `/global/health`
+### 2. `/api/info` 是 liveness 的唯一判据
 
-健康检查请求 `ServerEndpoint.healthUrl`，只接受 HTTP 200、JSON body、`healthy === true`。HTML 200、端口可连接、opaque response 都不能证明这是可用的 opencode server。
+服务是否可用由 `GET /api/info` 决定：2s 超时、HTTP 200、JSON body 带 `version` 与 `pid`。
+端口可连接、HTML 200、空响应都不能证明这是可用的 opencode 服务。
 
-### 3. 本地 HTTP 代理 —— CSP 剥离 + 脚本注入
+### 3. 服务死亡由 SSE 断连表达
 
-opencode 的 HTML 响应携带严格的 Content-Security-Policy，禁止内联脚本执行。代理在转发前剥离 CSP 头，从而可以注入自定义脚本：
+attach 之后不轮询。`/api/event` 的响应流结束（非主动 stop）代表服务端消失，main 立刻把状态切成
+unavailable，再由重试定时器接管。这样状态变化只有一个来源，不会出现「进程没了但插件还以为在线」。
 
-- **键盘桥接**: 从 Obsidian hotkeys 和 OpenCode command keybinds 生成 normalized policy；iframe 只拦截 policy 归 Obsidian 的快捷键，并通过 `keyboard:dispatch` 发回父窗口
-- **自动端口检测**: 从 4097 开始递增尝试，找到第一个可用端口
-- **协议来源**: `BridgeProtocol.ts` 是 message namespace、version、type 的唯一来源；父窗口只接受来自当前 proxy origin 的协议消息
+### 4. v2 单协议，无回落
 
-### 4. `postMessage` 桥接
+所有 HTTP 都走 `/api/*`，成功形状只有 `{data}` envelope。v1 路径在 opencode 2.1.3 上返回
+200 + SPA HTML；任何「失败就换裸路径再试一次」的写法都会把 HTML 当 JSON 解析，把真实失败藏成
+解析错误。
 
-iframe 与 Obsidian 插件之间通过 `window.postMessage` 通信：
+### 5. 本地 HTTP 代理 —— CSP 剥离 + head 注入
 
-- `{ns:'another-opencode-for-obsidian', version:1, type:'view:toggle'}`: iframe 通知父窗口切换视图
-- `{ns:'another-opencode-for-obsidian', version:1, type:'proxy:loaded'}`: 代理注入的脚本初始化完成，通知父窗口可以开始通信
-- `{ns:'another-opencode-for-obsidian', version:1, type:'vault-file:open', payload:{path}}`: iframe 通知父窗口用户点击了一个文件路径；父窗口必须先用 Obsidian/GraphIndex 解析到已有 `TFile`，再 `WorkspaceLeaf.openFile()`
-- 父窗口通过 `window.addEventListener('message', ...)` 监听
+opencode 的 HTML 响应携带严格的 Content-Security-Policy，禁止内联脚本执行。代理在转发前剥离 CSP
+头，把 HTML 交给 `ProxyInjection` 注入外观 token、bridge 脚本和首帧 theme payload。JS/CSS asset
+原样直通；改写上游 bundle 需要跟随每个版本的内部锚点，这条兼容层会持续吞掉维护预算。
 
-### 5. Bridge 开发纪律
+### 6. `postMessage` 桥接
 
-新增 OpenCode API、hook、event、permission、question、tui 或 Obsidian workspace 消费时，先写实际消费代码，再跑：
+iframe 与 Obsidian 插件通过 `window.postMessage` 通信。消息集合由 `BridgeProtocol.ts` 唯一定义：
+`proxy:loaded`（注入脚本就绪）、`theme:diagnostics`（iframe 内外观采样）、`theme:update`
+（父窗口推主题）、`vault-file:open`（用户点了 vault 路径，父窗口必须解析到已有 `TFile` 再打开）。
+父窗口只接受来自当前 proxy origin 的协议消息。
 
-```bash
-bun run dev:bridge --opencode ~/Projects/ai-cli/opencode
-```
-
-harness 会从消费代码中抽取 path、method、body key、workspace event，再对本地金标准。不要新增手写能力清单。以后可以加表驱动策略，但表只能表达“本项目如何组合两边能力”，不能复制上游协议事实。
-
-### 6. 三段式切换逻辑
+### 7. 三段式切换逻辑
 
 ```
 当前状态                         →  操作
@@ -477,55 +487,55 @@ harness 会从消费代码中抽取 path、method、body key、workspace event�
 
 这确保了快捷键的直觉行为：按一次展开，再按一次折叠，不会出现「展开了但需要再多按一下才能切到 opencode」的情况。
 
-### 7. 焦点恢复
+### 8. 焦点恢复
 
 在聚焦 opencode iframe 前保存 `previousEditorLeaf`（当前活跃的编辑器 leaf）。用户通过 toggle 折叠侧边栏时，自动恢复到该 leaf，让用户可以无缝回到编辑状态。
 
-### 8. 会话持久化
+### 9. 会话持久化
 
 - 创建新会话时将 URL 保存到 `lastSessionUrl`（持久化在插件 data.json 中）
 - 插件启动时先尝试恢复 `lastSessionUrl`
-- 同时查询服务器 `/session`，比较时间戳，如果有更新的会话则优先使用
+- 同时查询最新会话（`order=desc&limit=1`），有更新的会话时优先使用
 - `lastSessionUrl`、OpenCode leaf iframe URL 和 session id 解析通过 `CurrentContextSession` 收口；`ContextManager` 和 `ViewManager` 不各自实现“当前 session 是谁”的流程
 
-### 9. Harness 与运行时真相源
+### 10. Harness 与运行时真相源
 
-- 插件写 XDG log 和 `status.json`
-- harness 只读这些文件和 vault 插件目录，不通过 `obsidian eval` 获取常规状态
-- `obsidian eval` 只能作为最后取证手段，不能写进默认调试流程
-- 本机默认 vault 是 `~/obsidian`，也可用 `ANOTHER_OPENCODE_FOR_OBSIDIAN_VAULT` 或 `--vault` 覆盖；harness 会展开 `~`
-- 错误 UI 先显示 `getDiagnostics()` 的错误、hint、命令、stderr、log/status 路径；harness 和 issue template 只搬运同一份证据，不能成为用户发现根因的前置要求
-- 命令面板里的 `Copy OpenCode diagnostics` 和错误页里的 `Copy diagnostics` 必须复用 `formatServerDiagnosticsForClipboard()`，不要在 UI 里重新拼一份诊断结构
-- `ServerManager.getDiagnostics()` 是启动环境证据的唯一入口：必须显示 Obsidian 进程看到的 PATH、PATH entries、env key 摘要、最近一次 spawn 环境、resolved executable、shell flag 和 cwd。不要在 harness、UI 或 issue template 里重新探测一套环境事实。
+- 插件写 XDG log 和 `status.json`。
+- harness 只读这些文件和 vault 插件目录，不通过 `obsidian eval` 获取常规状态。
+- `obsidian eval` 只能作为最后取证手段，不能写进默认调试流程。
+- 本机默认 vault 是 `~/obsidian`，也可用 `ANOTHER_OPENCODE_FOR_OBSIDIAN_VAULT` 或 `--vault` 覆盖。
+- 错误 UI、harness 和 issue template 只搬运同一份证据：`getServiceDiagnostics()`。
 
-### 10. Custom Command 契约
+### 11. 上下文只有一个载体
 
-- `CUSTOM_COMMAND_EXAMPLE` 只用于设置页 placeholder 和测试示例
-- 空 `customCommand` 表示 path 模式：解析 `opencodePath`，直接 spawn `opencode serve --hostname ... --port ... --cors app://obsidian.md`
-- 非空模板表示 custom 模式：通过 shell 执行，必须包含 `{hostname}` 和 `{port}`
-- `{cors}` 和 `{projectDirectory}` 是可选变量
-- macOS GUI 启动的 Obsidian 可能拿不到交互式 shell 的 PATH。custom 模式使用绝对路径或开头 `~` 的路径；path 模式由 `ExecutableResolver` 处理常见安装位置
-- 产品默认不能自动 source `.zshrc`、`.bashrc`、`.profile`、PowerShell profile 或用户的 XDG shell 片段。这些文件可能有交互输出、prompt 初始化和版本管理器副作用。需要 shell 语义时只能由用户显式写 custom command；需要稳定补 PATH 时后续应做显式 `pathEntries` / `environment` 配置。
-- 启动失败后不要在运行时自动从 path 模式切到 custom command，或从 custom command 切回 path 模式。失败时保留当前策略的命令、PATH、stderr、health error 和 hint，让用户选择下一种配置策略。
+Obsidian 上下文以 `data:text/plain;base64,` 文件附件进 prompt body 的 `files`。没有独立的 context
+消息，没有额外的 text part，没有来源标记，也没有服务端 message id 参与状态。one-shot
+candidate 的消费发生在请求成功转发之后，`PromptDelivery` 只记录事实。
+
+### 12. Settings 只描述用户能决定的事
+
+设置项只有：`serviceName`、`projectDirectory`、`defaultViewLocation`、`contextAssist`、
+`webViewAppearance`、`lastSessionUrl`。端口、hostname、可执行文件路径、启动超时、自定义命令、
+自动启动、键盘策略都不再是插件设置：它们属于 opencode 自己的配置或已删除的机制。
 
 ## 编码规范
 
 | 类型                | 规范                           | 示例                                     |
 | ------------------- | ------------------------------ | ---------------------------------------- |
-| Classes             | PascalCase                     | `OpenCodePlugin`, `ServerManager`        |
-| Interfaces/Types    | PascalCase                     | `OpenCodeSettings`, `ProcessState`       |
+| Classes             | PascalCase                     | `OpenCodePlugin`, `OpenCodeWebUiProxy`   |
+| Interfaces/Types    | PascalCase                     | `OpenCodeSettings`, `ServiceStatus`      |
 | Constants           | UPPER_CASE 或 camelCase        | `DEFAULT_SETTINGS`, `OPENCODE_VIEW_TYPE` |
-| Variables/functions | camelCase                      | `getVaultPath`, `startServer`            |
-| Private members     | camelCase（无前缀）            | `private processManager`                 |
-| Files               | PascalCase（类）、小写（入口） | `ServerManager.ts`, `main.ts`            |
+| Variables/functions | camelCase                      | `getVaultPath`, `attachService`          |
+| Private members     | camelCase（无前缀）            | `private serviceStatus`                  |
+| Files               | PascalCase（类）、小写（入口） | `ServiceDiscovery.ts`, `main.ts`         |
 
 ### TypeScript 模式
 
 - `strictNullChecks` 启用——显式处理 null/undefined
-- Union types 表示状态: `"stopped" | "starting" | "running" | "error"`
+- Union types 表示状态: `ServiceState = "attached" | "unavailable"`
 - `async/await` 优于 Promise 链
 - 公共方法显式声明返回类型
-- Node.js 内置模块用 `const http = require("http")` 内联引入（不用 `import`），因为 esbuild 将它们标记为 external
+- Node.js 内置模块按普通 ES import 引入（`import { request as httpRequest } from "http"`），esbuild 通过 `builtin-modules` 把它们全部标记为 external
 
 ### Obsidian API 模式
 
@@ -585,18 +595,21 @@ bun run harness
 # 查看插件安装、配置、XDG status、最近日志
 bun run harness status --vault ~/obsidian
 
-# 查看 XDG 日志
-bun run harness logs --lines 120
-
-# 构建 + opencode 可执行文件 + runtime health 检查
+# 构建 + opencode service attach 检查
 bun run harness doctor --vault ~/obsidian
+
+# OpenCode OpenAPI / Obsidian workspace event / 本地 bridge 消息契约检查
+bun run dev:bridge --opencode ~/Projects/ai-cli/opencode
 
 # 真实 Obsidian 插件里的主题注入和 iframe diagnostics 检查
 bun run harness theme --vault ~/obsidian
 ```
 
-`obsidian eval` 会读 Obsidian 内部对象，只在 XDG 日志和 status 文件不足以定位问题时使用。默认先看 `$XDG_STATE_HOME/another-opencode-for-obsidian/status.json` 和 `$XDG_STATE_HOME/another-opencode-for-obsidian/another-opencode-for-obsidian.log`。
-Obsidian 命令面板中的 `Copy OpenCode diagnostics` 会复制同一份 server diagnostics，适合直接贴到 issue 或后续 agent 对话里。
+`obsidian eval` 会读 Obsidian 内部对象，只在 XDG 日志和 status 文件不足以定位问题时使用。默认先看
+`$XDG_STATE_HOME/another-opencode-for-obsidian/status.json` 和
+`another-opencode-for-obsidian.log`。
+Obsidian 命令面板中的 `Copy OpenCode diagnostics` 会复制同一份 service diagnostics。
+`bun run dev:bridge` 需要本地 opencode 源码 checkout；它不联网。
 
 ## 分支策略
 
@@ -604,29 +617,31 @@ Obsidian 命令面板中的 `Copy OpenCode diagnostics` 会复制同一份 serve
 
 ## 已知限制与后续工作
 
-- **上下文面板仍需增强**: StatusBar 浮层只承担显示、复制 diagnostics 和安全导航。后续要补的是更强的手动选择入口、显式 remove / candidate exclude 控制，以及把 note/folder/search result 等候选来源统一接入现有 `ContextItem` 生命周期。
-- **未使用的 opencode API**: `file.read`、`find.*`、`tui.*`、`event.subscribe`、`session.fork/diff/todo` 等 API 尚未集成，这些都是可增强双向交互的接口。
-- **代理端口不可见**: 设置面板不显示代理端口（自动检测，目前工作正常但不够透明）。
-- **代理扩展潜力**: 当前代理基础设施可以支持 Obsidian 与 opencode 之间的双向文件同步，但尚未实现。
-- **仅限桌面端**: 使用 `child_process.spawn()` 等 Node.js API，不支持 Obsidian Mobile。
+- **仅桌面端**: 使用 Node.js `http` / `fs` 等桌面 API，不支持 Obsidian Mobile。
+- **不管理服务生命周期**: 服务的启动、停止、端口和 provider/MCP 配置归 opencode 自己的
+  `opencode service` 命令；插件只 attach 和报告状态。
+- **上下文面板仍是状态栏 popover**: 更强的手动选择入口、note/folder/search 候选来源尚未接入。
+- **harness theme 依赖运行中的 Obsidian 与 proxy**: 未启动时看到的是前置条件缺失，不是外观缺陷。
+- **graph-derived source 未接入**: GraphIndex 只提供事实，还没有产出 candidate 的 driver。
 
 ## esbuild 配置要点
 
-```typescript
+```javascript
 // esbuild.config.mjs 关键配置
 {
   format: "cjs",
   target: "es2018",
   platform: "node",
-  external: ["obsidian", "electron", "@codemirror/*", "child_process", "http", "net", "fs", "path", "os"],
+  external: ["obsidian", "electron", "@codemirror/*", "@lezer/*", ...builtins],
   bundle: true,
   outfile: "main.js",
 }
 ```
 
 - `obsidian` 和 `electron` 标记为 external——由 Obsidian 运行时提供
-- Node.js 内置模块（`http`、`child_process` 等）标记为 external——插件运行在 Node.js 环境
-- 代码中使用 `require("http")` 而非 `import http from "http"`，因为 esbuild 不会转换 external 模块的 import 语句
+- Node.js 内置模块由 `builtin-modules` 展开进 external——插件运行在 Obsidian 的 Node 环境
+- 源码用普通 ES import 引入 node 内置模块（`import { request as httpRequest } from "http"`），
+  bundle 时保留为 `require` 调用
 
 <!-- bv-agent-instructions-v2 -->
 

@@ -1,13 +1,15 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test";
 import type { App } from "obsidian";
-import type { ContextItemNavigator as ContextItemNavigatorClass } from "../../src/context/ContextItemNavigator";
+import type {
+  ContextItemNavigator as ContextItemNavigatorClass,
+  ContextNavigationSource,
+} from "../../src/context/ContextItemNavigator";
 import {
   GraphIndex,
   type GraphFile,
   type GraphPosition,
   type GraphReference,
 } from "../../src/graph/GraphIndex";
-import type { ContextItem } from "../../src/types";
 
 class FakeTFile {
   constructor(public path: string) {}
@@ -42,18 +44,11 @@ function createItem(
   sourceFile: string,
   startLine?: number,
   navigationSourceFile?: string
-): ContextItem {
+): ContextNavigationSource {
   return {
-    id: "msg_1:prt_1",
-    type: "manual",
-    label: sourceFile,
-    text: "context text",
     sourceFile,
     ...(navigationSourceFile ? { navigationSourceFile } : {}),
     startLine,
-    messageId: "msg_1",
-    partId: "prt_1",
-    createdAt: 123,
   };
 }
 

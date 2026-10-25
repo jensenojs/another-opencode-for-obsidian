@@ -1,5 +1,9 @@
 import type { SelectedTextContext } from "./ContextFormatter";
-import type { ContextSourceDriver, ContextSourceResult } from "./ContextSourceDriver";
+import type {
+  ContextCandidateInput,
+  ContextSourceDriver,
+  ContextSourceResult,
+} from "./ContextSourceDriver";
 import type { OpenCodeSettings } from "../types";
 
 export const SELECTION_SOURCE_ID = "selection";
@@ -25,45 +29,48 @@ export class AutoSelectionContextSource implements ContextSourceDriver {
   }
 
   handleSelection(selection: SelectedTextContext | null): ContextSourceResult | null {
-    if (!this.deps.isEnabled()) {
+    if (!this.deps.isEnabled() || !selection) {
       return null;
     }
 
-    if (!selection) {
-      return null;
-    }
-
-    const fingerprint = this.createFingerprint(selection);
-    const text = truncateText(selection.text, this.deps.maxCharsPerSnippet());
-    const identityKey = `selection:${hashFingerprint(fingerprint)}`;
     return {
       type: "upsert",
-      candidate: {
-        sourceId: this.sourceId,
-        sourceKind: "selection",
-        identityKey,
-        fingerprint,
-        label: formatSelectionLabel(selection),
-        text,
-        sourceFile: selection.sourcePath,
-        navigationSourceFile: selection.sourcePath,
-        startLine: selection.selectionStartLine,
-        endLine: selection.selectionEndLine,
-        lifetime: "one-shot",
-      },
+      candidate: buildSelectionCandidate(selection, this.deps.maxCharsPerSnippet()),
     };
   }
 
   reset(): void {}
+}
 
-  private createFingerprint(selection: SelectedTextContext): string {
-    return [
-      selection.sourcePath,
-      selection.selectionStartLine ?? "",
-      selection.selectionEndLine ?? "",
-      selection.text,
-    ].join("\u0000");
-  }
+// Shared by automatic selection capture and the explicit "add selection"
+// command: one identity space, one truncation rule.
+export function buildSelectionCandidate(
+  selection: SelectedTextContext,
+  maxCharsPerSnippet: number
+): ContextCandidateInput {
+  const fingerprint = createFingerprint(selection);
+  return {
+    sourceId: SELECTION_SOURCE_ID,
+    sourceKind: "selection",
+    identityKey: `selection:${hashFingerprint(fingerprint)}`,
+    fingerprint,
+    label: formatSelectionLabel(selection),
+    text: truncateText(selection.text, maxCharsPerSnippet),
+    sourceFile: selection.sourcePath,
+    navigationSourceFile: selection.sourcePath,
+    startLine: selection.selectionStartLine,
+    endLine: selection.selectionEndLine,
+    lifetime: "one-shot",
+  };
+}
+
+function createFingerprint(selection: SelectedTextContext): string {
+  return [
+    selection.sourcePath,
+    selection.selectionStartLine ?? "",
+    selection.selectionEndLine ?? "",
+    selection.text,
+  ].join("\u0000");
 }
 
 function formatSelectionLabel(selection: SelectedTextContext): string {
