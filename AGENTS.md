@@ -160,9 +160,11 @@ scripts/
   upstream 不接受过滤参数。
 - 帧形如 `data: {"id","type","data","created","location":{"directory"}}`。只有
   `payload.location.directory === projectDirectory` 的帧才计入 snapshot；目录过滤是客户端职责。
-- 响应流结束且不是主动 `stop()` 时状态转 `disconnected`。这是服务死亡的权威信号，由 main 转成
-  unavailable，不额外加轮询。
-- 404 记为 `unsupported`，非 2xx 或 content-type 不匹配记为 `failed`。
+- 响应流进入终态时按状态归类：结束时 `disconnected`，读错误/非 2xx/content-type 不匹配时 `failed`，
+  404 时 `unsupported`。三者都是「服务不可用」的证据，由 `describeEventLoss()` 交成诊断句给 main。
+- `start()` 的语义是「幂等地把流连在当前目标上」：已有 request 且 endpoint 未变则不动，endpoint
+  变了（attach 到了另一个服务）就销毁旧 request 并对新 endpoint 建连。旧 request 的回调按
+  `this.request === request` 判身份，陈旧回调不许改 snapshot 或清槽位。
 
 ### `bridge/OpenCodeBridge.ts` — event bridge 生命周期
 
@@ -453,8 +455,11 @@ scripts/
 
 ### 3. 服务死亡由 SSE 断连表达
 
-attach 之后不轮询。`/api/event` 的响应流结束（非主动 stop）代表服务端消失，main 立刻把状态切成
-unavailable，再由重试定时器接管。这样状态变化只有一个来源，不会出现「进程没了但插件还以为在线」。
+attach 之后不轮询。`/api/event` 的连接进入任一终态——响应流结束、读错误（进程被杀时的
+`read ECONNRESET`）、或路由不可用——都代表服务端已经不可用，main 立刻把状态切成 unavailable，
+再由重试定时器接管。判据只有一处：`bridge/OpenCodeBridge.ts` 的 `describeEventLoss(snapshot)`
+把 snapshot 状态映射成诊断句，main 见到非 null 就降级，不在调用点重写条件。漏掉 `failed`
+会让进程被杀后的插件一直显示 attached、事件流已死却永不重试。
 
 ### 4. v2 单协议，无回落
 
