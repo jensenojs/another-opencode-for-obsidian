@@ -87,7 +87,6 @@ export default class OpenCodePlugin extends Plugin {
       this.logger.error("proxy failed to start");
     }
 
-    await this.attachService();
     this.registerDomEvent(window, "message", (event: MessageEvent) => {
       if (event.origin !== this.openCodeWebUiProxy.getOrigin() || !isBridgeMessage(event.data)) {
         return;
@@ -272,12 +271,6 @@ export default class OpenCodePlugin extends Plugin {
 
     this.contextManager.updateSettings(this.settings);
 
-    if (this.getServiceState() === "attached") {
-      void this.handleServiceAttached();
-    } else {
-      this.startAttachRetry();
-    }
-
     this.registerCleanupHandlers();
     this.registerEvent(
       this.app.workspace.on("css-change", () => {
@@ -291,6 +284,8 @@ export default class OpenCodePlugin extends Plugin {
       logFile: getRuntimePaths().logFile,
       statusFile: getRuntimePaths().statusFile,
     });
+
+    await this.attachService();
   }
 
   async onunload(): Promise<void> {
@@ -341,7 +336,7 @@ export default class OpenCodePlugin extends Plugin {
 
   private applyServiceStatus(status: ServiceStatus): void {
     this.serviceStatus = status;
-    this.openCodeBridge?.syncServiceState(status.state);
+    this.refreshClientState();
 
     if (status.state === "attached") {
       this.stopAttachRetry();
@@ -350,20 +345,21 @@ export default class OpenCodePlugin extends Plugin {
       this.startAttachRetry();
     }
 
+    this.openCodeBridge.syncServiceState(status.state);
+
     for (const callback of this.serviceChangeCallbacks) {
       callback(status.state);
     }
 
-    this.refreshClientState();
     this.writeStatus(`service:${status.state}`);
   }
 
   private async handleServiceAttached(): Promise<void> {
-    const initialized = await this.openCodeClient?.initializeProject();
+    const initialized = await this.openCodeClient.initializeProject();
     if (initialized === false) {
       this.logger.warn("failed to initialize project on service");
     }
-    await this.contextManager?.handleServiceAttached();
+    await this.contextManager.handleServiceAttached();
   }
 
   private startAttachRetry(): void {
@@ -493,7 +489,7 @@ export default class OpenCodePlugin extends Plugin {
     const nextApiBaseUrl = this.getApiBaseUrl();
     const projectDirectory = this.getProjectDirectory();
     this.openCodeClient.updateBaseUrl(nextApiBaseUrl, nextUiBaseUrl, projectDirectory);
-    this.openCodeBridge?.updateOpenCodeLocation(nextApiBaseUrl, projectDirectory);
+    this.openCodeBridge.updateOpenCodeLocation(nextApiBaseUrl, projectDirectory);
 
     if (
       (this.lastBaseUrl && this.lastBaseUrl !== nextUiBaseUrl) ||
