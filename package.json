@@ -1,6 +1,6 @@
 {
   "name": "another-opencode-for-obsidian",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Another OpenCode integration for Obsidian",
   "main": "main.js",
   "scripts": {
