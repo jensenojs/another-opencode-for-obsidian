@@ -64,8 +64,9 @@ function deadUrl(): string {
 
 describe("defaultServiceDir", () => {
   test("follows XDG_STATE_HOME and falls back to the home state directory", () => {
-    expect(defaultServiceDir({ XDG_STATE_HOME: "/tmp/state" })).toBe("/tmp/state/opencode");
-    expect(defaultServiceDir({})).toMatch(/\/\.local\/state\/opencode$/);
+    const stateHome = join(tmpdir(), "xdg-state");
+    expect(defaultServiceDir({ XDG_STATE_HOME: stateHome })).toBe(join(stateHome, "opencode"));
+    expect(defaultServiceDir({})).toMatch(/[\\/]\.local[\\/]state[\\/]opencode$/);
   });
 });
 
